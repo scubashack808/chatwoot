@@ -7,7 +7,7 @@ them.
 
 - A pull request targeting `integration/v4.16` or `develop` builds and scans an
   `amd64` image locally. The job has no package write permission.
-- A merge or other push to either protected branch builds and pushes a uniquely
+- A merge or other push to either named branch builds and pushes a uniquely
   tagged candidate.
 - No manual-dispatch path exists. This lets the integration branch exercise the
   workflow before the final cutover to the default branch.
