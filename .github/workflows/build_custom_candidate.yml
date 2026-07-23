@@ -9,7 +9,6 @@ on:
     branches:
       - develop
       - integration/v4.16
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -92,7 +91,7 @@ jobs:
   publish:
     if: >-
       github.repository == 'a-t-m-reef/chatwoot'
-      && github.event_name != 'pull_request'
+      && github.event_name == 'push'
       && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/integration/v4.16')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -131,7 +130,7 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          provenance: mode=max
+          provenance: false
           sbom: true
           cache-from: type=gha,scope=custom-linux-amd64
           cache-to: type=gha,mode=max,scope=custom-linux-amd64
