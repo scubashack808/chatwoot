@@ -1,0 +1,224 @@
+name: Build custom Chatwoot candidate
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - integration/v4.16
+  push:
+    branches:
+      - develop
+      - integration/v4.16
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/a-t-m-reef/chatwoot
+
+concurrency:
+  group: custom-candidate-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.repository == 'a-t-m-reef/chatwoot' && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build pull-request image locally
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: chatwoot-candidate:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=custom-linux-amd64
+          cache-to: type=gha,mode=max,scope=custom-linux-amd64
+
+      - name: Scan pull-request image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: chatwoot-candidate:${{ github.sha }}
+          format: json
+          output: trivy-results.json
+          scanners: vuln,secret
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Upload pull-request scan
+        if: always() && hashFiles('trivy-results.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: custom-image-pr-scan-${{ github.sha }}
+          path: trivy-results.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Reject fixable critical vulnerabilities
+        if: always() && hashFiles('trivy-results.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          critical_count="$(
+            jq '[.Results[]? | (.Vulnerabilities // [])[] | select(.Severity == "CRITICAL")] | length' \
+              trivy-results.json
+          )"
+          if [[ "$critical_count" -ne 0 ]]; then
+            echo "::error::$critical_count fixable critical vulnerabilities found"
+            exit 1
+          fi
+
+  publish:
+    if: >-
+      github.repository == 'a-t-m-reef/chatwoot'
+      && github.event_name != 'pull_request'
+      && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/integration/v4.16')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      CANDIDATE_TAG: candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push uniquely tagged candidate
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.CANDIDATE_TAG }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=custom-linux-amd64
+          cache-to: type=gha,mode=max,scope=custom-linux-amd64
+
+      - name: Validate candidate digest
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not return a valid immutable digest"
+            exit 1
+          fi
+
+      - name: Attest candidate provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Scan candidate by digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: json
+          output: trivy-results.json
+          scanners: vuln,secret
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Write immutable candidate receipt
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg commit "$GITHUB_SHA" \
+            --arg image "$IMAGE_NAME" \
+            --arg tag "$CANDIDATE_TAG" \
+            --arg digest "$DIGEST" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg source_ref "$GITHUB_REF" \
+            --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              repository: $repository,
+              commit: $commit,
+              image: $image,
+              candidate_tag: $tag,
+              digest: $digest,
+              deploy_ref: ($image + "@" + $digest),
+              platform: "linux/amd64",
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              source_ref: $source_ref,
+              run_url: $run_url,
+              created_at: $created_at
+            }' > candidate-receipt.json
+
+      - name: Upload candidate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: custom-image-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            candidate-receipt.json
+            trivy-results.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Reject fixable critical vulnerabilities
+        if: always() && hashFiles('trivy-results.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          critical_count="$(
+            jq '[.Results[]? | (.Vulnerabilities // [])[] | select(.Severity == "CRITICAL")] | length' \
+              trivy-results.json
+          )"
+          if [[ "$critical_count" -ne 0 ]]; then
+            echo "::error::$critical_count fixable critical vulnerabilities found"
+            exit 1
+          fi
