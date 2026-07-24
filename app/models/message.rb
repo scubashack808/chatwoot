@@ -148,11 +148,40 @@ class Message < ApplicationRecord
       created_at: created_at.to_i,
       message_type: message_type_before_type_cast,
       conversation_id: conversation&.display_id,
-      conversation: conversation.present? ? conversation_push_event_data : nil
+      conversation: conversation.present? ? conversation_push_event_data : nil,
+      external_source_ids: publishable_external_source_ids
     )
     data[:echo_id] = echo_id if echo_id.present?
     data[:attachments] = attachments.map(&:push_event_data) if attachments.present?
     merge_sender_attributes(data)
+  end
+
+  # IMAP identity is internal synchronisation state, not something an agent, contact, webhook,
+  # bot or CRM processor should ever receive. This is the single chokepoint: every realtime
+  # broadcast, webhook payload, agent-bot payload and conversation partial ultimately builds on
+  # push_event_data, so stripping the namespace here covers all of them at once. Other
+  # integrations' source ids, such as slack and intercom, are deliberately left untouched.
+  def publishable_external_source_ids
+    return external_source_ids if external_source_ids.blank?
+
+    external_source_ids.except(Imap::MessageIdentity::NAMESPACE)
+  end
+
+  def imap_identity
+    Imap::MessageIdentity.parse(external_source_ids&.dig(Imap::MessageIdentity::NAMESPACE))
+  end
+
+  # Merges only the imap namespace, under a row lock, without firing the ordinary update
+  # callbacks. update_columns is deliberate: dispatch_update_event would broadcast this internal
+  # state to contacts and fan it out to automations, bots, webhooks and CRM processors.
+  def write_imap_identity!(identity)
+    with_lock do
+      merged = (external_source_ids || {}).merge(Imap::MessageIdentity::NAMESPACE => identity.to_h)
+      # rubocop:disable Rails/SkipsModelValidations
+      update_columns(external_source_ids: merged)
+      # rubocop:enable Rails/SkipsModelValidations
+    end
+    self
   end
 
   def conversation_push_event_data

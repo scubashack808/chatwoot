@@ -64,11 +64,11 @@ class Imap::BaseFetchEmailService
     @imap_client ||= build_imap_client
   end
 
-  def mail_info_logger(inbound_mail, seq_no)
+  def mail_info_logger(inbound_mail, uid)
     return if Rails.env.test?
 
     Rails.logger.info("
-      #{channel.provider} Email id: #{inbound_mail.from} - message_source_id: #{inbound_mail.message_id} - sequence id: #{seq_no}")
+      #{channel.provider} Email id: #{inbound_mail.from} - message_source_id: #{inbound_mail.message_id} - uid: #{uid}")
   end
 
   def email_already_present?(channel, message_id)
@@ -81,26 +81,28 @@ class Imap::BaseFetchEmailService
   end
 
   def fetch_mail_for_channel
-    message_ids_with_seq = fetch_message_ids_with_sequence
-    message_ids_with_seq.filter_map do |message_id_with_seq|
-      process_message_id(message_id_with_seq)
+    message_ids_with_uid = fetch_message_ids_with_uid
+    message_ids_with_uid.filter_map do |message_id_with_uid|
+      process_message_id(message_id_with_uid)
     end
   end
 
-  def process_message_id(message_id_with_seq)
-    seq_no, message_id = message_id_with_seq
+  def process_message_id(message_id_with_uid)
+    uid, message_id = message_id_with_uid
 
     if message_id.blank?
-      Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Empty message id for #{channel.email} with seq no. <#{seq_no}>."
+      Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Empty message id for #{channel.email} with uid <#{uid}>."
       return
     end
 
     return if email_already_present?(channel, message_id)
 
-    # Fetch the original mail content using the sequence no.
+    # Fetch the original mail content by UID, which is stable across expunges.
     # BODY.PEEK[] avoids RFC822 parser failures seen with some IMAP servers.
     client = imap_client
-    mail_str = session.command { client.fetch(seq_no, 'BODY.PEEK[]') }[0].attr['BODY[]']
+    data = session.command { client.uid_fetch(uid, body_fetch_attributes) }&.first
+
+    mail_str = data&.attr&.dig('BODY[]')
 
     if mail_str.blank?
       Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetch failed for #{channel.email} with message-id <#{message_id}>."
@@ -108,33 +110,47 @@ class Imap::BaseFetchEmailService
     end
 
     inbound_mail = build_mail_from_string(mail_str)
-    mail_info_logger(inbound_mail, seq_no)
-    inbound_mail
+    mail_info_logger(inbound_mail, uid)
+
+    build_fetched_message(inbound_mail, uid, data)
   end
 
-  # Sends a FETCH command to retrieve data associated with a message in the mailbox.
-  # You can send batches of message sequence number in `.fetch` method.
-  def fetch_message_ids_with_sequence
-    seq_nums = fetch_available_mail_sequence_numbers
+  # The message plus where the server says it lives. The mailbox is INBOX here because that is
+  # what this service selects; other roles are read by their own callers.
+  def build_fetched_message(inbound_mail, uid, data)
+    Imap::FetchedMessage.new(
+      mail: inbound_mail,
+      mailbox: mailbox_name,
+      uidvalidity: current_uidvalidity,
+      uid: uid,
+      roles: mailbox_roles,
+      provider_id: data.attr['X-GM-MSGID']&.to_s
+    )
+  end
 
-    Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetching mails from #{channel.email}, found #{seq_nums.length}."
+  # Sends a UID FETCH to retrieve data associated with a message in the mailbox.
+  # You can send batches of UIDs in `.uid_fetch`.
+  def fetch_message_ids_with_uid
+    uids = fetch_available_uids
 
-    message_ids_with_seq = []
-    seq_nums.each_slice(MAX_MESSAGES_PER_SYNC).each do |batch|
-      append_message_ids_for_batch(batch, message_ids_with_seq)
-      if message_ids_with_seq.length >= MAX_MESSAGES_PER_SYNC
+    Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetching mails from #{channel.email}, found #{uids.length}."
+
+    message_ids_with_uid = []
+    uids.each_slice(MAX_MESSAGES_PER_SYNC).each do |batch|
+      append_message_ids_for_batch(batch, message_ids_with_uid)
+      if message_ids_with_uid.length >= MAX_MESSAGES_PER_SYNC
         Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Reached MAX_MESSAGES_PER_SYNC=#{MAX_MESSAGES_PER_SYNC} for #{channel.email}, stopping sync."
         break
       end
     end
 
-    message_ids_with_seq
+    message_ids_with_uid
   end
 
-  def append_message_ids_for_batch(batch, message_ids_with_seq)
+  def append_message_ids_for_batch(batch, message_ids_with_uid)
     # Fetch only message-id only without mail body or contents.
     client = imap_client
-    batch_message_ids = session.command { client.fetch(batch, 'BODY.PEEK[HEADER]') }
+    batch_message_ids = session.command { client.uid_fetch(batch, header_fetch_attributes) }
     Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetching the batch for #{channel.email}. Found #{batch_message_ids&.length} messages."
 
     # .fetch returns an array of Net::IMAP::FetchData or nil
@@ -148,8 +164,8 @@ class Imap::BaseFetchEmailService
       entry = build_message_id_entry(data)
       next if entry.nil?
 
-      message_ids_with_seq.push(entry)
-      break if message_ids_with_seq.length >= MAX_MESSAGES_PER_SYNC
+      message_ids_with_uid.push(entry)
+      break if message_ids_with_uid.length >= MAX_MESSAGES_PER_SYNC
     end
   end
 
@@ -161,15 +177,47 @@ class Imap::BaseFetchEmailService
     return nil if message_id.blank?
     return nil if email_already_present?(channel, message_id)
 
-    [data.seqno, message_id]
+    # data.seqno exists but is deliberately never used or stored: it is positional and shifts on
+    # every expunge. The UID is the stable handle.
+    [data.attr['UID'], message_id]
   end
 
-  # Sends a SEARCH command to search the mailbox for messages that were
-  # created between yesterday (or given date) and today and returns message sequence numbers.
-  # Return <message set>
-  def fetch_available_mail_sequence_numbers
+  # Sends a UID SEARCH for messages since the given date and returns UIDs.
+  def fetch_available_uids
     client = imap_client
-    session.command { client.search(['SINCE', since]) }
+    Array(session.command { client.uid_search(['SINCE', since]) })
+  end
+
+  def header_fetch_attributes
+    gmail_extensions? ? ['UID', 'BODY.PEEK[HEADER]', 'X-GM-MSGID'] : ['UID', 'BODY.PEEK[HEADER]']
+  end
+
+  def body_fetch_attributes
+    gmail_extensions? ? ['BODY.PEEK[]', 'X-GM-MSGID'] : ['BODY.PEEK[]']
+  end
+
+  # Gmail is selected by the advertised capability, never by the Chatwoot provider field, which is
+  # blank on every live channel including the Gmail-hosted one.
+  def gmail_extensions?
+    return @gmail_extensions if defined?(@gmail_extensions)
+
+    @gmail_extensions = imap_client.capabilities.include?('X-GM-EXT-1')
+  rescue StandardError
+    @gmail_extensions = false
+  end
+
+  def mailbox_name
+    'INBOX'
+  end
+
+  def mailbox_roles
+    ['inbox']
+  end
+
+  # The UIDVALIDITY of the selected mailbox. Every UID is only meaningful inside its generation,
+  # so it is captured with the UID and stored alongside it.
+  def current_uidvalidity
+    @current_uidvalidity ||= Array(imap_client.responses('UIDVALIDITY')).last
   end
 
   # The raw connection is handed to the session the instant it exists, before authentication runs,
