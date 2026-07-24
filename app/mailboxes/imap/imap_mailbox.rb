@@ -5,8 +5,11 @@ class Imap::ImapMailbox
 
   FALLBACK_CONVERSATION_PATTERN = %r{account/(\d+)/conversation/([a-zA-Z0-9-]+)@}
 
+  # Accepts either an Imap::FetchedMessage, which carries the server coordinates alongside the
+  # parsed mail, or a bare Mail object for callers that have no identity to record.
   def process(mail, channel)
-    @inbound_mail = mail
+    @fetched_message = mail.is_a?(Imap::FetchedMessage) ? mail : nil
+    @inbound_mail = @fetched_message&.mail || mail
     @channel = channel
     load_account
     load_inbox
@@ -22,10 +25,19 @@ class Imap::ImapMailbox
       find_or_create_conversation
       create_message
       add_attachments_to_message
+      persist_imap_identity
     end
   end
 
   private
+
+  # Records where the server says this message lives, so a later move can be tracked by UID
+  # rather than by the sequence-independent Message-ID alone.
+  def persist_imap_identity
+    return if @message.blank? || @fetched_message.blank?
+
+    @message.write_imap_identity!(@fetched_message.to_identity)
+  end
 
   def load_account
     @account = @channel.account
