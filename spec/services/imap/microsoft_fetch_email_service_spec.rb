@@ -5,7 +5,7 @@ RSpec.describe Imap::MicrosoftFetchEmailService do
   let(:logger) { instance_double(ActiveSupport::Logger, info: true, error: true) }
   let(:account) { create(:account) }
   let(:microsoft_channel) { create(:channel_email, :microsoft_email, account: account) }
-  let(:imap) { instance_double(Net::IMAP) }
+  let(:imap) { instance_double(Net::IMAP, disconnected?: false, disconnect: true) }
   let(:refresh_token_service) { double }
   let(:eml_content_with_message_id) { Rails.root.join('spec/fixtures/files/only_text.eml').read }
 

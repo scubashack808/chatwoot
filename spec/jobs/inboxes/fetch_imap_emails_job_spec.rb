@@ -157,5 +157,34 @@ RSpec.describe Inboxes::FetchImapEmailsJob do
         described_class.perform_now(imap_email_channel)
       end
     end
+
+    context 'when the mailbox lease is contended' do
+      let(:fetch_service) { double }
+
+      before do
+        allow(Imap::FetchEmailService).to receive(:new).with(channel: imap_email_channel, interval: 1).and_return(fetch_service)
+      end
+
+      it 'defers politely without raising when another worker holds the lease' do
+        allow(fetch_service).to receive(:perform).and_raise(Imap::Lease::LeaseNotAcquiredError)
+
+        expect { described_class.perform_now(imap_email_channel) }.not_to raise_error
+      end
+
+      it 'does not report lease contention as an exception' do
+        allow(fetch_service).to receive(:perform).and_raise(Imap::Lease::LeaseNotAcquiredError)
+        allow(ChatwootExceptionTracker).to receive(:new)
+
+        described_class.perform_now(imap_email_channel)
+
+        expect(ChatwootExceptionTracker).not_to have_received(:new)
+      end
+
+      it 'stops the cycle without raising when the lease is lost mid-fetch' do
+        allow(fetch_service).to receive(:perform).and_raise(Imap::Lease::LeaseLostError, 'lease lost')
+
+        expect { described_class.perform_now(imap_email_channel) }.not_to raise_error
+      end
+    end
   end
 end

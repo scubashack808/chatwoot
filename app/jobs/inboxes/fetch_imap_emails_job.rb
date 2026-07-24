@@ -1,23 +1,27 @@
 require 'net/imap'
 
-class Inboxes::FetchImapEmailsJob < MutexApplicationJob
+# The per-inbox mutex now lives in Imap::BaseFetchEmailService, which holds the mail-specific
+# owner-token Imap::Lease around the connection it opens. This job no longer takes the generic
+# Redis::LockManager lock, whose ownerless unlock could delete a newer worker's lock once the
+# original holder overran the TTL.
+class Inboxes::FetchImapEmailsJob < ApplicationJob
   queue_as :scheduled_jobs
 
   def perform(channel, interval = 1)
     return unless should_fetch_email?(channel)
 
-    key = format(::Redis::Alfred::EMAIL_MESSAGE_MUTEX, inbox_id: channel.inbox.id)
-
-    with_lock(key, 5.minutes) do
-      process_email_for_channel(channel, interval)
-    end
+    process_email_for_channel(channel, interval)
+  rescue Imap::Lease::LeaseNotAcquiredError
+    # Contention is not a failure. Another worker already holds this mailbox, so the cycle defers
+    # rather than opening a second connection as a fallback.
+    Rails.logger.info "[IMAP] Lease busy for email channel - #{channel.inbox.id}, deferring to the next cycle."
+  rescue Imap::Lease::LeaseLostError => e
+    Rails.logger.warn "[IMAP] Lease lost mid-cycle for email channel - #{channel.inbox.id} : #{e.message}"
   rescue *ExceptionList::IMAP_EXCEPTIONS => e
     Rails.logger.error "Authorization error for email channel - #{channel.inbox.id} : #{e.message}"
   rescue IOError, OpenSSL::SSL::SSLError, Net::IMAP::NoResponseError, Net::IMAP::BadResponseError, Net::IMAP::InvalidResponseError,
          Net::IMAP::ResponseParseError, Net::IMAP::ResponseReadError, Net::IMAP::ResponseTooLargeError => e
     Rails.logger.error "Error for email channel - #{channel.inbox.id} : #{e.message}"
-  rescue LockAcquisitionError
-    Rails.logger.error "Lock failed for #{channel.inbox.id}"
   rescue StandardError => e
     ChatwootExceptionTracker.new(e, account: channel.account).capture_exception
   end

@@ -9,14 +9,22 @@ class Imap::BaseFetchEmailService
     # Override this method
   end
 
+  # All per-inbox IMAP work runs under one owner-token lease and one guaranteed-cleanup session.
+  # The lease stops concurrent workers from multiplying connections against the same mailbox. The
+  # session guarantees the socket is closed on every exit path, including a failure during
+  # connect, authenticate, or select, which the previous shape skipped entirely.
   def perform
-    inbound_emails = fetch_emails
-    terminate_imap_connection
-
-    inbound_emails
+    Imap::Lease.with_lease(inbox_id: channel.inbox.id) do |lease|
+      Imap::Session.run(lease: lease) do |session|
+        @session = session
+        fetch_emails
+      end
+    end
   end
 
   private
+
+  attr_reader :session
 
   def authentication_type
     # Override this method
@@ -65,7 +73,8 @@ class Imap::BaseFetchEmailService
 
     # Fetch the original mail content using the sequence no.
     # BODY.PEEK[] avoids RFC822 parser failures seen with some IMAP servers.
-    mail_str = imap_client.fetch(seq_no, 'BODY.PEEK[]')[0].attr['BODY[]']
+    client = imap_client
+    mail_str = session.command { client.fetch(seq_no, 'BODY.PEEK[]') }[0].attr['BODY[]']
 
     if mail_str.blank?
       Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetch failed for #{channel.email} with message-id <#{message_id}>."
@@ -98,7 +107,8 @@ class Imap::BaseFetchEmailService
 
   def append_message_ids_for_batch(batch, message_ids_with_seq)
     # Fetch only message-id only without mail body or contents.
-    batch_message_ids = imap_client.fetch(batch, 'BODY.PEEK[HEADER]')
+    client = imap_client
+    batch_message_ids = session.command { client.fetch(batch, 'BODY.PEEK[HEADER]') }
     Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetching the batch for #{channel.email}. Found #{batch_message_ids&.length} messages."
 
     # .fetch returns an array of Net::IMAP::FetchData or nil
@@ -132,22 +142,21 @@ class Imap::BaseFetchEmailService
   # created between yesterday (or given date) and today and returns message sequence numbers.
   # Return <message set>
   def fetch_available_mail_sequence_numbers
-    imap_client.search(['SINCE', since])
+    client = imap_client
+    session.command { client.search(['SINCE', since]) }
   end
 
+  # The raw connection is handed to the session the instant it exists, before authentication runs,
+  # so that a failure during authenticate or select still leaves the session something to close.
   def build_imap_client
-    imap = Net::IMAP.new(channel.imap_address, port: channel.imap_port, ssl: channel.imap_enable_ssl)
-    Imap::Authentication.authenticate!(imap, authentication_type, channel.imap_login, imap_password)
+    imap = session.connect do
+      Net::IMAP.new(channel.imap_address, port: channel.imap_port, ssl: channel.imap_enable_ssl)
+    end
 
-    imap.select('INBOX')
+    session.command { Imap::Authentication.authenticate!(imap, authentication_type, channel.imap_login, imap_password) }
+    session.command { imap.select('INBOX') }
+
     imap
-  end
-
-  def terminate_imap_connection
-    imap_client.logout
-  rescue Net::IMAP::Error => e
-    Rails.logger.info "Logout failed for #{channel.email} - #{e.message}."
-    imap_client.disconnect
   end
 
   def build_mail_from_string(raw_email_content)
