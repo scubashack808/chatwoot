@@ -12,6 +12,7 @@
 #  imap_login                :string           default("")
 #  imap_password             :string           default("")
 #  imap_port                 :integer          default(0)
+#  mailbox_sync_config       :jsonb            not null
 #  provider                  :string
 #  provider_config           :jsonb
 #  smtp_address              :string           default("")
@@ -48,17 +49,30 @@ class Channel::Email < ApplicationRecord
   end
 
   self.table_name = 'channel_email'
+  # mailbox_sync_config is permitted as a nested object; Imap::MailboxSyncConfig is the contract
+  # that rejects unknown keys, so permitting the object here does not permit arbitrary state.
   EDITABLE_ATTRS = [:email, :imap_enabled, :imap_login, :imap_password, :imap_address, :imap_port, :imap_enable_ssl, :imap_authentication,
                     :smtp_enabled, :smtp_login, :smtp_password, :smtp_address, :smtp_port, :smtp_domain, :smtp_enable_starttls_auto,
-                    :smtp_enable_ssl_tls, :smtp_openssl_verify_mode, :smtp_authentication, :provider, :verified_for_sending].freeze
+                    :smtp_enable_ssl_tls, :smtp_openssl_verify_mode, :smtp_authentication, :provider, :verified_for_sending,
+                    { mailbox_sync_config: {} }].freeze
 
   validates :email, uniqueness: true
   validates :forward_to_email, uniqueness: true
+  validate :validate_mailbox_sync_config
+  validate :validate_folder_overrides_against_server, if: :folder_overrides_changed?
 
   before_validation :ensure_forward_to_email, on: :create
 
   def name
     'Email'
+  end
+
+  # The typed view of the mailbox_sync_config column. Always safe to call: an unparseable stored
+  # value falls back to the default off configuration rather than raising into a request.
+  def mailbox_sync
+    Imap::MailboxSyncConfig.parse(mailbox_sync_config)
+  rescue Imap::MailboxSyncConfig::InvalidConfigError
+    Imap::MailboxSyncConfig.default
   end
 
   def microsoft?
@@ -77,5 +91,44 @@ class Channel::Email < ApplicationRecord
 
   def ensure_forward_to_email
     self.forward_to_email ||= "#{SecureRandom.hex}@#{account.inbound_email_domain}"
+  end
+
+  def validate_mailbox_sync_config
+    Imap::MailboxSyncConfig.parse(mailbox_sync_config)
+  rescue Imap::MailboxSyncConfig::InvalidConfigError => e
+    errors.add(:mailbox_sync_config, e.message)
+  end
+
+  # Only when the overrides themselves change, so an ordinary inbox update never reaches the mail
+  # server. A mode change on its own does not re-verify folders.
+  def folder_overrides_changed?
+    return false unless imap_enabled?
+    return false unless mailbox_sync_config_changed?
+
+    overrides = safe_folder_overrides(mailbox_sync_config)
+
+    overrides.present? && overrides != safe_folder_overrides(mailbox_sync_config_was)
+  end
+
+  def safe_folder_overrides(raw)
+    Imap::MailboxSyncConfig.parse(raw).folder_overrides
+  rescue Imap::MailboxSyncConfig::InvalidConfigError
+    {}
+  end
+
+  # An override names an exact server folder, so it is checked against a fresh LIST before it is
+  # stored. A folder that has since been renamed or removed is refused now rather than being found
+  # broken later, at the moment it would have moved mail.
+  def validate_folder_overrides_against_server
+    result = Imap::FolderDiscoveryService.new(channel: self).perform
+    missing = safe_folder_overrides(mailbox_sync_config).reject { |_role, name| result.selectable_folder?(name) }
+    return if missing.empty?
+
+    errors.add(:mailbox_sync_config, "these folders are not selectable on the mail server: #{missing.values.sort.join(', ')}")
+  rescue Imap::Lease::LeaseNotAcquiredError
+    errors.add(:mailbox_sync_config, 'mailbox is busy, try again shortly')
+  rescue StandardError => e
+    Rails.logger.error "[IMAP] Folder override verification failed for channel #{id} : #{e.class}"
+    errors.add(:mailbox_sync_config, 'could not verify these folders against the mail server')
   end
 end
