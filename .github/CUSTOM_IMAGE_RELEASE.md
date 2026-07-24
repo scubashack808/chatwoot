@@ -35,6 +35,16 @@ the pipeline needs no edits when the repo moves. Only the upstream
 The unique candidate tag is for discovery only. Production must never deploy a
 tag.
 
+## Scan gate semantics
+
+The vulnerability gate fails only on CRITICAL findings that are NOT present in
+the matching upstream `chatwoot/chatwoot` release image (resolved from
+`config/app.yml`). A thin-patch fork cannot fix upstream's dependency tree, so
+upstream-inherited findings are recorded in the evidence artifact (candidate
+scan plus baseline scan) without blocking, while anything our patches introduce
+fails the build. First candidate run (2026-07-24) recorded 36 inherited
+criticals, all in upstream's JavaScript build dependencies.
+
 ## Approval boundary
 
 Building a candidate is not approval to deploy it. Kevin's later deployment
