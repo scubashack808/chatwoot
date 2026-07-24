@@ -24,8 +24,13 @@ Each published candidate records:
 The only valid deployment reference is:
 
 ```text
-ghcr.io/a-t-m-reef/chatwoot@sha256:<64 hexadecimal characters>
+ghcr.io/<hosting repository>@sha256:<64 hexadecimal characters>
 ```
+
+The image namespace follows whichever repository hosts the build (the interim
+`scubashack808/chatwoot` today, the canonical repository after migration), so
+the pipeline needs no edits when the repo moves. Only the upstream
+`chatwoot/chatwoot` repository is excluded from building candidates.
 
 The unique candidate tag is for discovery only. Production must never deploy a
 tag.

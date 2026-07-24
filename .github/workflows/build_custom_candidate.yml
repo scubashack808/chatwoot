@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: ghcr.io/a-t-m-reef/chatwoot
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 concurrency:
   group: custom-candidate-${{ github.event_name }}-${{ github.ref }}
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   validate:
-    if: github.repository == 'a-t-m-reef/chatwoot' && github.event_name == 'pull_request'
+    if: github.repository != 'chatwoot/chatwoot' && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -90,7 +90,7 @@ jobs:
 
   publish:
     if: >-
-      github.repository == 'a-t-m-reef/chatwoot'
+      github.repository != 'chatwoot/chatwoot'
       && github.event_name == 'push'
       && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/integration/v4.16')
     runs-on: ubuntu-24.04
