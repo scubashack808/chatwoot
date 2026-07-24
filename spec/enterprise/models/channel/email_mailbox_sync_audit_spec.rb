@@ -3,6 +3,25 @@ require 'rails_helper'
 RSpec.describe Channel::Email do
   let(:account) { create(:account) }
   let(:channel) { create(:channel_email, :imap_email, account: account) }
+  let(:imap) { instance_double(Net::IMAP, disconnected?: false, disconnect: true, logout: true) }
+  let(:lease_key) { format(Redis::Alfred::EMAIL_MESSAGE_MUTEX, inbox_id: channel.inbox.id) }
+  let(:folders) do
+    [
+      Net::IMAP::MailboxList.new([:Archive, :Hasnochildren], '.', 'INBOX.Archives'),
+      Net::IMAP::MailboxList.new([:Trash, :Hasnochildren], '.', 'INBOX.Trash')
+    ]
+  end
+
+  # Saving a folder override re-reads the server folder list, so the LIST is stubbed here.
+  before do
+    allow(Net::IMAP).to receive(:new).and_return(imap)
+    allow(imap).to receive(:authenticate)
+    allow(imap).to receive(:login)
+    allow(imap).to receive(:select).with('INBOX')
+    allow(imap).to receive(:list).with('', '*').and_return(folders)
+  end
+
+  after { Redis::Alfred.delete(lease_key) }
 
   describe 'mailbox sync configuration auditing' do
     it 'records the change through the existing channel audit seam' do

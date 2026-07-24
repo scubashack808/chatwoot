@@ -3,6 +3,27 @@ require 'rails_helper'
 RSpec.describe Channel::Email do
   let(:account) { create(:account) }
   let(:channel) { create(:channel_email, :imap_email, account: account) }
+  let(:imap) { instance_double(Net::IMAP, disconnected?: false, disconnect: true, logout: true) }
+  let(:lease_key) { format(Redis::Alfred::EMAIL_MESSAGE_MUTEX, inbox_id: channel.inbox.id) }
+  let(:folders) do
+    [
+      Net::IMAP::MailboxList.new([:Haschildren], '.', 'INBOX'),
+      Net::IMAP::MailboxList.new([:Archive, :Hasnochildren], '.', 'INBOX.Archives'),
+      Net::IMAP::MailboxList.new([:Trash, :Hasnochildren], '.', 'INBOX.Trash'),
+      Net::IMAP::MailboxList.new([:Junk, :Hasnochildren], '.', 'INBOX.spam')
+    ]
+  end
+
+  # Saving a folder override re-reads the server folder list, so the LIST is stubbed here.
+  before do
+    allow(Net::IMAP).to receive(:new).and_return(imap)
+    allow(imap).to receive(:authenticate)
+    allow(imap).to receive(:login)
+    allow(imap).to receive(:select).with('INBOX')
+    allow(imap).to receive(:list).with('', '*').and_return(folders)
+  end
+
+  after { Redis::Alfred.delete(lease_key) }
 
   describe 'the stored column default' do
     it 'starts every inbox off' do
@@ -89,6 +110,27 @@ RSpec.describe Channel::Email do
       channel.update!(mailbox_sync_config: channel.mailbox_sync.to_h.merge('mode' => 'active'))
 
       expect(channel.reload.mailbox_sync.override_for(:spam)).to eq 'INBOX.spam'
+    end
+  end
+
+  describe 'server verification scope' do
+    it 'does not contact the mail server when only the mode changes' do
+      channel.update!(mailbox_sync_config: { 'mode' => 'observe' })
+
+      expect(imap).not_to have_received(:list)
+    end
+
+    it 'contacts the mail server when a folder override changes' do
+      channel.update!(mailbox_sync_config: { 'folder_overrides' => { 'archive' => 'INBOX.Archives' } })
+
+      expect(imap).to have_received(:list).with('', '*')
+    end
+
+    it 'refuses an override that is not selectable on the server' do
+      channel.mailbox_sync_config = { 'folder_overrides' => { 'archive' => 'INBOX.Gone' } }
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:mailbox_sync_config].join).to match(/INBOX.Gone/)
     end
   end
 

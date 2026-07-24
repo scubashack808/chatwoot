@@ -5,8 +5,34 @@ class Imap::BaseFetchEmailService
 
   pattr_initialize [:channel!, :interval]
 
+  # This class owns how to authenticate against a given channel's IMAP server, so it is also the
+  # entry point other mailbox work uses to borrow a connected client.
+  def self.for(channel, interval: nil)
+    klass = if channel.microsoft?
+              Imap::MicrosoftFetchEmailService
+            elsif channel.google?
+              Imap::GoogleFetchEmailService
+            else
+              Imap::FetchEmailService
+            end
+
+    klass.new(channel: channel, interval: interval)
+  end
+
   def fetch_emails
     # Override this method
+  end
+
+  # Runs a block against a connected, authenticated client under the same lease and
+  # guaranteed-cleanup session that perform uses. Used by work that is not a message fetch, such
+  # as folder discovery.
+  def with_connection
+    Imap::Lease.with_lease(inbox_id: channel.inbox.id) do |lease|
+      Imap::Session.run(lease: lease) do |session|
+        @session = session
+        yield imap_client, session
+      end
+    end
   end
 
   # All per-inbox IMAP work runs under one owner-token lease and one guaranteed-cleanup session.

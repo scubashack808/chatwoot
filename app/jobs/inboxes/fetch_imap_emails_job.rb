@@ -33,13 +33,7 @@ class Inboxes::FetchImapEmailsJob < ApplicationJob
   end
 
   def process_email_for_channel(channel, interval)
-    inbound_emails = if channel.microsoft?
-                       Imap::MicrosoftFetchEmailService.new(channel: channel, interval: interval).perform
-                     elsif channel.google?
-                       Imap::GoogleFetchEmailService.new(channel: channel, interval: interval).perform
-                     else
-                       Imap::FetchEmailService.new(channel: channel, interval: interval).perform
-                     end
+    inbound_emails = Imap::BaseFetchEmailService.for(channel, interval: interval).perform
 
     inbound_emails.each do |inbound_mail|
       process_mail(inbound_mail, channel)

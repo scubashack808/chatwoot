@@ -59,6 +59,7 @@ class Channel::Email < ApplicationRecord
   validates :email, uniqueness: true
   validates :forward_to_email, uniqueness: true
   validate :validate_mailbox_sync_config
+  validate :validate_folder_overrides_against_server, if: :folder_overrides_changed?
 
   before_validation :ensure_forward_to_email, on: :create
 
@@ -96,5 +97,38 @@ class Channel::Email < ApplicationRecord
     Imap::MailboxSyncConfig.parse(mailbox_sync_config)
   rescue Imap::MailboxSyncConfig::InvalidConfigError => e
     errors.add(:mailbox_sync_config, e.message)
+  end
+
+  # Only when the overrides themselves change, so an ordinary inbox update never reaches the mail
+  # server. A mode change on its own does not re-verify folders.
+  def folder_overrides_changed?
+    return false unless imap_enabled?
+    return false unless mailbox_sync_config_changed?
+
+    overrides = safe_folder_overrides(mailbox_sync_config)
+
+    overrides.present? && overrides != safe_folder_overrides(mailbox_sync_config_was)
+  end
+
+  def safe_folder_overrides(raw)
+    Imap::MailboxSyncConfig.parse(raw).folder_overrides
+  rescue Imap::MailboxSyncConfig::InvalidConfigError
+    {}
+  end
+
+  # An override names an exact server folder, so it is checked against a fresh LIST before it is
+  # stored. A folder that has since been renamed or removed is refused now rather than being found
+  # broken later, at the moment it would have moved mail.
+  def validate_folder_overrides_against_server
+    result = Imap::FolderDiscoveryService.new(channel: self).perform
+    missing = safe_folder_overrides(mailbox_sync_config).reject { |_role, name| result.selectable_folder?(name) }
+    return if missing.empty?
+
+    errors.add(:mailbox_sync_config, "these folders are not selectable on the mail server: #{missing.values.sort.join(', ')}")
+  rescue Imap::Lease::LeaseNotAcquiredError
+    errors.add(:mailbox_sync_config, 'mailbox is busy, try again shortly')
+  rescue StandardError => e
+    Rails.logger.error "[IMAP] Folder override verification failed for channel #{id} : #{e.class}"
+    errors.add(:mailbox_sync_config, 'could not verify these folders against the mail server')
   end
 end
