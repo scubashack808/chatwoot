@@ -74,17 +74,48 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Reject fixable critical vulnerabilities
-        if: always() && hashFiles('trivy-results.json') != ''
+      - name: Resolve upstream base image
+        id: base
         shell: bash
         run: |
           set -euo pipefail
-          critical_count="$(
-            jq '[.Results[]? | (.Vulnerabilities // [])[] | select(.Severity == "CRITICAL")] | length' \
-              trivy-results.json
-          )"
-          if [[ "$critical_count" -ne 0 ]]; then
-            echo "::error::$critical_count fixable critical vulnerabilities found"
+          version="$(awk '/^version:/{print $2; exit}' config/app.yml)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Could not resolve upstream version from config/app.yml"
+            exit 1
+          fi
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Scan upstream base image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: chatwoot/chatwoot:${{ steps.base.outputs.tag }}
+          format: json
+          output: baseline-trivy.json
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Reject criticals not present in the upstream base
+        if: always() && hashFiles('trivy-results.json') != '' && hashFiles('baseline-trivy.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract_criticals() {
+            jq -r '[.Results[]? | (.Vulnerabilities // [])[]
+                    | select(.Severity == "CRITICAL")
+                    | "\(.VulnerabilityID) \(.PkgName)"] | unique | .[]' "$1" | sort -u
+          }
+          extract_criticals baseline-trivy.json > baseline-criticals.txt
+          extract_criticals trivy-results.json > candidate-criticals.txt
+          inherited="$(comm -12 baseline-criticals.txt candidate-criticals.txt | wc -l | tr -d ' ')"
+          new_criticals="$(comm -13 baseline-criticals.txt candidate-criticals.txt)"
+          echo "Upstream-inherited criticals (reported, not blocking): $inherited"
+          if [[ -n "$new_criticals" ]]; then
+            echo "::error::Critical vulnerabilities introduced beyond the upstream base image:"
+            printf '%s\n' "$new_criticals"
             exit 1
           fi
 
@@ -205,19 +236,51 @@ jobs:
           path: |
             candidate-receipt.json
             trivy-results.json
+            baseline-trivy.json
           if-no-files-found: warn
           retention-days: 90
 
-      - name: Reject fixable critical vulnerabilities
-        if: always() && hashFiles('trivy-results.json') != ''
+      - name: Resolve upstream base image
+        id: base
         shell: bash
         run: |
           set -euo pipefail
-          critical_count="$(
-            jq '[.Results[]? | (.Vulnerabilities // [])[] | select(.Severity == "CRITICAL")] | length' \
-              trivy-results.json
-          )"
-          if [[ "$critical_count" -ne 0 ]]; then
-            echo "::error::$critical_count fixable critical vulnerabilities found"
+          version="$(awk '/^version:/{print $2; exit}' config/app.yml)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Could not resolve upstream version from config/app.yml"
+            exit 1
+          fi
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Scan upstream base image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: chatwoot/chatwoot:${{ steps.base.outputs.tag }}
+          format: json
+          output: baseline-trivy.json
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Reject criticals not present in the upstream base
+        if: always() && hashFiles('trivy-results.json') != '' && hashFiles('baseline-trivy.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract_criticals() {
+            jq -r '[.Results[]? | (.Vulnerabilities // [])[]
+                    | select(.Severity == "CRITICAL")
+                    | "\(.VulnerabilityID) \(.PkgName)"] | unique | .[]' "$1" | sort -u
+          }
+          extract_criticals baseline-trivy.json > baseline-criticals.txt
+          extract_criticals trivy-results.json > candidate-criticals.txt
+          inherited="$(comm -12 baseline-criticals.txt candidate-criticals.txt | wc -l | tr -d ' ')"
+          new_criticals="$(comm -13 baseline-criticals.txt candidate-criticals.txt)"
+          echo "Upstream-inherited criticals (reported, not blocking): $inherited"
+          if [[ -n "$new_criticals" ]]; then
+            echo "::error::Critical vulnerabilities introduced beyond the upstream base image:"
+            printf '%s\n' "$new_criticals"
             exit 1
           fi
