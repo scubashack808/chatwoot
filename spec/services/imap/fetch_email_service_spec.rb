@@ -5,7 +5,7 @@ RSpec.describe Imap::FetchEmailService do
   let(:logger) { instance_double(ActiveSupport::Logger, info: true, error: true) }
   let(:account) { create(:account) }
   let(:imap_email_channel) { create(:channel_email, :imap_email, account: account) }
-  let(:imap) { instance_double(Net::IMAP) }
+  let(:imap) { instance_double(Net::IMAP, disconnected?: false, disconnect: true) }
   let(:eml_content_with_message_id) { Rails.root.join('spec/fixtures/files/only_text.eml').read }
   let(:eml_content_without_message_id) { eml_content_with_message_id.sub(/^Message-ID:.*\n/, '') }
 
@@ -168,6 +168,81 @@ RSpec.describe Imap::FetchEmailService do
           expect(imap).to have_received(:fetch).with(valid_message_seq_num, 'BODY.PEEK[]')
         end
       end
+    end
+  end
+
+  describe 'connection lifetime and lease' do
+    let(:lease_key) { format(Redis::Alfred::EMAIL_MESSAGE_MUTEX, inbox_id: imap_email_channel.inbox.id) }
+
+    before do
+      allow(Rails).to receive(:logger).and_return(logger)
+      allow(Net::IMAP).to receive(:new).with(
+        imap_email_channel.imap_address, port: imap_email_channel.imap_port, ssl: imap_email_channel.imap_enable_ssl
+      ).and_return(imap)
+      allow(imap).to receive(:authenticate)
+      allow(imap).to receive(:login)
+      allow(imap).to receive(:select).with('INBOX')
+      allow(imap).to receive(:logout)
+    end
+
+    after { Redis::Alfred.delete(lease_key) }
+
+    it 'closes the socket after a successful fetch instead of leaving it open on logout' do
+      allow(imap).to receive(:search).and_return([])
+
+      described_class.new(channel: imap_email_channel).perform
+
+      expect(imap).to have_received(:logout)
+      expect(imap).to have_received(:disconnect)
+    end
+
+    it 'closes the socket when authentication fails after the connection was established' do
+      allow(imap).to receive(:authenticate).and_raise(Net::IMAP::Error, 'bad credentials')
+
+      expect { described_class.new(channel: imap_email_channel).perform }.to raise_error(Net::IMAP::Error, 'bad credentials')
+
+      expect(imap).to have_received(:disconnect)
+    end
+
+    it 'closes the socket when mailbox selection fails' do
+      allow(imap).to receive(:select).with('INBOX').and_raise(Net::IMAP::Error, 'no such mailbox')
+
+      expect { described_class.new(channel: imap_email_channel).perform }.to raise_error(Net::IMAP::Error, 'no such mailbox')
+
+      expect(imap).to have_received(:disconnect)
+    end
+
+    it 'closes the socket when the search fails' do
+      allow(imap).to receive(:search).and_raise(IOError, 'connection reset')
+
+      expect { described_class.new(channel: imap_email_channel).perform }.to raise_error(IOError, 'connection reset')
+
+      expect(imap).to have_received(:disconnect)
+    end
+
+    it 'releases the lease after a successful fetch' do
+      allow(imap).to receive(:search).and_return([])
+
+      described_class.new(channel: imap_email_channel).perform
+
+      expect(Redis::Alfred.exists?(lease_key)).to be false
+    end
+
+    it 'releases the lease when the fetch fails' do
+      allow(imap).to receive(:search).and_raise(IOError, 'connection reset')
+
+      expect { described_class.new(channel: imap_email_channel).perform }.to raise_error(IOError)
+
+      expect(Redis::Alfred.exists?(lease_key)).to be false
+    end
+
+    it 'never opens a second connection while another worker holds the lease' do
+      Imap::Lease.new(inbox_id: imap_email_channel.inbox.id, ttl: 30).acquire
+
+      expect { described_class.new(channel: imap_email_channel).perform }
+        .to raise_error(Imap::Lease::LeaseNotAcquiredError)
+
+      expect(Net::IMAP).not_to have_received(:new)
     end
   end
 end
