@@ -12,6 +12,7 @@
 #  imap_login                :string           default("")
 #  imap_password             :string           default("")
 #  imap_port                 :integer          default(0)
+#  mailbox_sync_config       :jsonb            not null
 #  provider                  :string
 #  provider_config           :jsonb
 #  smtp_address              :string           default("")
@@ -48,17 +49,29 @@ class Channel::Email < ApplicationRecord
   end
 
   self.table_name = 'channel_email'
+  # mailbox_sync_config is permitted as a nested object; Imap::MailboxSyncConfig is the contract
+  # that rejects unknown keys, so permitting the object here does not permit arbitrary state.
   EDITABLE_ATTRS = [:email, :imap_enabled, :imap_login, :imap_password, :imap_address, :imap_port, :imap_enable_ssl, :imap_authentication,
                     :smtp_enabled, :smtp_login, :smtp_password, :smtp_address, :smtp_port, :smtp_domain, :smtp_enable_starttls_auto,
-                    :smtp_enable_ssl_tls, :smtp_openssl_verify_mode, :smtp_authentication, :provider, :verified_for_sending].freeze
+                    :smtp_enable_ssl_tls, :smtp_openssl_verify_mode, :smtp_authentication, :provider, :verified_for_sending,
+                    { mailbox_sync_config: {} }].freeze
 
   validates :email, uniqueness: true
   validates :forward_to_email, uniqueness: true
+  validate :validate_mailbox_sync_config
 
   before_validation :ensure_forward_to_email, on: :create
 
   def name
     'Email'
+  end
+
+  # The typed view of the mailbox_sync_config column. Always safe to call: an unparseable stored
+  # value falls back to the default off configuration rather than raising into a request.
+  def mailbox_sync
+    Imap::MailboxSyncConfig.parse(mailbox_sync_config)
+  rescue Imap::MailboxSyncConfig::InvalidConfigError
+    Imap::MailboxSyncConfig.default
   end
 
   def microsoft?
@@ -77,5 +90,11 @@ class Channel::Email < ApplicationRecord
 
   def ensure_forward_to_email
     self.forward_to_email ||= "#{SecureRandom.hex}@#{account.inbound_email_domain}"
+  end
+
+  def validate_mailbox_sync_config
+    Imap::MailboxSyncConfig.parse(mailbox_sync_config)
+  rescue Imap::MailboxSyncConfig::InvalidConfigError => e
+    errors.add(:mailbox_sync_config, e.message)
   end
 end
