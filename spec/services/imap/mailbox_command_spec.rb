@@ -6,7 +6,13 @@ RSpec.describe Imap::MailboxCommand do
   # command reads, so this stand-in matches either. The real object is exercised in the sandbox.
   let(:client) { instance_double(Net::IMAP) }
   let(:session) { instance_double(Imap::Session) }
-  let(:copy_uid_data) { Struct.new(:uidvalidity, :source_uids, :assigned_uids).new(99, [7], [21]) }
+  let(:copy_uid_data) do
+    Struct.new(:uidvalidity, :source_uids, :assigned_uids).new(
+      99,
+      Net::IMAP::SequenceSet['7'],
+      Net::IMAP::SequenceSet['21']
+    )
+  end
   let(:identity) { Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox']) }
 
   before do

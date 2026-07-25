@@ -94,7 +94,7 @@ class Imap::MailboxCommand::Standard
       return moved(
         target,
         copyuid.uidvalidity,
-        copyuid.assigned_uids.first,
+        copyuid.assigned_uids.to_a.fetch(0),
         roles: target_roles(action)
       )
     end
