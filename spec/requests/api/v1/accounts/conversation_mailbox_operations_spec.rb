@@ -255,6 +255,27 @@ RSpec.describe 'Conversation mailbox operations API', type: :request do
 
       expect(response).to have_http_status(:unauthorized)
     end
+
+    it 'does not expose operation data while the account feature is disabled' do
+      operation = create(
+        :email_mailbox_operation,
+        account: account,
+        inbox: inbox,
+        conversation: conversation,
+        user: administrator,
+        action: :archive,
+        idempotency_key: idempotency_key,
+        items: [{ 'message_id' => incoming_message.id }]
+      )
+      account.disable_features!(:email_mailbox_actions)
+
+      get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations/#{operation.id}",
+          headers: administrator.create_new_auth_token,
+          as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq('error_code' => 'mailbox_actions_disabled')
+    end
   end
 
   describe 'GET /api/v1/accounts/:account_id/conversations/:conversation_id/mailbox_operations' do
@@ -333,6 +354,49 @@ RSpec.describe 'Conversation mailbox operations API', type: :request do
           as: :json
 
       expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'allows an explicit inbox member who is not an administrator' do
+      agent = create(:user, account: account, role: :agent)
+      create(:inbox_member, inbox: inbox, user: agent)
+      operation = create(
+        :email_mailbox_operation,
+        account: account,
+        inbox: inbox,
+        conversation: conversation,
+        user: administrator,
+        action: :archive,
+        idempotency_key: idempotency_key,
+        items: [{ 'message_id' => incoming_message.id }]
+      )
+
+      get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations",
+          headers: agent.create_new_auth_token,
+          as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body['operations'].sole['id']).to eq(operation.id)
+    end
+
+    it 'does not expose operation data while the account feature is disabled' do
+      create(
+        :email_mailbox_operation,
+        account: account,
+        inbox: inbox,
+        conversation: conversation,
+        user: administrator,
+        action: :archive,
+        idempotency_key: idempotency_key,
+        items: [{ 'message_id' => incoming_message.id }]
+      )
+      account.disable_features!(:email_mailbox_actions)
+
+      get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations",
+          headers: administrator.create_new_auth_token,
+          as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq('error_code' => 'mailbox_actions_disabled')
     end
   end
 end

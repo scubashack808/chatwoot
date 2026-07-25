@@ -259,64 +259,33 @@ describe ConversationFinder do
       end
 
       it 'returns exactly the conversations represented in each mailbox role' do
-        tracked_inbox = create(:conversation, account: account, inbox: inbox)
-        tracked_inbox_message = create(
-          :message, account: account, inbox: inbox, conversation: tracked_inbox, message_type: :incoming
-        )
-        tracked_inbox_message.write_imap_identity!(
-          Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 1, roles: ['inbox'])
-        )
-
-        standard_archive = create(:conversation, account: account, inbox: inbox)
-        standard_archive_message = create(
-          :message, account: account, inbox: inbox, conversation: standard_archive, message_type: :incoming
-        )
-        standard_archive_message.write_imap_identity!(
-          Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 2, roles: ['archive'])
-        )
-
-        gmail_inbox = create(:conversation, account: account, inbox: inbox)
-        gmail_inbox_message = create(
-          :message, account: account, inbox: inbox, conversation: gmail_inbox, message_type: :incoming
-        )
-        gmail_inbox_message.write_imap_identity!(
-          Imap::MessageIdentity
-            .build(mailbox: 'INBOX', uidvalidity: 42, uid: 3, roles: ['inbox'], provider_id: '9001')
-            .with_location(mailbox: '[Gmail]/All Mail', uidvalidity: 43, uid: 30, roles: ['archive'])
+        create_conversation = lambda do |*identities|
+          conversation = create(:conversation, account: account, inbox: inbox)
+          identities.each do |identity|
+            message = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming)
+            message.write_imap_identity!(identity) if identity
+          end
+          conversation
+        end
+        inbox_identity = Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 1, roles: ['inbox'])
+        archive_identity = Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 2, roles: ['archive'])
+        gmail_inbox_identity = Imap::MessageIdentity
+                               .build(mailbox: 'INBOX', uidvalidity: 42, uid: 3, roles: ['inbox'], provider_id: '9001')
+                               .with_location(mailbox: '[Gmail]/All Mail', uidvalidity: 43, uid: 30, roles: ['archive'])
+        gmail_archive_identity = Imap::MessageIdentity.build(
+          mailbox: '[Gmail]/All Mail', uidvalidity: 43, uid: 31, roles: ['archive'], provider_id: '9002'
         )
 
-        gmail_archive = create(:conversation, account: account, inbox: inbox)
-        gmail_archive_message = create(
-          :message, account: account, inbox: inbox, conversation: gmail_archive, message_type: :incoming
-        )
-        gmail_archive_message.write_imap_identity!(
-          Imap::MessageIdentity.build(
-            mailbox: '[Gmail]/All Mail', uidvalidity: 43, uid: 31, roles: ['archive'], provider_id: '9002'
-          )
-        )
-
-        mixed = create(:conversation, account: account, inbox: inbox)
-        mixed_inbox_message = create(:message, account: account, inbox: inbox, conversation: mixed, message_type: :incoming)
-        mixed_archive_message = create(:message, account: account, inbox: inbox, conversation: mixed, message_type: :incoming)
-        mixed_inbox_message.write_imap_identity!(
-          Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 4, roles: ['inbox'])
-        )
-        mixed_archive_message.write_imap_identity!(
-          Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 5, roles: ['archive'])
-        )
-
-        untracked = create(:conversation, account: account, inbox: inbox)
-        create(:message, account: account, inbox: inbox, conversation: untracked, message_type: :incoming)
-
-        trash = create(:conversation, account: account, inbox: inbox)
-        trash_message = create(:message, account: account, inbox: inbox, conversation: trash, message_type: :incoming)
-        trash_message.write_imap_identity!(
+        tracked_inbox = create_conversation.call(inbox_identity)
+        standard_archive = create_conversation.call(archive_identity)
+        gmail_inbox = create_conversation.call(gmail_inbox_identity)
+        gmail_archive = create_conversation.call(gmail_archive_identity)
+        mixed = create_conversation.call(inbox_identity, archive_identity)
+        untracked = create_conversation.call(nil)
+        trash = create_conversation.call(
           Imap::MessageIdentity.build(mailbox: 'Trash', uidvalidity: 42, uid: 6, roles: ['trash'])
         )
-
-        spam = create(:conversation, account: account, inbox: inbox)
-        spam_message = create(:message, account: account, inbox: inbox, conversation: spam, message_type: :incoming)
-        spam_message.write_imap_identity!(
+        spam = create_conversation.call(
           Imap::MessageIdentity.build(mailbox: 'Junk', uidvalidity: 42, uid: 7, roles: ['spam'])
         )
 
@@ -359,7 +328,7 @@ describe ConversationFinder do
       end
 
       it 'keeps counts and every page boundary correct after mailbox filtering' do
-        archives = 5.times.map do |index|
+        archives = Array.new(5) do |index|
           conversation = create(
             :conversation,
             account: account,

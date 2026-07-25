@@ -117,6 +117,109 @@ RSpec.describe 'Conversations API', type: :request do
         end
       end
 
+      it 'preserves the upstream list and show payload shape when mailbox actions are disabled' do
+        account.disable_features!(:email_mailbox_actions)
+        create(:message, account: account, inbox: conversation.inbox, conversation: conversation, message_type: :incoming)
+
+        get "/api/v1/accounts/#{account.id}/conversations",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include('"mailbox_state"')
+        expect(response.body).not_to include('"mailbox_operation"')
+
+        get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include('"mailbox_state"')
+        expect(response.body).not_to include('"mailbox_operation"')
+      end
+
+      it 'does not expose mailbox state when the agent can see the conversation only through a team' do
+        account.enable_features!(:email_mailbox_actions)
+        InboxMember.find_by!(inbox: conversation.inbox, user: agent).destroy!
+        team = create(:team, account: account)
+        create(:team_member, team: team, user: agent)
+        conversation.update!(team: team)
+        message = create(
+          :message,
+          account: account,
+          inbox: conversation.inbox,
+          conversation: conversation,
+          message_type: :incoming
+        )
+        message.write_imap_identity!(
+          Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 8, roles: ['archive'])
+        )
+        create(
+          :email_mailbox_operation,
+          account: account,
+          inbox: conversation.inbox,
+          conversation: conversation,
+          action: :archive
+        )
+
+        get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include('"mailbox_state"')
+        expect(response.body).not_to include('"mailbox_operation"')
+      end
+
+      it 'adds two mailbox queries regardless of the number of conversations in the list payload' do
+        query_counts = [1, 5].map do |conversation_count|
+          test_account = create(:account)
+          test_account.enable_features!(:email_mailbox_actions)
+          test_channel = create(:channel_email, :imap_email, account: test_account)
+          test_agent = create(:user, account: test_account, role: :agent)
+          create(:inbox_member, inbox: test_channel.inbox, user: test_agent)
+
+          Array.new(conversation_count) do |index|
+            test_conversation = create(:conversation, account: test_account, inbox: test_channel.inbox)
+            test_message = create(
+              :message,
+              account: test_account,
+              inbox: test_channel.inbox,
+              conversation: test_conversation,
+              message_type: :incoming
+            )
+            test_message.write_imap_identity!(
+              Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: index + 1, roles: ['archive'])
+            )
+            create(
+              :email_mailbox_operation,
+              account: test_account,
+              inbox: test_channel.inbox,
+              conversation: test_conversation,
+              action: :archive
+            )
+          end
+
+          queries = []
+          subscriber = lambda do |_name, _started, _finished, _unique_id, payload|
+            queries << payload[:sql] unless payload[:cached] || payload[:name] == 'SCHEMA'
+          end
+          ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record') do
+            get "/api/v1/accounts/#{test_account.id}/conversations",
+                headers: test_agent.create_new_auth_token,
+                as: :json
+          end
+
+          expect(response.parsed_body.dig('data', 'payload').length).to eq(conversation_count)
+          queries.count do |sql|
+            sql.include?('SELECT "messages"."id", "messages"."conversation_id", "messages"."external_source_ids"') ||
+              sql.include?('SELECT DISTINCT ON (conversation_id) email_mailbox_operations.*')
+          end
+        end
+
+        expect(query_counts).to eq([2, 2])
+      end
+
       it 'returns unattended conversations' do
         attended_conversation = create(:conversation, account: account, first_reply_created_at: Time.now.utc)
         # to ensure that waiting since value is populated
