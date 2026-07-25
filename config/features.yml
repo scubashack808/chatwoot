@@ -268,3 +268,8 @@
   display_name: WhatsApp Embedded Signup Flow
   enabled: false
   column: feature_flags_ext_1
+- name: email_mailbox_actions
+  display_name: Email Mailbox Actions
+  enabled: false
+  chatwoot_internal: true
+  column: feature_flags_ext_1

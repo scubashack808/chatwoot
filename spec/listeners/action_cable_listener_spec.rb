@@ -256,6 +256,69 @@ describe ActionCableListener do
     end
   end
 
+  describe '#conversation_mailbox_operation_updated' do
+    let(:event_name) { :'conversation.mailbox_operation_updated' }
+    let(:operation_summary) do
+      {
+        id: 99,
+        action: 'archive',
+        status: 'succeeded',
+        attempt_count: 1,
+        error_code: nil,
+        total: 1,
+        succeeded: 1,
+        conflicted: 0,
+        failed: 0
+      }
+    end
+    let(:mailbox_state) do
+      {
+        state: 'archive',
+        roles: ['archive'],
+        tracked_count: 1,
+        untracked_count: 0,
+        missing_count: 0,
+        conflict_count: 0
+      }
+    end
+    let(:event) do
+      Events::Base.new(
+        event_name,
+        Time.zone.now,
+        account_id: account.id,
+        inbox_id: inbox.id,
+        conversation_id: conversation.display_id,
+        operation: operation_summary,
+        mailbox_state: mailbox_state
+      )
+    end
+
+    it 'broadcasts the dedicated safe payload only to inbox members and account administrators' do
+      expect(ActionCableBroadcastJob).to receive(:perform_later).with(
+        a_collection_containing_exactly(agent.pubsub_token, admin.pubsub_token),
+        'conversation.mailbox_operation_updated',
+        {
+          account_id: account.id,
+          conversation_id: conversation.display_id,
+          operation: operation_summary,
+          mailbox_state: mailbox_state
+        }
+      )
+
+      listener.conversation_mailbox_operation_updated(event)
+    end
+
+    it 'does not broadcast to the contact session' do
+      expect(ActionCableBroadcastJob).not_to receive(:perform_later).with(
+        array_including(conversation.contact_inbox.pubsub_token),
+        anything,
+        anything
+      )
+
+      listener.conversation_mailbox_operation_updated(event)
+    end
+  end
+
   describe '#conversation_unread_count_changed' do
     let(:event_name) { :'conversation.unread_count_changed' }
     let!(:agent_without_inbox_access) { create(:user, account: account, role: :agent) }
