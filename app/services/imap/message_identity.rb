@@ -96,15 +96,14 @@ class Imap::MessageIdentity
   # Adds or replaces the location for one mailbox and bumps the monotonic identity version.
   def with_location(mailbox:, uidvalidity:, uid:, roles: [], provider_id: nil)
     replacement = self.class.location_for(mailbox: mailbox, uidvalidity: uidvalidity, uid: uid, roles: roles)
-    others = locations.reject { |candidate| candidate['mailbox'] == replacement['mailbox'] }
+    update_location(replacement, provider_id: provider_id)
+  end
 
-    self.class.new(
-      version: version + 1,
-      provider_id: provider_id.presence || self.provider_id,
-      sync_state: SYNC_STATE_VERIFIED,
-      last_verified_at: Time.current.iso8601,
-      locations: [replacement] + others
-    )
+  # A UID MOVE replaces its source location rather than adding a Gmail-style second location.
+  # It shares the same version+1 write path as with_location.
+  def moved_to(mailbox:, uidvalidity:, uid:, roles: [], source_mailbox: self.mailbox)
+    replacement = self.class.location_for(mailbox: mailbox, uidvalidity: uidvalidity, uid: uid, roles: roles)
+    update_location(replacement, provider_id: nil, replaces: source_mailbox)
   end
 
   def to_h
@@ -119,5 +118,20 @@ class Imap::MessageIdentity
       'last_verified_at' => last_verified_at,
       'locations' => locations
     }
+  end
+
+  private
+
+  def update_location(replacement, provider_id:, replaces: nil)
+    replaced_mailboxes = [replacement['mailbox'], replaces].compact
+    others = locations.reject { |candidate| replaced_mailboxes.include?(candidate['mailbox']) }
+
+    self.class.new(
+      version: version + 1,
+      provider_id: provider_id.presence || self.provider_id,
+      sync_state: SYNC_STATE_VERIFIED,
+      last_verified_at: Time.current.iso8601,
+      locations: [replacement] + others
+    )
   end
 end

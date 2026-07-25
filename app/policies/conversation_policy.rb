@@ -7,6 +7,10 @@ class ConversationPolicy < ApplicationPolicy
     administrator?
   end
 
+  def mailbox_action?
+    user.is_a?(User) && (administrator? || inbox_access?)
+  end
+
   def show?
     administrator? || agent_bot? || agent_can_view_conversation?
   end

@@ -112,6 +112,7 @@ en:
       feature_not_enabled: SAML feature not enabled for this account
       sso_not_enabled: SAML SSO is not enabled for this installation
     conversations:
+      email_hard_delete: Email conversations cannot be permanently deleted in Chatwoot. Move them to Trash so they remain restorable.
       unread_counts:
         feature_not_enabled: Conversation unread counts feature not enabled for this account
     data_import:

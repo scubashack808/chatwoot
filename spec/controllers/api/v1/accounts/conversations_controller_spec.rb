@@ -1344,6 +1344,23 @@ RSpec.describe 'Conversations API', type: :request do
 
         expect(response).to have_http_status(:ok)
       end
+
+      it 'refuses every email conversation hard-delete even while mailbox mutations are dark' do
+        email_channel = create(:channel_email, :imap_email, account: account)
+        email_conversation = create(:conversation, account: account, inbox: email_channel.inbox)
+        account.disable_features!(:email_mailbox_actions)
+        email_channel.update!(mailbox_sync_config: { 'mode' => 'off' })
+
+        expect do
+          delete "/api/v1/accounts/#{account.id}/conversations/#{email_conversation.display_id}",
+                 headers: administrator.create_new_auth_token,
+                 as: :json
+        end.not_to have_enqueued_job(DeleteObjectJob)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body['message']).to match(/Trash/)
+        expect(Conversation).to exist(email_conversation.id)
+      end
     end
   end
 end
