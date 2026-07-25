@@ -74,7 +74,10 @@ class EmailMailboxOperation < ApplicationRecord
   end
 
   def complete!
-    with_lock { update!(status: derive_status) }
+    with_lock do
+      derived_status = derive_status
+      update!(status: derived_status, error_code: derived_status == :succeeded ? nil : error_code)
+    end
   end
 
   def mark_failed!(code)

@@ -116,6 +116,22 @@ RSpec.describe EmailMailboxOperation do
     end
   end
 
+  describe '#complete!' do
+    it 'clears a transient lease error when the operation ultimately succeeds' do
+      operation = build_operation(
+        status: :pending,
+        error_code: 'mailbox_busy',
+        items: [{ 'message_id' => 1 }],
+        results: [{ 'message_id' => 1, 'status' => 'succeeded' }]
+      )
+      operation.save!
+
+      operation.complete!
+
+      expect(operation.reload).to have_attributes(status: 'succeeded', error_code: nil)
+    end
+  end
+
   describe '#summary' do
     subject(:summary) do
       build_operation(items: [{ 'message_id' => 1 }, { 'message_id' => 2 }],
