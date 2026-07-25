@@ -1,5 +1,6 @@
 class ActionCableListener < BaseListener
   include Events::Types
+  include ConversationMailboxOperationListener
 
   def notification_created(event)
     notification, account, unread_count, count = extract_notification_and_account(event)
@@ -33,9 +34,7 @@ class ActionCableListener < BaseListener
     account = event.data[:account]
     tokens = user_tokens(account, account.agents)
 
-    broadcast(account, tokens, ACCOUNT_CACHE_INVALIDATED, {
-                cache_keys: event.data[:cache_keys]
-              })
+    broadcast(account, tokens, ACCOUNT_CACHE_INVALIDATED, cache_keys: event.data[:cache_keys])
   end
 
   def message_created(event)

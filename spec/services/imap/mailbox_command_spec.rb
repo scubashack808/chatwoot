@@ -4,22 +4,20 @@ RSpec.describe Imap::MailboxCommand do
   # net-imap 0.5 gates Net::IMAP::UIDPlusData behind a deprecation flag, and the parser may return
   # either UIDPlusData or CopyUIDData. Both expose uidvalidity and assigned_uids, which is all the
   # command reads, so this stand-in matches either. The real object is exercised in the sandbox.
-  copy_uid = Struct.new(:uidvalidity, :source_uids, :assigned_uids)
-  CopyUidStandIn = copy_uid unless defined?(CopyUidStandIn)
-
   let(:client) { instance_double(Net::IMAP) }
   let(:session) { instance_double(Imap::Session) }
+  let(:copy_uid_data) { Struct.new(:uidvalidity, :source_uids, :assigned_uids).new(99, [7], [21]) }
   let(:identity) { Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox']) }
 
   before do
-    allow(session).to receive(:command) { |&block| block.call(client) }
+    allow(session).to receive(:command).and_yield(client)
+    allow(client).to receive(:capabilities).and_return(%w[MOVE UIDPLUS])
     allow(client).to receive(:select)
     allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42])
     allow(client).to receive(:clear_responses)
     allow(client).to receive(:uid_search).and_return([7])
     allow(client).to receive(:uid_move)
-    allow(client).to receive(:responses).with('COPYUID')
-      .and_return([CopyUidStandIn.new(99, [7], [21])])
+    allow(client).to receive(:responses).with('COPYUID').and_return([copy_uid_data])
   end
 
   def run(action, dialect: described_class::Standard, targets: { 'archive' => 'INBOX.Archive', 'trash' => 'INBOX.Trash', 'spam' => 'INBOX.spam' })
@@ -81,6 +79,19 @@ RSpec.describe Imap::MailboxCommand do
 
       run(:archive)
     end
+
+    it 'refuses a server without MOVE and never falls back to COPY, STORE, or EXPUNGE' do
+      allow(client).to receive(:capabilities).and_return(['UIDPLUS'])
+      expect(client).not_to receive(:uid_copy)
+      expect(client).not_to receive(:uid_store)
+      expect(client).not_to receive(:expunge)
+
+      result = run(:archive)
+
+      expect(result.status).to eq :conflict
+      expect(result.detail).to match(/UID MOVE/)
+      expect(client).not_to have_received(:uid_move)
+    end
   end
 
   describe 'refusing to act on a stale identity' do
@@ -113,6 +124,25 @@ RSpec.describe Imap::MailboxCommand do
                .call(action: :archive, identity: archived)
 
       expect(result.status).to eq :already_in_target
+      expect(client).not_to have_received(:uid_move)
+    end
+
+    it 'treats a concurrent same-target move as idempotent success without moving twice' do
+      selected_mailbox = nil
+      allow(client).to receive(:select) { |mailbox| selected_mailbox = mailbox }
+      allow(client).to receive(:responses).with('UIDVALIDITY') { selected_mailbox == 'INBOX.Archive' ? [99] : [42] }
+      allow(client).to receive(:uid_search) do |query|
+        selected_mailbox == 'INBOX.Archive' && query == ['HEADER', 'MESSAGE-ID', 'abc@example.com'] ? [31] : []
+      end
+
+      result = described_class::Standard
+               .new(session: session, client: client, targets: { 'archive' => 'INBOX.Archive' })
+               .call(action: :archive, identity: identity, message_id: 'abc@example.com')
+
+      expect(result.status).to eq :already_in_target
+      expect(result.target_mailbox).to eq 'INBOX.Archive'
+      expect(result.target_uidvalidity).to eq 99
+      expect(result.target_uid).to eq 31
       expect(client).not_to have_received(:uid_move)
     end
   end
@@ -156,37 +186,104 @@ RSpec.describe Imap::MailboxCommand do
   describe 'gmail dialect' do
     subject(:gmail) { described_class::Gmail.new(session: session, client: client, targets: targets) }
 
-    let(:targets) { { 'trash' => '[Gmail]/Trash', 'spam' => '[Gmail]/Spam' } }
+    let(:targets) do
+      { 'all' => '[Gmail]/All Mail', 'trash' => '[Gmail]/Trash', 'spam' => '[Gmail]/Spam' }
+    end
 
-    before { allow(client).to receive(:uid_store) }
+    before do
+      allow(client).to receive(:capabilities).and_return(%w[X-GM-EXT-1 MOVE UIDPLUS])
+      allow(client).to receive(:uid_store)
+    end
 
     # Archiving on Gmail removes the Inbox label. It is not a move into All Mail.
     it 'archives by removing only the Inbox label' do
-      result = gmail.call(action: :archive, identity: identity)
+      gmail_identity = Imap::MessageIdentity.build(
+        mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox'], provider_id: '9001'
+      )
+      allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42], [99])
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([31])
+
+      result = gmail.call(action: :archive, identity: gmail_identity)
 
       expect(client).to have_received(:uid_store).with(7, '-X-GM-LABELS', ['\\Inbox'])
       expect(client).not_to have_received(:uid_move)
       expect(result.status).to eq :moved
+      expect(result.target_mailbox).to eq '[Gmail]/All Mail'
+      expect(result.target_uidvalidity).to eq 99
+      expect(result.target_uid).to eq 31
     end
 
     it 'preserves unrelated labels by touching only the Inbox label' do
-      gmail.call(action: :archive, identity: identity)
+      gmail_identity = Imap::MessageIdentity.build(
+        mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox'], provider_id: '9001'
+      )
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([31])
+
+      gmail.call(action: :archive, identity: gmail_identity)
 
       expect(client).to have_received(:uid_store).with(7, '-X-GM-LABELS', ['\\Inbox'])
       expect(client).not_to have_received(:uid_store).with(7, 'X-GM-LABELS', anything)
     end
 
-    it 'reports the message as still present but no longer in Inbox' do
-      result = gmail.call(action: :archive, identity: identity)
+    it 'archives from the frozen Inbox location when All Mail is the identity primary' do
+      gmail_identity = Imap::MessageIdentity
+                       .build(mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox'], provider_id: '9001')
+                       .with_location(mailbox: '[Gmail]/All Mail', uidvalidity: 99, uid: 31, roles: ['archive'])
+      allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42], [99])
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([31])
 
-      expect(result.target_mailbox).to be_nil
+      gmail.call(action: :archive, identity: gmail_identity, source: gmail_identity.location_for('INBOX'))
+
+      expect(client).to have_received(:uid_store).with(7, '-X-GM-LABELS', ['\\Inbox'])
+    end
+
+    it 'reports the message as still present but no longer in Inbox' do
+      gmail_identity = Imap::MessageIdentity.build(
+        mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox'], provider_id: '9001'
+      )
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([31])
+
+      result = gmail.call(action: :archive, identity: gmail_identity)
+
+      expect(result.target_mailbox).to eq '[Gmail]/All Mail'
       expect(result.detail).to match(/inbox label/i)
     end
 
-    it 'restores by adding the Inbox label back' do
-      gmail.call(action: :restore, identity: identity)
+    it 'restores by adding the Inbox label back and confirms the new Inbox identity' do
+      archived_identity = Imap::MessageIdentity.build(
+        mailbox: '[Gmail]/All Mail', uidvalidity: 42, uid: 31, roles: ['archive'], provider_id: '9001'
+      )
+      allow(client).to receive(:uid_search).with(['UID', 31]).and_return([31])
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([44])
+      allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42], [100])
 
-      expect(client).to have_received(:uid_store).with(7, '+X-GM-LABELS', ['\\Inbox'])
+      result = gmail.call(action: :restore, identity: archived_identity)
+
+      expect(client).to have_received(:uid_store).with(31, '+X-GM-LABELS', ['\\Inbox'])
+      expect(result.target_mailbox).to eq 'INBOX'
+      expect(result.target_uidvalidity).to eq 100
+      expect(result.target_uid).to eq 44
+    end
+
+    it 'restores from Gmail Trash with UID MOVE instead of retaining the Trash label' do
+      trashed_identity = Imap::MessageIdentity.build(
+        mailbox: '[Gmail]/Trash', uidvalidity: 42, uid: 31, roles: ['trash'], provider_id: '9001'
+      )
+      allow(client).to receive(:uid_search).with(['UID', 31]).and_return([31])
+
+      gmail.call(action: :restore, identity: trashed_identity)
+
+      expect(client).to have_received(:uid_move).with(31, 'INBOX')
+      expect(client).not_to have_received(:uid_store)
+    end
+
+    it 'refuses archive before mutation when Gmail All Mail cannot be resolved' do
+      gmail = described_class::Gmail.new(session: session, client: client, targets: {})
+
+      result = gmail.call(action: :archive, identity: identity, message_id: 'abc@example.com')
+
+      expect(result.status).to eq :conflict
+      expect(client).not_to have_received(:uid_store)
     end
 
     it 'still uses an ordinary UID move for trash' do

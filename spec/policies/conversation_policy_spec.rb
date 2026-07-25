@@ -33,6 +33,33 @@ RSpec.describe ConversationPolicy, type: :policy do
     end
   end
 
+  permissions :mailbox_action? do
+    context 'when user is an administrator' do
+      it 'allows the action without a direct inbox membership' do
+        expect(subject).to permit(administrator_context, conversation)
+      end
+    end
+
+    context 'when agent is an explicit inbox member' do
+      before { create(:inbox_member, user: agent, inbox: conversation.inbox) }
+
+      it 'allows the action' do
+        expect(subject).to permit(agent_context, conversation)
+      end
+    end
+
+    context 'when agent has only team access' do
+      let(:team) { create(:team, account: account) }
+      let(:conversation) { create(:conversation, :with_team, account: account, team: team) }
+
+      before { create(:team_member, team: team, user: agent) }
+
+      it 'denies the action' do
+        expect(subject).not_to permit(agent_context, conversation)
+      end
+    end
+  end
+
   permissions :show? do
     context 'when user is an administrator' do
       it 'allows access' do

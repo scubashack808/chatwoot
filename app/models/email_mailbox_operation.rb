@@ -54,6 +54,37 @@ class EmailMailboxOperation < ApplicationRecord
     Array(results).map { |result| result.to_h.transform_keys(&:to_s) }
   end
 
+  def start_attempt!
+    with_lock do
+      update!(status: :running, attempt_count: attempt_count + 1, error_code: nil)
+    end
+  end
+
+  def record_result!(result)
+    normalized = result.to_h.deep_stringify_keys
+
+    with_lock do
+      retained = recorded_results.reject { |existing| existing['message_id'] == normalized['message_id'] }
+      update!(results: retained + [normalized])
+    end
+  end
+
+  def record_error_code!(code)
+    with_lock { update!(error_code: code) }
+  end
+
+  def complete!
+    with_lock { update!(status: derive_status) }
+  end
+
+  def mark_failed!(code)
+    with_lock { update!(status: :failed, error_code: code) }
+  end
+
+  def mark_pending!(code = nil)
+    with_lock { update!(status: :pending, error_code: code) }
+  end
+
   # Items with no terminal result yet. A retry resolves only these, so a message already moved is
   # never moved again.
   def unresolved_items

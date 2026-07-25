@@ -130,6 +130,20 @@ RSpec.describe Imap::MessageIdentity do
       expect(updated.uidvalidity).to eq 43
     end
 
+    it 'replaces the source mailbox for a MOVE while retaining one version bump' do
+      updated = identity.moved_to(
+        mailbox: 'INBOX.Archive',
+        uidvalidity: 99,
+        uid: 21,
+        roles: ['archive']
+      )
+
+      expect(updated.locations).to contain_exactly(
+        include('mailbox' => 'INBOX.Archive', 'uidvalidity' => 99, 'uid' => 21, 'roles' => ['archive'])
+      )
+      expect(updated.version).to eq 2
+    end
+
     it 'keeps the flat primary fields pointing at the first location' do
       updated = identity.with_location(mailbox: 'INBOX', uidvalidity: 43, uid: 8)
 
