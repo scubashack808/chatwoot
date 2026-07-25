@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_24_060000) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_25_060000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -978,6 +978,28 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_24_060000) do
     t.index ["account_id"], name: "index_data_imports_on_account_id"
     t.index ["initiated_by_id"], name: "index_data_imports_on_initiated_by_id"
     t.index ["source_provider"], name: "index_data_imports_on_source_provider"
+  end
+
+  create_table "email_mailbox_operations", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "inbox_id", null: false
+    t.bigint "conversation_id", null: false
+    t.bigint "user_id"
+    t.integer "action", null: false
+    t.string "idempotency_key", null: false
+    t.integer "status", default: 0, null: false
+    t.integer "attempt_count", default: 0, null: false
+    t.string "error_code"
+    t.jsonb "items", default: [], null: false
+    t.jsonb "results", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "idempotency_key"], name: "idx_email_mailbox_operations_on_account_and_key", unique: true
+    t.index ["account_id"], name: "index_email_mailbox_operations_on_account_id"
+    t.index ["conversation_id"], name: "idx_email_mailbox_operations_one_active_per_conversation", unique: true, where: "(status = ANY (ARRAY[0, 1]))"
+    t.index ["conversation_id"], name: "index_email_mailbox_operations_on_conversation_id"
+    t.index ["inbox_id"], name: "index_email_mailbox_operations_on_inbox_id"
+    t.index ["user_id"], name: "idx_email_mailbox_operations_on_user"
   end
 
   create_table "email_templates", force: :cascade do |t|
