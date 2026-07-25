@@ -46,6 +46,77 @@ RSpec.describe 'Conversations API', type: :request do
         expect(body[:data][:payload].first[:messages]).to eq([])
       end
 
+      context 'when mailbox actions are enabled' do
+        let(:channel) { create(:channel_email, :imap_email, account: account) }
+        let(:conversation) { create(:conversation, account: account, inbox: channel.inbox) }
+        let!(:message) do
+          create(:message, account: account, inbox: channel.inbox, conversation: conversation, message_type: :incoming)
+        end
+        let!(:operation) do
+          create(
+            :email_mailbox_operation,
+            account: account,
+            inbox: channel.inbox,
+            conversation: conversation,
+            user: agent,
+            action: :archive,
+            status: :partially_succeeded,
+            items: [{ 'message_id' => message.id }, { 'message_id' => message.id + 1 }],
+            results: [{ 'message_id' => message.id, 'status' => 'succeeded' }]
+          )
+        end
+
+        before do
+          account.enable_features!(:email_mailbox_actions)
+          message.write_imap_identity!(
+            Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 8, roles: ['archive'])
+          )
+        end
+
+        it 'includes derived mailbox state and the latest operation in list payloads' do
+          operation
+
+          get "/api/v1/accounts/#{account.id}/conversations",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          expect(response).to have_http_status(:ok)
+          payload = response.parsed_body.dig('data', 'payload').sole
+          expect(payload['mailbox_state']).to include(
+            'state' => 'archive',
+            'roles' => ['archive'],
+            'tracked_count' => 1,
+            'untracked_count' => 0
+          )
+          expect(payload['mailbox_operation']).to include(
+            'id' => operation.id,
+            'action' => 'archive',
+            'status' => 'partially_succeeded',
+            'total' => 2,
+            'succeeded' => 1
+          )
+        end
+
+        it 'includes derived mailbox state and the latest operation in show payloads' do
+          operation
+
+          get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          expect(response).to have_http_status(:ok)
+          expect(response.parsed_body['mailbox_state']).to include(
+            'state' => 'archive',
+            'roles' => ['archive'],
+            'tracked_count' => 1
+          )
+          expect(response.parsed_body['mailbox_operation']).to include(
+            'id' => operation.id,
+            'status' => 'partially_succeeded'
+          )
+        end
+      end
+
       it 'returns unattended conversations' do
         attended_conversation = create(:conversation, account: account, first_reply_created_at: Time.now.utc)
         # to ensure that waiting since value is populated
