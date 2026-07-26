@@ -16,6 +16,7 @@ import { useInbox } from 'dashboard/composables/useInbox';
 import { useAlert } from 'dashboard/composables';
 import { useI18n } from 'vue-i18n';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import MailboxOperationStatus from './MailboxOperationStatus.vue';
 
 const props = defineProps({
   chat: {
@@ -42,7 +43,13 @@ const chatMetadata = computed(() => props.chat.meta);
 
 const backButtonUrl = computed(() => {
   const {
-    params: { inbox_id: inboxId, label, teamId, id: customViewId },
+    params: {
+      inbox_id: inboxId,
+      mailbox_role: mailboxRole,
+      label,
+      teamId,
+      id: customViewId,
+    },
     name,
   } = route;
 
@@ -54,6 +61,7 @@ const backButtonUrl = computed(() => {
   return conversationListPageURL({
     accountId: accountId.value,
     inboxId,
+    mailboxRole,
     label,
     teamId,
     conversationType: conversationTypeMap[name],
@@ -173,6 +181,11 @@ const copyConversationId = async () => {
         show-extended-info
         :parent-width="width"
         class="hidden md:flex"
+      />
+      <MailboxOperationStatus
+        :mailbox-state="chat.mailbox_state"
+        :mailbox-operation="chat.mailbox_operation"
+        class="max-w-48"
       />
       <ConversationCallButton :inbox="inbox" :chat="currentChat" />
       <MoreActions :conversation-id="currentChat.id" />

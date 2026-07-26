@@ -14,6 +14,7 @@ class ConversationApi extends ApiClient {
     labels,
     teamId,
     conversationType,
+    mailboxRole,
     sortBy,
     updatedWithin,
   }) {
@@ -26,6 +27,7 @@ class ConversationApi extends ApiClient {
         page,
         labels,
         conversation_type: conversationType,
+        mailbox_role: mailboxRole,
         sort_by: sortBy,
         updated_within: updatedWithin,
       },
@@ -54,6 +56,19 @@ class ConversationApi extends ApiClient {
       status,
       snoozed_until: snoozedUntil,
     });
+  }
+
+  createMailboxOperation({ conversationId, action, idempotencyKey }) {
+    return axios.post(`${this.url}/${conversationId}/mailbox_operations`, {
+      mailbox_operation: {
+        action,
+        idempotency_key: idempotencyKey,
+      },
+    });
+  }
+
+  getMailboxOperations(conversationId) {
+    return axios.get(`${this.url}/${conversationId}/mailbox_operations`);
   }
 
   togglePriority({ conversationId, priority }) {
@@ -97,7 +112,15 @@ class ConversationApi extends ApiClient {
     return axios.post(`${this.url}/${conversationId}/unmute`);
   }
 
-  meta({ inboxId, status, assigneeType, labels, teamId, conversationType }) {
+  meta({
+    inboxId,
+    status,
+    assigneeType,
+    labels,
+    teamId,
+    conversationType,
+    mailboxRole,
+  }) {
     return axios.get(`${this.url}/meta`, {
       params: {
         inbox_id: inboxId,
@@ -106,6 +129,7 @@ class ConversationApi extends ApiClient {
         labels,
         team_id: teamId,
         conversation_type: conversationType,
+        mailbox_role: mailboxRole,
       },
     });
   }

@@ -15,6 +15,10 @@ import {
   CMD_SEND_TRANSCRIPT,
   CMD_UNMUTE_CONVERSATION,
 } from 'dashboard/helper/commandbar/events';
+import {
+  getMailboxActions,
+  hasMailboxData,
+} from 'dashboard/helper/mailboxOperations';
 
 // No props needed as we're getting currentChat from the store directly
 const store = useStore();
@@ -24,6 +28,32 @@ const [showEmailActionsModal, toggleEmailModal] = useToggle(false);
 const [showActionsDropdown, toggleDropdown] = useToggle(false);
 
 const currentChat = computed(() => store.getters.getSelectedChat);
+const mailboxActions = computed(() => {
+  if (!hasMailboxData(currentChat.value)) return [];
+  return getMailboxActions(
+    currentChat.value.mailbox_state,
+    currentChat.value.mailbox_operation
+  );
+});
+
+const mailboxActionItems = computed(() => ({
+  archive: {
+    icon: 'i-lucide-archive',
+    label: t('CONVERSATION.MAILBOX.ACTIONS.ARCHIVE'),
+  },
+  spam: {
+    icon: 'i-lucide-triangle-alert',
+    label: t('CONVERSATION.MAILBOX.ACTIONS.SPAM'),
+  },
+  trash: {
+    icon: 'i-lucide-trash-2',
+    label: t('CONVERSATION.MAILBOX.ACTIONS.TRASH'),
+  },
+  restore: {
+    icon: 'i-lucide-undo-2',
+    label: t('CONVERSATION.MAILBOX.ACTIONS.RESTORE'),
+  },
+}));
 
 const actionMenuItems = computed(() => {
   const items = [];
@@ -44,6 +74,14 @@ const actionMenuItems = computed(() => {
     });
   }
 
+  mailboxActions.value.forEach(action => {
+    items.push({
+      ...mailboxActionItems.value[action],
+      action: `mailbox_${action}`,
+      value: action,
+    });
+  });
+
   items.push({
     icon: 'i-lucide-share',
     label: t('CONTACT_PANEL.SEND_TRANSCRIPT'),
@@ -54,10 +92,48 @@ const actionMenuItems = computed(() => {
   return items;
 });
 
-const handleActionClick = ({ action }) => {
+const mailboxActionErrorMessage = errorCode => {
+  const messages = {
+    mailbox_sync_not_active: t(
+      'CONVERSATION.MAILBOX.ERRORS.MAILBOX_SYNC_NOT_ACTIVE'
+    ),
+    no_eligible_messages: t('CONVERSATION.MAILBOX.ERRORS.NO_ELIGIBLE_MESSAGES'),
+    operation_in_progress: t(
+      'CONVERSATION.MAILBOX.ERRORS.OPERATION_IN_PROGRESS'
+    ),
+    mailbox_actions_disabled: t(
+      'CONVERSATION.MAILBOX.ERRORS.MAILBOX_ACTIONS_DISABLED'
+    ),
+  };
+  return messages[errorCode] || t('CONVERSATION.MAILBOX.ERRORS.DEFAULT');
+};
+
+const performMailboxOperation = async action => {
+  try {
+    await store.dispatch('createMailboxOperation', {
+      conversationId: currentChat.value.id,
+      action,
+    });
+    useAlert(
+      t('CONVERSATION.MAILBOX.REQUESTED', {
+        action: mailboxActionItems.value[action].label,
+      })
+    );
+  } catch (error) {
+    const errorCode = error?.response?.data?.error_code;
+    if (errorCode === 'operation_in_progress') {
+      await store.dispatch('refetchMailboxOperation', currentChat.value.id);
+    }
+    useAlert(mailboxActionErrorMessage(errorCode));
+  }
+};
+
+const handleActionClick = ({ action, value }) => {
   toggleDropdown(false);
 
-  if (action === 'mute') {
+  if (action.startsWith('mailbox_')) {
+    performMailboxOperation(value);
+  } else if (action === 'mute') {
     store.dispatch('muteConversation', currentChat.value.id);
     useAlert(t('CONTACT_PANEL.MUTED_SUCCESS'));
   } else if (action === 'unmute') {

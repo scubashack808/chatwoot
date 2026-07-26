@@ -7,6 +7,7 @@ import ConversationCard from './widgets/conversation/ConversationCard.vue';
 import ConversationCardExpanded from 'dashboard/components-next/Conversation/ConversationCard/ConversationCardExpanded.vue';
 import ContextMenu from 'dashboard/components/ui/ContextMenu.vue';
 import ConversationContextMenu from './widgets/conversation/contextMenu/Index.vue';
+import { hasMailboxData } from 'dashboard/helper/mailboxOperations';
 
 const props = defineProps({
   source: { type: Object, required: true },
@@ -16,6 +17,7 @@ const props = defineProps({
   foldersId: { type: [String, Number], default: 0 },
   showAssignee: { type: Boolean, default: false },
   showExpanded: { type: Boolean, default: false },
+  mailboxRole: { type: String, default: '' },
 });
 
 const router = useRouter();
@@ -34,6 +36,7 @@ const markAsRead = inject('markAsRead');
 const assignPriority = inject('assignPriority');
 const isConversationSelected = inject('isConversationSelected');
 const deleteConversation = inject('deleteConversation');
+const performMailboxOperation = inject('performMailboxOperation');
 
 // --- Context menu state (shared by both layouts) ---
 const showContextMenu = ref(false);
@@ -55,6 +58,7 @@ const currentChat = useMapGetter('getSelectedChat');
 const inboxesList = useMapGetter('inboxes/getInboxes');
 const activeInbox = useMapGetter('getSelectedInbox');
 const accountId = useMapGetter('getCurrentAccountId');
+const mailboxAvailable = computed(() => hasMailboxData(props.source));
 
 const chatMetadata = computed(() => props.source.meta || {});
 const assignee = computed(() => chatMetadata.value.assignee || {});
@@ -89,6 +93,7 @@ const conversationPath = computed(() =>
       teamId: props.teamId,
       conversationType: props.conversationType,
       foldersId: props.foldersId,
+      mailboxRole: props.mailboxRole,
     })
   )
 );
@@ -176,6 +181,11 @@ const onDeleteConversation = () => {
   deleteConversation(props.source.id);
   closeContextMenu();
 };
+
+const onMailboxAction = action => {
+  performMailboxOperation(props.source.id, action);
+  closeContextMenu();
+};
 </script>
 
 <template>
@@ -229,6 +239,9 @@ const onDeleteConversation = () => {
       :has-unread-messages="source.unread_count > 0"
       :conversation-labels="source.labels"
       :conversation-url="conversationPath"
+      :mailbox-available="mailboxAvailable"
+      :mailbox-state="source.mailbox_state"
+      :mailbox-operation="source.mailbox_operation"
       @update-conversation="onUpdateConversation"
       @assign-agent="onAssignAgent"
       @assign-label="onAssignLabel"
@@ -238,6 +251,7 @@ const onDeleteConversation = () => {
       @mark-as-read="onMarkAsRead"
       @assign-priority="onAssignPriority"
       @delete-conversation="onDeleteConversation"
+      @mailbox-action="onMailboxAction"
       @close="closeContextMenu"
     />
   </ContextMenu>

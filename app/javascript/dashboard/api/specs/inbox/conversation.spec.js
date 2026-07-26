@@ -19,6 +19,8 @@ describe('#ConversationAPI', () => {
     expect(conversationAPI).toHaveProperty('meta');
     expect(conversationAPI).toHaveProperty('sendEmailTranscript');
     expect(conversationAPI).toHaveProperty('filter');
+    expect(conversationAPI).toHaveProperty('createMailboxOperation');
+    expect(conversationAPI).toHaveProperty('getMailboxOperations');
   });
 
   describe('API calls', () => {
@@ -46,6 +48,8 @@ describe('#ConversationAPI', () => {
         page: 1,
         labels: [],
         teamId: 1,
+        mailboxRole: 'archive',
+        sortBy: 'last_activity_at_desc',
         updatedWithin: 20,
       });
       expect(axiosMock.get).toHaveBeenCalledWith('/api/v1/conversations', {
@@ -56,9 +60,58 @@ describe('#ConversationAPI', () => {
           assignee_type: 'me',
           page: 1,
           labels: [],
+          conversation_type: undefined,
+          mailbox_role: 'archive',
+          sort_by: 'last_activity_at_desc',
           updated_within: 20,
         },
       });
+    });
+
+    it('#get keeps mailbox sorting and pagination server-side', () => {
+      conversationAPI.get({
+        inboxId: 1,
+        status: 'all',
+        assigneeType: 'all',
+        page: 3,
+        mailboxRole: 'trash',
+        sortBy: 'created_at_asc',
+      });
+
+      expect(axiosMock.get).toHaveBeenCalledWith('/api/v1/conversations', {
+        params: expect.objectContaining({
+          inbox_id: 1,
+          mailbox_role: 'trash',
+          page: 3,
+          sort_by: 'created_at_asc',
+        }),
+      });
+    });
+
+    it('#createMailboxOperation', () => {
+      conversationAPI.createMailboxOperation({
+        conversationId: 12,
+        action: 'archive',
+        idempotencyKey: 'archive-12-request',
+      });
+
+      expect(axiosMock.post).toHaveBeenCalledWith(
+        '/api/v1/conversations/12/mailbox_operations',
+        {
+          mailbox_operation: {
+            action: 'archive',
+            idempotency_key: 'archive-12-request',
+          },
+        }
+      );
+    });
+
+    it('#getMailboxOperations recovers without an operation id', () => {
+      conversationAPI.getMailboxOperations(12);
+
+      expect(axiosMock.get).toHaveBeenCalledWith(
+        '/api/v1/conversations/12/mailbox_operations'
+      );
     });
 
     it('#search', () => {
@@ -155,6 +208,7 @@ describe('#ConversationAPI', () => {
         assigneeType: 'me',
         labels: [],
         teamId: 1,
+        mailboxRole: 'archive',
       });
       expect(axiosMock.get).toHaveBeenCalledWith('/api/v1/conversations/meta', {
         params: {
@@ -163,6 +217,8 @@ describe('#ConversationAPI', () => {
           status: 'open',
           assignee_type: 'me',
           labels: [],
+          conversation_type: undefined,
+          mailbox_role: 'archive',
         },
       });
     });

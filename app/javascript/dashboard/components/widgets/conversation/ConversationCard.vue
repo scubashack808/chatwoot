@@ -12,6 +12,7 @@ import UnreadBadge from 'dashboard/components-next/Conversation/ConversationCard
 import SLACardLabel from './components/SLACardLabel.vue';
 import VoiceCallStatus from './VoiceCallStatus.vue';
 import Checkbox from 'dashboard/components-next/checkbox/Checkbox.vue';
+import MailboxOperationStatus from './MailboxOperationStatus.vue';
 
 const props = defineProps({
   chat: { type: Object, required: true },
@@ -215,6 +216,11 @@ watch(
           {{ $t(`CHAT_LIST.NO_MESSAGES`) }}
         </span>
       </p>
+      <MailboxOperationStatus
+        :mailbox-state="chat.mailbox_state"
+        :mailbox-operation="chat.mailbox_operation"
+        class="my-0 mx-2"
+      />
       <div
         class="absolute flex flex-col ltr:right-3 rtl:left-3"
         :class="showMetaSection ? 'top-8' : 'top-4'"
