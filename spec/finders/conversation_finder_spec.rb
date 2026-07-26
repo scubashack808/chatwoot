@@ -251,6 +251,119 @@ describe ConversationFinder do
       end
     end
 
+    context 'with a mailbox role' do
+      let(:params) { { status: 'all', mailbox_role: 'archive' } }
+
+      before do
+        account.enable_features!(:email_mailbox_actions)
+      end
+
+      it 'returns exactly the conversations represented in each mailbox role' do
+        create_conversation = lambda do |*identities|
+          conversation = create(:conversation, account: account, inbox: inbox)
+          identities.each do |identity|
+            message = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming)
+            message.write_imap_identity!(identity) if identity
+          end
+          conversation
+        end
+        inbox_identity = Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 1, roles: ['inbox'])
+        archive_identity = Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 2, roles: ['archive'])
+        gmail_inbox_identity = Imap::MessageIdentity
+                               .build(mailbox: 'INBOX', uidvalidity: 42, uid: 3, roles: ['inbox'], provider_id: '9001')
+                               .with_location(mailbox: '[Gmail]/All Mail', uidvalidity: 43, uid: 30, roles: ['archive'])
+        gmail_archive_identity = Imap::MessageIdentity.build(
+          mailbox: '[Gmail]/All Mail', uidvalidity: 43, uid: 31, roles: ['archive'], provider_id: '9002'
+        )
+
+        tracked_inbox = create_conversation.call(inbox_identity)
+        standard_archive = create_conversation.call(archive_identity)
+        gmail_inbox = create_conversation.call(gmail_inbox_identity)
+        gmail_archive = create_conversation.call(gmail_archive_identity)
+        mixed = create_conversation.call(inbox_identity, archive_identity)
+        untracked = create_conversation.call(nil)
+        trash = create_conversation.call(
+          Imap::MessageIdentity.build(mailbox: 'Trash', uidvalidity: 42, uid: 6, roles: ['trash'])
+        )
+        spam = create_conversation.call(
+          Imap::MessageIdentity.build(mailbox: 'Junk', uidvalidity: 42, uid: 7, roles: ['spam'])
+        )
+
+        inbox_ids = described_class.new(user_1, status: 'all', mailbox_role: 'inbox').perform[:conversations].map(&:id)
+        archive_ids = described_class.new(user_1, status: 'all', mailbox_role: 'archive').perform[:conversations].map(&:id)
+        trash_ids = described_class.new(user_1, status: 'all', mailbox_role: 'trash').perform[:conversations].map(&:id)
+        spam_ids = described_class.new(user_1, status: 'all', mailbox_role: 'spam').perform[:conversations].map(&:id)
+
+        expect(inbox_ids).to contain_exactly(tracked_inbox.id, gmail_inbox.id, mixed.id, untracked.id)
+        expect(archive_ids).to contain_exactly(standard_archive.id, gmail_archive.id, mixed.id)
+        expect(trash_ids).to contain_exactly(trash.id)
+        expect(spam_ids).to contain_exactly(spam.id)
+      end
+
+      it 'applies server sorting after mailbox filtering' do
+        older_archive = create(
+          :conversation, account: account, inbox: inbox, last_activity_at: 3.hours.ago, created_at: 3.hours.ago
+        )
+        newer_archive = create(
+          :conversation, account: account, inbox: inbox, last_activity_at: 1.hour.ago, created_at: 1.hour.ago
+        )
+        non_archive = create(
+          :conversation, account: account, inbox: inbox, last_activity_at: 2.hours.ago, created_at: 2.hours.ago
+        )
+        [[older_archive, 'archive'], [newer_archive, 'archive'], [non_archive, 'inbox']].each_with_index do |(conversation, role), index|
+          message = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming)
+          message.write_imap_identity!(
+            Imap::MessageIdentity.build(mailbox: role.titleize, uidvalidity: 42, uid: index + 1, roles: [role])
+          )
+        end
+
+        result = described_class.new(
+          user_1,
+          status: 'all',
+          mailbox_role: 'archive',
+          sort_by: 'last_activity_at_asc'
+        ).perform
+
+        expect(result[:conversations].map(&:id)).to eq([older_archive.id, newer_archive.id])
+      end
+
+      it 'keeps counts and every page boundary correct after mailbox filtering' do
+        archives = Array.new(5) do |index|
+          conversation = create(
+            :conversation,
+            account: account,
+            inbox: inbox,
+            created_at: (5 - index).hours.ago,
+            last_activity_at: (5 - index).hours.ago
+          )
+          message = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming)
+          message.write_imap_identity!(
+            Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: index + 1, roles: ['archive'])
+          )
+          conversation
+        end
+        non_archive = create(:conversation, account: account, inbox: inbox)
+        create(:message, account: account, inbox: inbox, conversation: non_archive, message_type: :incoming)
+
+        results = with_modified_env CONVERSATION_RESULTS_PER_PAGE: '2' do
+          (1..4).map do |page|
+            described_class.new(
+              user_1,
+              status: 'all',
+              mailbox_role: 'archive',
+              sort_by: 'created_at_asc',
+              page: page
+            ).perform
+          end
+        end
+
+        expect(results.map { |result| result[:conversations].map(&:id) }).to eq(
+          [archives.first(2).map(&:id), archives.drop(2).first(2).map(&:id), [archives.last.id], []]
+        )
+        expect(results.map { |result| result.dig(:count, :all_count) }).to eq([5, 5, 5, 5])
+      end
+    end
+
     context 'with perform_meta_only' do
       let(:params) { { assignee_type: 'assigned' } }
 

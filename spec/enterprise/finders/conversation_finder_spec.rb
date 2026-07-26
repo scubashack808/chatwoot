@@ -1,6 +1,47 @@
 require 'rails_helper'
 
 RSpec.describe ConversationFinder do
+  describe '#perform' do
+    let(:account) { create(:account) }
+    let(:agent) { create(:user, account: account, role: :agent) }
+    let(:inbox) { create(:inbox, account: account) }
+
+    before do
+      Current.account = account
+      create(:inbox_member, user: agent, inbox: inbox)
+      account.enable_features!(:email_mailbox_actions, :sla)
+    end
+
+    it 'keeps mailbox filtering compatible with Enterprise SLA preloads' do
+      archived_conversation = create(:conversation, account: account, inbox: inbox)
+      archived_message = create(
+        :message,
+        account: account,
+        inbox: inbox,
+        conversation: archived_conversation,
+        message_type: :incoming
+      )
+      archived_message.write_imap_identity!(
+        Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 8, roles: ['archive'])
+      )
+      inbox_conversation = create(:conversation, account: account, inbox: inbox)
+      inbox_message = create(
+        :message,
+        account: account,
+        inbox: inbox,
+        conversation: inbox_conversation,
+        message_type: :incoming
+      )
+      inbox_message.write_imap_identity!(
+        Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 9, roles: ['inbox'])
+      )
+
+      result = described_class.new(agent, status: 'all', mailbox_role: 'archive').perform
+
+      expect(result[:conversations].map(&:id)).to eq([archived_conversation.id])
+    end
+  end
+
   describe '#perform_meta_only' do
     let(:account) { create(:account) }
     let(:agent) { create(:user, account: account, role: :agent) }

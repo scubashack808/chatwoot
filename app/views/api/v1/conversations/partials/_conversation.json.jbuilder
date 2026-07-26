@@ -60,4 +60,19 @@ json.priority conversation.priority
 json.waiting_since conversation.waiting_since.to_i.to_i
 sla_applicable = !conversation.respond_to?(:sla_applicable?) || conversation.sla_applicable?
 json.sla_policy_id sla_applicable ? conversation.sla_policy_id : nil
+
+if Current.account.feature_enabled?('email_mailbox_actions')
+  conversations = @conversations || [conversation]
+  mailbox_data = @conversation_mailbox_data ||= Imap::ConversationMailboxData.new(
+    conversations: conversations,
+    user: Current.user,
+    account_user: Current.account_user
+  ).to_h
+  conversation_mailbox_data = mailbox_data[conversation.id]
+  if conversation_mailbox_data
+    json.mailbox_state conversation_mailbox_data[:mailbox_state]
+    json.mailbox_operation conversation_mailbox_data[:mailbox_operation]
+  end
+end
+
 json.partial! 'enterprise/api/v1/conversations/partials/conversation', conversation: conversation if ChatwootApp.enterprise?

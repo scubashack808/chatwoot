@@ -4,7 +4,15 @@ class Imap::ConversationMailboxState
   MAILBOX_ROLES = %w[inbox archive trash spam].freeze
   PROVIDER_ABSENT_STATE = 'missing'.freeze
 
-  pattr_initialize [:conversation!]
+  def initialize(
+    conversation:,
+    incoming_messages: conversation.messages.incoming.order(:id),
+    latest_operation: EmailMailboxOperation.where(conversation_id: conversation.id).order(created_at: :desc, id: :desc).first
+  )
+    @conversation = conversation
+    @incoming_messages = incoming_messages
+    @latest_operation = latest_operation
+  end
 
   def to_h
     {
@@ -19,8 +27,10 @@ class Imap::ConversationMailboxState
 
   private
 
+  attr_reader :conversation, :incoming_messages, :latest_operation
+
   def incoming_identities
-    @incoming_identities ||= conversation.messages.incoming.order(:id).map(&:imap_identity)
+    @incoming_identities ||= incoming_messages.map(&:imap_identity)
   end
 
   def tracked_identities
@@ -50,8 +60,7 @@ class Imap::ConversationMailboxState
   end
 
   def conflict_count
-    latest = EmailMailboxOperation.where(conversation_id: conversation.id).order(created_at: :desc).first
-    latest&.count_results('conflict').to_i
+    latest_operation&.count_results('conflict').to_i
   end
 
   def state
