@@ -7,6 +7,7 @@ import wootConstants from 'dashboard/constants/globals';
 import { BUS_EVENTS } from '../../../../shared/constants/busEvents';
 import { emitter } from 'shared/helpers/mitt';
 import { CONTENT_TYPES } from 'dashboard/components-next/message/constants.js';
+import { isMailboxOperationTerminal } from 'dashboard/helper/mailboxOperations';
 
 const state = {
   allConversations: [],
@@ -129,6 +130,40 @@ export const mutations = {
     if (chat) {
       chat.last_activity_at = lastActivityAt;
     }
+  },
+
+  [types.UPDATE_CONVERSATION_MAILBOX](
+    _state,
+    { conversationId, mailboxOperation, mailboxState }
+  ) {
+    const conversation = getConversationById(_state)(conversationId);
+    if (!conversation) return;
+
+    const currentOperation = conversation.mailbox_operation;
+    if (
+      currentOperation &&
+      mailboxOperation &&
+      Number(mailboxOperation.id) < Number(currentOperation.id)
+    ) {
+      return;
+    }
+    if (
+      currentOperation?.id === mailboxOperation?.id &&
+      Number(mailboxOperation?.attempt_count) <
+        Number(currentOperation?.attempt_count)
+    ) {
+      return;
+    }
+    if (
+      currentOperation?.id === mailboxOperation?.id &&
+      isMailboxOperationTerminal(currentOperation) &&
+      !isMailboxOperationTerminal(mailboxOperation)
+    ) {
+      return;
+    }
+
+    conversation.mailbox_operation = mailboxOperation;
+    conversation.mailbox_state = mailboxState;
   },
   [types.ASSIGN_PRIORITY](_state, { priority, conversationId }) {
     const [chat] = _state.allConversations.filter(c => c.id === conversationId);

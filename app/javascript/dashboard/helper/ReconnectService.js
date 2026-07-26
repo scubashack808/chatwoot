@@ -71,9 +71,21 @@ class ReconnectService {
 
   fetchConversationsOnReconnect = async () => {
     const {
+      getChatListFilters,
       getAppliedConversationFiltersQuery,
       'customViews/getActiveConversationFolder': activeFolder,
     } = this.store.getters;
+    if (getChatListFilters?.mailboxRole) {
+      await this.store.dispatch('conversationPage/reset');
+      await this.store.dispatch('emptyAllConversations');
+      await this.store.dispatch('updateChatListFilters', {
+        page: 1,
+        updatedWithin: null,
+      });
+      await this.store.dispatch('fetchAllConversations');
+      return;
+    }
+
     const query = getAppliedConversationFiltersQuery?.payload?.length
       ? getAppliedConversationFiltersQuery
       : activeFolder?.query;
@@ -94,6 +106,17 @@ class ReconnectService {
     }
   };
 
+  refetchMailboxOperationOnReconnect = async () => {
+    const { conversation_id: conversationId } =
+      this.router.currentRoute.value.params;
+    if (!conversationId) return;
+
+    await this.store.dispatch(
+      'refetchMailboxOperation',
+      Number(conversationId)
+    );
+  };
+
   fetchNotificationsOnReconnect = async filter => {
     await this.store.dispatch('notifications/index', { ...filter, page: 1 });
   };
@@ -112,6 +135,7 @@ class ReconnectService {
   handleRouteSpecificFetch = async () => {
     const currentRoute = this.router.currentRoute.value.name;
     if (isAConversationRoute(currentRoute, true)) {
+      await this.refetchMailboxOperationOnReconnect();
       await this.fetchConversationsOnReconnect();
       await this.fetchConversationMessagesOnReconnect();
     } else if (isAInboxViewRoute(currentRoute, true)) {

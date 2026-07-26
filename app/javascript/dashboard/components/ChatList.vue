@@ -13,6 +13,7 @@ import Dialog from 'dashboard/components-next/dialog/Dialog.vue';
 import ConversationFilter from 'next/filter/ConversationFilter.vue';
 import SaveCustomView from 'next/filter/SaveCustomView.vue';
 import ChatTypeTabs from './widgets/ChatTypeTabs.vue';
+import MailboxRoleTabs from './widgets/conversation/MailboxRoleTabs.vue';
 import DeleteCustomViews from 'dashboard/routes/dashboard/customviews/DeleteCustomViews.vue';
 import ConversationBulkActions from './widgets/conversation/conversationBulkActions/Index.vue';
 import TeleportWithDirection from 'dashboard/components-next/TeleportWithDirection.vue';
@@ -52,6 +53,14 @@ import {
 import { matchesFilters } from '../store/modules/conversations/helpers/filterHelpers';
 import { CONVERSATION_EVENTS } from '../helper/AnalyticsHelper/events';
 import { ASSIGNEE_TYPE_TAB_PERMISSIONS } from 'dashboard/constants/permissions.js';
+import { FEATURE_FLAGS } from 'dashboard/featureFlags';
+import { BUS_EVENTS } from 'shared/constants/busEvents';
+import {
+  hasMailboxData,
+  isEmailHardDeleteError,
+  isMailboxOperationTerminal,
+  mailboxStateIncludesRole,
+} from 'dashboard/helper/mailboxOperations';
 
 const props = defineProps({
   conversationInbox: { type: [String, Number], default: 0 },
@@ -61,6 +70,7 @@ const props = defineProps({
   foldersId: { type: [String, Number], default: 0 },
   showConversationList: { default: true, type: Boolean },
   isOnExpandedLayout: { default: false, type: Boolean },
+  mailboxRole: { type: String, default: '' },
 });
 
 const emit = defineEmits(['conversationLoad']);
@@ -201,6 +211,30 @@ const currentPageFilterKey = computed(() => {
 });
 
 const inbox = useFunctionGetter('inboxes/getInbox', activeInbox);
+const mailboxInbox = computed(() =>
+  store.getters['inboxes/getInbox'](Number(props.conversationInbox))
+);
+const mailboxFeatureEnabled = computed(() => {
+  const isFeatureEnabled = store.getters['accounts/isFeatureEnabledonAccount'];
+  return Boolean(
+    isFeatureEnabled?.(
+      currentAccountId.value,
+      FEATURE_FLAGS.EMAIL_MAILBOX_ACTIONS
+    )
+  );
+});
+const showMailboxRoles = computed(
+  () =>
+    Boolean(props.conversationInbox) &&
+    mailboxInbox.value?.channel_type === 'Channel::Email' &&
+    mailboxFeatureEnabled.value
+);
+const activeMailboxRole = computed(() =>
+  showMailboxRoles.value ? props.mailboxRole || 'inbox' : ''
+);
+const showAllStatusesForMailbox = computed(
+  () => activeMailboxRole.value && activeMailboxRole.value !== 'inbox'
+);
 const currentPage = useFunctionGetter(
   'conversationPage/getCurrentPageFilter',
   activeAssigneeTab
@@ -256,6 +290,7 @@ const conversationFilters = computed(() => {
     labels: props.label ? [props.label] : undefined,
     teamId: props.teamId || undefined,
     conversationType: props.conversationType || undefined,
+    mailboxRole: activeMailboxRole.value || undefined,
   };
 });
 
@@ -381,7 +416,9 @@ const uniqueInboxes = computed(() => {
 function setFiltersFromUISettings() {
   const { conversations_filter_by: filterBy = {} } = uiSettings.value;
   const { status, order_by: orderBy } = filterBy;
-  activeStatus.value = status || wootConstants.STATUS_TYPE.OPEN;
+  activeStatus.value = showAllStatusesForMailbox.value
+    ? wootConstants.STATUS_TYPE.ALL
+    : status || wootConstants.STATUS_TYPE.OPEN;
   activeSortBy.value = Object.values(wootConstants.SORT_BY_TYPE).includes(
     orderBy
   )
@@ -655,13 +692,14 @@ function redirectToConversationList() {
   } else if (isOnUnattendedView({ route: { name } })) {
     conversationType = wootConstants.CONVERSATION_TYPE.UNATTENDED;
   }
-  router.push(
+  return router.push(
     conversationListPageURL({
       accountId,
       conversationType: conversationType,
       customViewId: props.foldersId,
       inboxId,
       label,
+      mailboxRole: activeMailboxRole.value,
       teamId,
     })
   );
@@ -805,6 +843,26 @@ useEmitter('fetch_conversation_stats', () => {
   store.dispatch('conversationStats/get', conversationFilters.value);
 });
 
+useEmitter(
+  BUS_EVENTS.MAILBOX_OPERATION_UPDATED,
+  async ({ conversationId, mailboxOperation, mailboxState } = {}) => {
+    if (
+      showMailboxRoles.value &&
+      isMailboxOperationTerminal(mailboxOperation)
+    ) {
+      const isSelectedConversation =
+        Number(route.params.conversation_id) === Number(conversationId);
+      if (
+        isSelectedConversation &&
+        !mailboxStateIncludesRole(mailboxState, activeMailboxRole.value)
+      ) {
+        await redirectToConversationList();
+      }
+      resetAndFetchData();
+    }
+  }
+);
+
 onMounted(() => {
   store.dispatch('setChatListFilters', conversationFilters.value);
   setFiltersFromUISettings();
@@ -817,7 +875,52 @@ onMounted(() => {
 });
 
 const deleteConversationDialogRef = ref(null);
+const hardDeleteMailboxDialogRef = ref(null);
 const selectedConversationId = ref(null);
+const hardDeleteConversationId = ref(null);
+
+const mailboxActionLabel = action => {
+  const actionLabels = {
+    archive: t('CONVERSATION.MAILBOX.ACTIONS.ARCHIVE'),
+    spam: t('CONVERSATION.MAILBOX.ACTIONS.SPAM'),
+    trash: t('CONVERSATION.MAILBOX.ACTIONS.TRASH'),
+    restore: t('CONVERSATION.MAILBOX.ACTIONS.RESTORE'),
+  };
+  return actionLabels[action];
+};
+
+const mailboxActionErrorMessage = errorCode => {
+  const messages = {
+    mailbox_sync_not_active: t(
+      'CONVERSATION.MAILBOX.ERRORS.MAILBOX_SYNC_NOT_ACTIVE'
+    ),
+    no_eligible_messages: t('CONVERSATION.MAILBOX.ERRORS.NO_ELIGIBLE_MESSAGES'),
+    operation_in_progress: t(
+      'CONVERSATION.MAILBOX.ERRORS.OPERATION_IN_PROGRESS'
+    ),
+    mailbox_actions_disabled: t(
+      'CONVERSATION.MAILBOX.ERRORS.MAILBOX_ACTIONS_DISABLED'
+    ),
+  };
+  return messages[errorCode] || t('CONVERSATION.MAILBOX.ERRORS.DEFAULT');
+};
+
+async function performMailboxOperation(conversationId, action) {
+  try {
+    await store.dispatch('createMailboxOperation', {
+      conversationId,
+      action,
+    });
+    useAlert(
+      t('CONVERSATION.MAILBOX.REQUESTED', {
+        action: mailboxActionLabel(action),
+      })
+    );
+  } catch (error) {
+    const errorCode = error?.response?.data?.error_code;
+    useAlert(mailboxActionErrorMessage(errorCode));
+  }
+}
 
 async function deleteConversation() {
   try {
@@ -827,8 +930,28 @@ async function deleteConversation() {
     deleteConversationDialogRef.value.close();
     useAlert(t('CONVERSATION.SUCCESS_DELETE_CONVERSATION'));
   } catch (error) {
+    const conversation = getConversationById.value(
+      selectedConversationId.value
+    );
+    if (isEmailHardDeleteError(error) && hasMailboxData(conversation)) {
+      hardDeleteConversationId.value = selectedConversationId.value;
+      deleteConversationDialogRef.value.close();
+      hardDeleteMailboxDialogRef.value.open();
+      return;
+    }
+    if (isEmailHardDeleteError(error)) {
+      deleteConversationDialogRef.value.close();
+      useAlert(t('CONVERSATION.MAILBOX.HARD_DELETE.DESCRIPTION'));
+      return;
+    }
     useAlert(t('CONVERSATION.FAIL_DELETE_CONVERSATION'));
   }
+}
+
+async function moveHardDeleteToTrash() {
+  await performMailboxOperation(hardDeleteConversationId.value, 'trash');
+  hardDeleteMailboxDialogRef.value.close();
+  hardDeleteConversationId.value = null;
 }
 
 const handleDelete = conversationId => {
@@ -848,6 +971,7 @@ provide('markAsRead', markAsRead);
 provide('assignPriority', assignPriority);
 provide('isConversationSelected', isConversationSelected);
 provide('deleteConversation', handleDelete);
+provide('performMailboxOperation', performMailboxOperation);
 
 watch(activeTeam, () => resetAndFetchData());
 
@@ -863,6 +987,10 @@ watch(
   computed(() => props.conversationType),
   () => resetAndFetchData()
 );
+watch(activeMailboxRole, () => {
+  setFiltersFromUISettings();
+  resetAndFetchData();
+});
 
 watch(activeFolder, (newVal, oldVal) => {
   if (newVal !== oldVal) {
@@ -899,6 +1027,7 @@ watch(conversationFilters, (newVal, oldVal) => {
       :is-on-expanded-layout="isOnExpandedLayout"
       :conversation-stats="conversationStats"
       :is-list-loading="chatListLoading && !conversationList.length"
+      :allow-advanced-filters="!showMailboxRoles"
       @add-folders="onClickOpenAddFoldersModal"
       @delete-folders="onClickOpenDeleteFoldersModal"
       @filters-modal="onToggleAdvanceFiltersModal"
@@ -925,6 +1054,12 @@ watch(conversationFilters, (newVal, oldVal) => {
       :custom-views-id="foldersId"
       :open-last-item-after-delete="openLastItemAfterDeleteInFolder"
       @close="onCloseDeleteFoldersModal"
+    />
+
+    <MailboxRoleTabs
+      v-if="showMailboxRoles"
+      :inbox-id="conversationInbox"
+      :active-role="activeMailboxRole"
     />
 
     <ChatTypeTabs
@@ -959,6 +1094,7 @@ watch(conversationFilters, (newVal, oldVal) => {
       :team-id="teamId"
       :folders-id="foldersId"
       :conversation-type="conversationType"
+      :mailbox-role="activeMailboxRole"
       :show-assignee="showAssigneeInConversationCard"
       :is-on-expanded-layout="isOnExpandedLayout"
       @load-more="loadMoreConversations"
@@ -975,6 +1111,15 @@ watch(conversationFilters, (newVal, oldVal) => {
       :confirm-button-label="$t('CONVERSATION.DELETE_CONVERSATION.CONFIRM')"
       @confirm="deleteConversation"
       @close="selectedConversationId = null"
+    />
+    <Dialog
+      ref="hardDeleteMailboxDialogRef"
+      type="alert"
+      :title="$t('CONVERSATION.MAILBOX.HARD_DELETE.TITLE')"
+      :description="$t('CONVERSATION.MAILBOX.HARD_DELETE.DESCRIPTION')"
+      :confirm-button-label="$t('CONVERSATION.MAILBOX.HARD_DELETE.CONFIRM')"
+      @confirm="moveHardDeleteToTrash"
+      @close="hardDeleteConversationId = null"
     />
     <TeleportWithDirection
       v-if="showAdvancedFilters"

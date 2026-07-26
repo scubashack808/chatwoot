@@ -29,6 +29,7 @@ vi.mock('dashboard/helper/routeHelpers', () => ({
 const storeMock = {
   dispatch: vi.fn(),
   getters: {
+    getChatListFilters: {},
     getAppliedConversationFiltersQuery: [],
     'customViews/getActiveConversationFolder': { query: {} },
     'notifications/getNotificationFilters': {},
@@ -170,6 +171,20 @@ describe('ReconnectService', () => {
   });
 
   describe('fetchConversationsOnReconnect', () => {
+    it('fully refetches a mailbox role so moved rows cannot remain stale', async () => {
+      storeMock.getters.getChatListFilters = { mailboxRole: 'inbox' };
+
+      await reconnectService.fetchConversationsOnReconnect();
+
+      expect(storeMock.dispatch.mock.calls).toEqual([
+        ['conversationPage/reset'],
+        ['emptyAllConversations'],
+        ['updateChatListFilters', { page: 1, updatedWithin: null }],
+        ['fetchAllConversations'],
+      ]);
+      storeMock.getters.getChatListFilters = {};
+    });
+
     it('should fetch filtered or saved conversations if query exists', async () => {
       storeMock.getters.getAppliedConversationFiltersQuery = {
         payload: [
@@ -285,9 +300,17 @@ describe('ReconnectService', () => {
         reconnectService,
         'fetchConversationMessagesOnReconnect'
       );
+      const spyMailboxOperation = vi.spyOn(
+        reconnectService,
+        'refetchMailboxOperationOnReconnect'
+      );
       await reconnectService.handleRouteSpecificFetch();
       expect(spyConversations).toHaveBeenCalled();
       expect(spyMessages).toHaveBeenCalled();
+      expect(spyMailboxOperation).toHaveBeenCalled();
+      expect(spyMailboxOperation.mock.invocationCallOrder[0]).toBeLessThan(
+        spyConversations.mock.invocationCallOrder[0]
+      );
     });
 
     it('should fetch notifications if current route is an inbox view route', async () => {
@@ -320,6 +343,30 @@ describe('ReconnectService', () => {
       await reconnectService.setConversationLastMessageId();
       expect(storeMock.dispatch).not.toHaveBeenCalledWith(
         'setConversationLastMessageId',
+        expect.anything()
+      );
+    });
+  });
+
+  describe('refetchMailboxOperationOnReconnect', () => {
+    it('recovers the selected conversation without a known operation id', async () => {
+      routerMock.currentRoute.value.params.conversation_id = '42';
+
+      await reconnectService.refetchMailboxOperationOnReconnect();
+
+      expect(storeMock.dispatch).toHaveBeenCalledWith(
+        'refetchMailboxOperation',
+        42
+      );
+    });
+
+    it('does not issue a per-row request on a list-only route', async () => {
+      routerMock.currentRoute.value.params.conversation_id = null;
+
+      await reconnectService.refetchMailboxOperationOnReconnect();
+
+      expect(storeMock.dispatch).not.toHaveBeenCalledWith(
+        'refetchMailboxOperation',
         expect.anything()
       );
     });

@@ -18,6 +18,16 @@ import {
   handleVoiceCallUpdated,
   syncConversationCallVisibility,
 } from 'dashboard/helper/voice';
+import getUuid from 'widget/helpers/uuid';
+import {
+  hasMailboxData,
+  isMailboxOperationInProgress,
+} from 'dashboard/helper/mailboxOperations';
+import { emitter } from 'shared/helpers/mitt';
+import { BUS_EVENTS } from 'shared/constants/busEvents';
+
+const MAILBOX_OPERATION_REFETCH_DELAY_MS = 2000;
+const mailboxOperationRefetchTimers = new Map();
 
 export const hasMessageFailedWithExternalError = pendingMessage => {
   // This helper is used to check if the message has failed with an external error.
@@ -373,8 +383,130 @@ const actions = {
       commit(types.DELETE_CONVERSATION, conversationId);
       dispatch('conversationStats/get', {}, { root: true });
     } catch (error) {
-      throw new Error(error);
+      const wrappedError = new Error(error);
+      wrappedError.response = error.response;
+      throw wrappedError;
     }
+  },
+
+  createMailboxOperation: async (
+    { commit, dispatch, state },
+    {
+      conversationId,
+      action,
+      idempotencyKey = `mailbox-${conversationId}-${action}-${Date.now()}-${getUuid()}`,
+    }
+  ) => {
+    const {
+      data: { operation, mailbox_state: mailboxState },
+    } = await ConversationApi.createMailboxOperation({
+      conversationId,
+      action,
+      idempotencyKey,
+    });
+
+    commit(types.UPDATE_CONVERSATION_MAILBOX, {
+      conversationId,
+      mailboxOperation: operation,
+      mailboxState,
+    });
+    const conversation = state.allConversations?.find(
+      item => Number(item.id) === Number(conversationId)
+    );
+    if (
+      Number(state.selectedChatId) === Number(conversationId) &&
+      isMailboxOperationInProgress(conversation?.mailbox_operation)
+    ) {
+      dispatch('scheduleMailboxOperationRefetch', conversationId);
+    }
+
+    return { operation, mailboxState };
+  },
+
+  applyMailboxOperationUpdate(
+    { commit, dispatch, state },
+    { conversationId, mailboxOperation, mailboxState }
+  ) {
+    commit(types.UPDATE_CONVERSATION_MAILBOX, {
+      conversationId,
+      mailboxOperation,
+      mailboxState,
+    });
+
+    const conversation = state.allConversations?.find(
+      item => Number(item.id) === Number(conversationId)
+    );
+    if (
+      Number(state.selectedChatId) === Number(conversationId) &&
+      isMailboxOperationInProgress(conversation?.mailbox_operation)
+    ) {
+      dispatch('scheduleMailboxOperationRefetch', conversationId);
+    } else {
+      dispatch('clearMailboxOperationRefetch', conversationId);
+    }
+  },
+
+  refetchMailboxOperation: async (
+    { commit, dispatch, state },
+    conversationId
+  ) => {
+    if (Number(state.selectedChatId) !== Number(conversationId)) return null;
+
+    const conversation = state.allConversations?.find(
+      item => Number(item.id) === Number(conversationId)
+    );
+    if (!hasMailboxData(conversation)) return null;
+
+    const {
+      data: { operations, mailbox_state: mailboxState },
+    } = await ConversationApi.getMailboxOperations(conversationId);
+    const mailboxOperation = operations[0] || null;
+
+    commit(types.UPDATE_CONVERSATION_MAILBOX, {
+      conversationId,
+      mailboxOperation,
+      mailboxState,
+    });
+
+    const currentConversation = state.allConversations?.find(
+      item => Number(item.id) === Number(conversationId)
+    );
+    if (
+      Number(state.selectedChatId) === Number(conversationId) &&
+      isMailboxOperationInProgress(currentConversation?.mailbox_operation)
+    ) {
+      dispatch('scheduleMailboxOperationRefetch', conversationId);
+    } else {
+      dispatch('clearMailboxOperationRefetch', conversationId);
+    }
+
+    emitter.emit(BUS_EVENTS.MAILBOX_OPERATION_UPDATED, {
+      conversationId,
+      mailboxOperation,
+      mailboxState,
+    });
+    return { mailboxOperation, mailboxState };
+  },
+
+  scheduleMailboxOperationRefetch({ dispatch, state }, conversationId) {
+    if (Number(state.selectedChatId) !== Number(conversationId)) return;
+
+    const existingTimer = mailboxOperationRefetchTimers.get(conversationId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(() => {
+      mailboxOperationRefetchTimers.delete(conversationId);
+      if (Number(state.selectedChatId) === Number(conversationId)) {
+        dispatch('refetchMailboxOperation', conversationId);
+      }
+    }, MAILBOX_OPERATION_REFETCH_DELAY_MS);
+    mailboxOperationRefetchTimers.set(conversationId, timer);
+  },
+
+  clearMailboxOperationRefetch(_context, conversationId) {
+    const timer = mailboxOperationRefetchTimers.get(conversationId);
+    if (timer) clearTimeout(timer);
+    mailboxOperationRefetchTimers.delete(conversationId);
   },
 
   addConversation({ commit, state, dispatch, rootState }, conversation) {

@@ -11,9 +11,12 @@ export const conversationUrl = ({
   teamId,
   conversationType = '',
   foldersId,
+  mailboxRole,
 }) => {
   let url = `accounts/${accountId}/conversations/${id}`;
-  if (activeInbox) {
+  if (activeInbox && mailboxRole && mailboxRole !== 'inbox') {
+    url = `accounts/${accountId}/inbox/${activeInbox}/mail/${mailboxRole}/conversations/${id}`;
+  } else if (activeInbox) {
     url = `accounts/${accountId}/inbox/${activeInbox}/conversations/${id}`;
   } else if (label) {
     url = `accounts/${accountId}/label/${label}/conversations/${id}`;
@@ -38,12 +41,15 @@ export const conversationListPageURL = ({
   label,
   teamId,
   customViewId,
+  mailboxRole,
 }) => {
   let url = `accounts/${accountId}/dashboard`;
   if (label) {
     url = `accounts/${accountId}/label/${label}`;
   } else if (teamId) {
     url = `accounts/${accountId}/team/${teamId}`;
+  } else if (inboxId && mailboxRole && mailboxRole !== 'inbox') {
+    url = `accounts/${accountId}/inbox/${inboxId}/mail/${mailboxRole}`;
   } else if (inboxId) {
     url = `accounts/${accountId}/inbox/${inboxId}`;
   } else if (customViewId) {
