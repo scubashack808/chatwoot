@@ -1,5 +1,15 @@
 class Api::V1::Accounts::Conversations::MailboxOperationsController < Api::V1::Accounts::Conversations::BaseController
-  before_action :authorize_mailbox_action, only: :create
+  before_action :authorize_mailbox_action, only: [:index, :show, :create]
+  before_action :ensure_mailbox_actions_enabled, only: [:index, :show]
+
+  def index
+    operations = EmailMailboxOperation.where(conversation_id: @conversation.id).order(created_at: :desc, id: :desc)
+
+    render json: {
+      operations: operations.map(&:summary),
+      mailbox_state: Imap::ConversationMailboxState.new(conversation: @conversation).to_h
+    }
+  end
 
   def show
     operation = EmailMailboxOperation.find_by!(id: params[:id], conversation_id: @conversation.id)
@@ -26,6 +36,12 @@ class Api::V1::Accounts::Conversations::MailboxOperationsController < Api::V1::A
 
   def authorize_mailbox_action
     authorize @conversation, :mailbox_action?
+  end
+
+  def ensure_mailbox_actions_enabled
+    return if Current.account.feature_enabled?('email_mailbox_actions')
+
+    render json: { error_code: 'mailbox_actions_disabled' }, status: :forbidden
   end
 
   def permitted_params
