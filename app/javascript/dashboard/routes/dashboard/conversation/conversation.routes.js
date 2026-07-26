@@ -2,6 +2,7 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import store from '../../../store';
 import ConversationView from './ConversationView.vue';
+import { MAILBOX_ROLES } from 'dashboard/helper/mailboxOperations';
 
 const CONVERSATION_PERMISSIONS = [
   'administrator',
@@ -39,6 +40,19 @@ const redirectFolderConversationIfUnavailable = async (to, _from, next) => {
       accountId: to.params.accountId,
       conversation_id: to.params.conversation_id,
     },
+  });
+};
+
+const redirectInvalidMailboxRole = (to, _from, next) => {
+  const { accountId, inbox_id: inboxId, mailbox_role: mailboxRole } = to.params;
+  if (MAILBOX_ROLES.includes(mailboxRole) && mailboxRole !== 'inbox') {
+    next();
+    return;
+  }
+
+  next({
+    name: 'inbox_dashboard',
+    params: { accountId, inbox_id: inboxId },
   });
 };
 
@@ -92,6 +106,37 @@ export default {
           inboxId: route.params.inbox_id,
         };
       },
+    },
+    {
+      path: frontendURL(
+        'accounts/:accountId/inbox/:inbox_id/mail/:mailbox_role'
+      ),
+      name: 'inbox_mailbox_role',
+      meta: {
+        permissions: CONVERSATION_PERMISSIONS,
+      },
+      component: ConversationView,
+      beforeEnter: redirectInvalidMailboxRole,
+      props: route => ({
+        inboxId: route.params.inbox_id,
+        mailboxRole: route.params.mailbox_role,
+      }),
+    },
+    {
+      path: frontendURL(
+        'accounts/:accountId/inbox/:inbox_id/mail/:mailbox_role/conversations/:conversation_id'
+      ),
+      name: 'conversation_through_mailbox_role',
+      meta: {
+        permissions: CONVERSATION_PERMISSIONS,
+      },
+      component: ConversationView,
+      beforeEnter: redirectInvalidMailboxRole,
+      props: route => ({
+        conversationId: route.params.conversation_id,
+        inboxId: route.params.inbox_id,
+        mailboxRole: route.params.mailbox_role,
+      }),
     },
     {
       path: frontendURL('accounts/:accountId/label/:label'),

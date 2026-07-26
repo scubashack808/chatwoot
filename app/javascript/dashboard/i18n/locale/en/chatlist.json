@@ -14,6 +14,13 @@
       "INPUT": "Search for People, Chats, Saved Replies .."
     },
     "FILTER_ALL": "All",
+    "MAILBOX_ROLES": {
+      "LABEL": "Mailbox views",
+      "INBOX": "Inbox",
+      "ARCHIVE": "Archive",
+      "SPAM": "Spam",
+      "TRASH": "Trash"
+    },
     "ASSIGNEE_TYPE_TABS": {
       "me": "Mine",
       "unassigned": "Unassigned",

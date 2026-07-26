@@ -179,6 +179,35 @@
       "DESCRIPTION": "Are you sure you want to delete this conversation?",
       "CONFIRM": "Delete"
     },
+    "MAILBOX": {
+      "ACTIONS": {
+        "ARCHIVE": "Archive",
+        "SPAM": "Move to spam",
+        "TRASH": "Move to Trash",
+        "RESTORE": "Restore to inbox"
+      },
+      "REQUESTED": "{action} requested",
+      "STATUS": {
+        "PENDING": "{action} queued",
+        "RUNNING": "{action} in progress",
+        "PARTIAL": "{action} partly completed ({succeeded}/{total})",
+        "FAILED": "{action} failed",
+        "CONFLICT": "{action} needs review",
+        "MIXED": "Mixed mailbox state"
+      },
+      "ERRORS": {
+        "MAILBOX_SYNC_NOT_ACTIVE": "Mailbox actions are not active for this inbox.",
+        "NO_ELIGIBLE_MESSAGES": "This conversation has no messages that can be moved.",
+        "OPERATION_IN_PROGRESS": "Another mailbox action is already in progress.",
+        "MAILBOX_ACTIONS_DISABLED": "Mailbox actions are not enabled for this account.",
+        "DEFAULT": "The mailbox action could not be started. Please try again."
+      },
+      "HARD_DELETE": {
+        "TITLE": "Move email conversation to Trash?",
+        "DESCRIPTION": "Email conversations cannot be permanently deleted. Move this conversation to Trash so it remains restorable.",
+        "CONFIRM": "Move to Trash"
+      }
+    },
     "CARD_CONTEXT_MENU": {
       "PENDING": "Mark as pending",
       "RESOLVED": "Mark as resolved",

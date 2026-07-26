@@ -377,4 +377,43 @@ describe('ActionCableConnector - Copilot Tests', () => {
       expect(mockDispatch).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('conversation mailbox operation event handlers', () => {
+    it('registers the dedicated mailbox operation event', () => {
+      expect(Object.keys(actionCable.events)).toContain(
+        'conversation.mailbox_operation_updated'
+      );
+      expect(actionCable.events['conversation.mailbox_operation_updated']).toBe(
+        actionCable.onConversationMailboxOperationUpdated
+      );
+    });
+
+    it('applies the same server payload in a second session', () => {
+      const payload = {
+        account_id: 1,
+        conversation_id: 42,
+        operation: {
+          id: 91,
+          action: 'archive',
+          status: 'succeeded',
+        },
+        mailbox_state: {
+          state: 'archive',
+          roles: ['archive'],
+          tracked_count: 1,
+        },
+      };
+
+      actionCable.onReceived({
+        event: 'conversation.mailbox_operation_updated',
+        data: payload,
+      });
+
+      expect(mockDispatch).toHaveBeenCalledWith('applyMailboxOperationUpdate', {
+        conversationId: 42,
+        mailboxOperation: payload.operation,
+        mailboxState: payload.mailbox_state,
+      });
+    });
+  });
 });

@@ -61,6 +61,16 @@ describe('#URL Helpers', () => {
         'accounts/1/inbox/2/conversations/1'
       );
     });
+    it('should preserve the server-derived mailbox view in conversation URLs', () => {
+      expect(
+        conversationUrl({
+          accountId: 1,
+          id: 1,
+          activeInbox: 2,
+          mailboxRole: 'archive',
+        })
+      ).toBe('accounts/1/inbox/2/mail/archive/conversations/1');
+    });
     it('should return correct conversation URL if label is active', () => {
       expect(
         conversationUrl({ accountId: 1, label: 'customer-support', id: 1 })
