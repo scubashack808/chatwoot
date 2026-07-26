@@ -123,6 +123,20 @@ RSpec.describe Imap::MailboxReconciliationService do
       expect(imap).not_to have_received(:examine).with('INBOX.Container')
     end
 
+    it 'writes identities while still holding the lease, so a mailbox operation cannot interleave' do
+      tracked_message('a@example.com', mailbox: 'INBOX', uid: 11)
+      place('INBOX.Archive', 5, 'a@example.com')
+      lease_held_during_write = nil
+      allow_any_instance_of(Message).to receive(:write_imap_identity!).and_wrap_original do |original, *args| # rubocop:disable RSpec/AnyInstance
+        lease_held_during_write = Redis::Alfred.get(lease_key).present?
+        original.call(*args)
+      end
+
+      reconcile
+
+      expect(lease_held_during_write).to be true
+    end
+
     it 'scans folders that carry no mailbox role, so a move outside the four roles is still found' do
       place('INBOX.Projects', 4, 'a@example.com')
       tracked_message('a@example.com')

@@ -38,11 +38,17 @@ class Imap::MailboxReconciliationService
 
   pattr_initialize [:channel!]
 
+  # The scan and the writes happen inside one lease on purpose. If the lease were released
+  # between them, a mailbox operation could move a message and rewrite its identity while this
+  # pass still held a pre-move scan, and the pass would then silently revert the user's move in
+  # Chatwoot's own records. The lease is what serializes all per-inbox mailbox work.
   def perform
     reason = blocking_reason
     return skipped(reason) if reason
 
-    reconcile(read_server)
+    Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|
+      reconcile(read_server(client, session))
+    end
   end
 
   private
@@ -57,13 +63,11 @@ class Imap::MailboxReconciliationService
     nil
   end
 
-  def read_server
-    Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|
-      Imap::MailboxScan.new(
-        client: client, session: session,
-        mailboxes: mailboxes_to_scan(session), max_messages: MAX_MESSAGES_PER_MAILBOX
-      ).perform
-    end
+  def read_server(client, session)
+    Imap::MailboxScan.new(
+      client: client, session: session,
+      mailboxes: mailboxes_to_scan(session), max_messages: MAX_MESSAGES_PER_MAILBOX
+    ).perform
   end
 
   # Every selectable folder the server lists, tagged with a mailbox role where the inbox has one
