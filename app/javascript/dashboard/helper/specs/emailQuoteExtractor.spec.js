@@ -43,7 +43,224 @@ const EMAIL_WITH_FOLLOW_UP_CONTENT = `
 <p>Regards,</p>
 `;
 
+const NEW_RAW_FIXTURE_MATRIX = [
+  {
+    client: 'Gmail',
+    kind: 'reply',
+    metadata: { subject: 'Re: Dive plan' },
+    html: `
+      <div>Fresh Gmail reply</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">On Sun, Jul 26, 2026 at 9:30 AM Pat wrote:</div>
+        <blockquote class="gmail_quote">Older Gmail reply</blockquote>
+      </div>
+    `,
+    visibleText: ['Fresh Gmail reply'],
+    hiddenText: ['Older Gmail reply'],
+    hasQuotes: true,
+  },
+  {
+    client: 'Gmail',
+    kind: 'forward with a quoted reply below',
+    metadata: { subject: 'Fwd: Dive plan' },
+    html: `
+      <div>For the dive team</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">---------- Forwarded message ---------</div>
+        <div>Forwarded Gmail body</div>
+        <blockquote>
+          <div>On Sat, Jul 25, 2026 at 8:15 AM Sam wrote:</div>
+          <div>Older reply inside the forwarded body</div>
+        </blockquote>
+      </div>
+    `,
+    visibleText: [
+      'For the dive team',
+      'Forwarded Gmail body',
+      'Older reply inside the forwarded body',
+    ],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    client: 'Outlook',
+    kind: 'reply',
+    metadata: { subject: 'RE: Charter details' },
+    html: `
+      <div>Fresh Outlook reply</div>
+      <div class="OutlookQuote">
+        <div>From: Pat Example &lt;pat@example.com&gt;</div>
+        <div>Sent: Sunday, July 26, 2026 9:30 AM</div>
+        <div>Older Outlook reply</div>
+      </div>
+    `,
+    visibleText: ['Fresh Outlook reply'],
+    hiddenText: ['Older Outlook reply'],
+    hasQuotes: true,
+  },
+  {
+    client: 'Outlook',
+    kind: 'forward',
+    metadata: { subject: 'FW: Charter details' },
+    html: `
+      <div>Please review this Outlook message.</div>
+      <div id="divRplyFwdMsg">
+        <hr>
+        <div>From: Pat Example &lt;pat@example.com&gt;</div>
+        <div>Sent: Sunday, July 26, 2026 9:30 AM</div>
+        <div>Forwarded Outlook body</div>
+      </div>
+    `,
+    visibleText: [
+      'Please review this Outlook message.',
+      'Forwarded Outlook body',
+    ],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    client: 'Apple Mail',
+    kind: 'reply',
+    metadata: { subject: 'Re: Boat time' },
+    html: `
+      <div>Fresh Apple Mail reply</div>
+      <blockquote type="cite">
+        <div>On Jul 26, 2026, at 9:30 AM, Pat wrote:</div>
+        <div>Older Apple Mail reply</div>
+      </blockquote>
+    `,
+    visibleText: ['Fresh Apple Mail reply'],
+    hiddenText: ['Older Apple Mail reply'],
+    hasQuotes: true,
+  },
+  {
+    client: 'Apple Mail',
+    kind: 'forward',
+    metadata: { subject: 'Fwd: Boat time' },
+    html: `
+      <div>For the captain</div>
+      <blockquote type="cite">
+        <div>Begin forwarded message:</div>
+        <div>Forwarded Apple Mail body</div>
+      </blockquote>
+    `,
+    visibleText: ['For the captain', 'Forwarded Apple Mail body'],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    client: 'cPanel',
+    kind: 'reply',
+    metadata: { subject: 'Re: Equipment list' },
+    html: `
+      <p>Fresh cPanel reply</p>
+      <blockquote type="cite">
+        On 07/26/2026 9:30 AM, Pat wrote:
+        <p>Older cPanel reply</p>
+      </blockquote>
+    `,
+    visibleText: ['Fresh cPanel reply'],
+    hiddenText: ['Older cPanel reply'],
+    hasQuotes: true,
+  },
+  {
+    client: 'cPanel',
+    kind: 'forward',
+    metadata: { subject: 'Fwd: Equipment list' },
+    html: `
+      <p>For the equipment team</p>
+      <div>-------- Forwarded Message --------</div>
+      <div>From: Pat Example &lt;pat@example.com&gt;</div>
+      <div>Forwarded cPanel body</div>
+    `,
+    visibleText: ['For the equipment team', 'Forwarded cPanel body'],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+];
+
+const LEGACY_QUOTE_CSS = `
+  <!-- chatwoot-bq-fix-v2 -->
+  <style>
+    blockquote { display: none !important; }
+    .gmail_quote, .gmail_attr, div[class*="gmail_quote"], div[class*="gmail_attr"] { display: none !important; }
+    div.OutlookMessageHeader, div[id*="reply_header"] { display: none !important; }
+  </style>
+`;
+
+const LEGACY_FIXTURE = {
+  metadata: { subject: 'Re: Historical reservation' },
+  html: `
+    ${LEGACY_QUOTE_CSS}
+    <div>Fresh historical reply</div>
+    <div class="gmail_quote gmail_quote_container">
+      <div class="gmail_attr">On Sat, Jul 25, 2026 at 8:15 AM Pat wrote:</div>
+      <blockquote class="gmail_quote">Historical quoted reply</blockquote>
+    </div>
+  `,
+};
+
 describe('EmailQuoteExtractor', () => {
+  describe('new raw fixture matrix', () => {
+    it.each(NEW_RAW_FIXTURE_MATRIX)(
+      '$client $kind renders the accepted default body',
+      fixture => {
+        const renderedHtml = EmailQuoteExtractor.extractQuotes(
+          fixture.html,
+          fixture.metadata
+        );
+        const container = document.createElement('div');
+        container.innerHTML = renderedHtml;
+
+        fixture.visibleText.forEach(text => {
+          expect(container.textContent).toContain(text);
+        });
+        fixture.hiddenText.forEach(text => {
+          expect(container.textContent).not.toContain(text);
+        });
+        expect(
+          EmailQuoteExtractor.hasQuotes(fixture.html, fixture.metadata)
+        ).toBe(fixture.hasQuotes);
+      }
+    );
+  });
+
+  describe('historical legacy fixture', () => {
+    it('strips the known legacy CSS marker and style at render time', () => {
+      const renderableHtml = EmailQuoteExtractor.prepareForRender(
+        LEGACY_FIXTURE.html
+      );
+
+      expect(renderableHtml).not.toContain('chatwoot-bq-fix-v2');
+      expect(renderableHtml).not.toContain('display: none !important');
+      expect(renderableHtml).toContain('Fresh historical reply');
+      expect(renderableHtml).toContain('Historical quoted reply');
+    });
+
+    it('collapses the historical quoted reply after render-time stripping', () => {
+      const renderableHtml = EmailQuoteExtractor.prepareForRender(
+        LEGACY_FIXTURE.html
+      );
+      const renderedHtml = EmailQuoteExtractor.extractQuotes(
+        renderableHtml,
+        LEGACY_FIXTURE.metadata
+      );
+
+      expect(renderedHtml).toContain('Fresh historical reply');
+      expect(renderedHtml).not.toContain('Historical quoted reply');
+      expect(
+        EmailQuoteExtractor.hasQuotes(renderableHtml, LEGACY_FIXTURE.metadata)
+      ).toBe(true);
+    });
+
+    it('does not remove unmarked style elements from historical bodies', () => {
+      const html =
+        '<style>.reservation { color: blue; }</style><p>Reservation</p>';
+
+      expect(EmailQuoteExtractor.prepareForRender(html)).toBe(html);
+    });
+  });
+
   it('removes blockquote-based quotes from the email body', () => {
     const cleanedHtml = EmailQuoteExtractor.extractQuotes(SAMPLE_EMAIL_HTML);
 
