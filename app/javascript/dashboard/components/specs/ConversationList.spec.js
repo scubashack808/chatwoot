@@ -37,11 +37,7 @@ const translations = {
 
 const toTimestamp = value => new Date(value).getTime() / 1000;
 
-const conversation = ({
-  id,
-  lastActivityAt,
-  createdAt = lastActivityAt,
-}) => ({
+const conversation = ({ id, lastActivityAt, createdAt = lastActivityAt }) => ({
   id,
   last_activity_at: toTimestamp(lastActivityAt),
   timestamp: toTimestamp(lastActivityAt),

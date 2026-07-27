@@ -6,6 +6,7 @@ const DAY_IN_MILLI_SECONDS = HOUR_IN_MILLI_SECONDS * 24;
 import {
   dynamicTime,
   dateFormat,
+  relativeDayTimestamp,
   shortTimestamp,
 } from 'shared/helpers/timeHelper';
 
@@ -28,11 +29,22 @@ export default {
       type: [String, Number],
       default: '',
     },
+    displayTimestamp: {
+      type: [String, Date, Number],
+      default: '',
+    },
+    showCalendarTimestamp: {
+      type: Boolean,
+      default: false,
+    },
   },
   data() {
     return {
       lastActivityAtTimeAgo: dynamicTime(this.lastActivityTimestamp),
       createdAtTimeAgo: dynamicTime(this.createdAtTimestamp),
+      displayTimestampTimeAgo: dynamicTime(
+        this.displayTimestamp || this.lastActivityTimestamp
+      ),
       timer: null,
     };
   },
@@ -42,6 +54,18 @@ export default {
     },
     createdAtTime() {
       return shortTimestamp(this.createdAtTimeAgo);
+    },
+    effectiveDisplayTimestamp() {
+      return this.displayTimestamp || this.lastActivityTimestamp;
+    },
+    calendarTimestamp() {
+      return relativeDayTimestamp(
+        this.effectiveDisplayTimestamp,
+        this.$t('CHAT_LIST.TIME_BUCKETS.YESTERDAY')
+      );
+    },
+    displayTime() {
+      return shortTimestamp(this.displayTimestampTimeAgo);
     },
     createdAt() {
       const createdTimeDiff = Date.now() - this.createdAtTimestamp * 1000;
@@ -74,14 +98,25 @@ export default {
   watch: {
     lastActivityTimestamp() {
       this.lastActivityAtTimeAgo = dynamicTime(this.lastActivityTimestamp);
+      if (!this.displayTimestamp) {
+        this.displayTimestampTimeAgo = dynamicTime(this.lastActivityTimestamp);
+      }
     },
     createdAtTimestamp() {
       this.createdAtTimeAgo = dynamicTime(this.createdAtTimestamp);
+    },
+    displayTimestamp() {
+      this.displayTimestampTimeAgo = dynamicTime(
+        this.effectiveDisplayTimestamp
+      );
     },
     conversationId() {
       // Reset display values and timer when the row is recycled to a different conversation.
       this.lastActivityAtTimeAgo = dynamicTime(this.lastActivityTimestamp);
       this.createdAtTimeAgo = dynamicTime(this.createdAtTimestamp);
+      this.displayTimestampTimeAgo = dynamicTime(
+        this.effectiveDisplayTimestamp
+      );
       if (this.isAutoRefreshEnabled) {
         clearTimeout(this.timer);
         this.createTimer();
@@ -101,11 +136,14 @@ export default {
       this.timer = setTimeout(() => {
         this.lastActivityAtTimeAgo = dynamicTime(this.lastActivityTimestamp);
         this.createdAtTimeAgo = dynamicTime(this.createdAtTimestamp);
+        this.displayTimestampTimeAgo = dynamicTime(
+          this.effectiveDisplayTimestamp
+        );
         this.createTimer();
       }, this.refreshTime());
     },
     refreshTime() {
-      const timeDiff = Date.now() - this.lastActivityTimestamp * 1000;
+      const timeDiff = Date.now() - this.effectiveDisplayTimestamp * 1000;
       if (timeDiff > DAY_IN_MILLI_SECONDS) {
         return DAY_IN_MILLI_SECONDS;
       }
@@ -127,6 +165,9 @@ export default {
     }"
     class="ml-auto leading-4 text-xxs text-n-slate-10 hover:text-n-slate-11"
   >
-    <span>{{ `${createdAtTime} • ${lastActivityTime}` }}</span>
+    <span v-if="showCalendarTimestamp">
+      {{ `${calendarTimestamp} • ${displayTime}` }}
+    </span>
+    <span v-else>{{ `${createdAtTime} • ${lastActivityTime}` }}</span>
   </div>
 </template>

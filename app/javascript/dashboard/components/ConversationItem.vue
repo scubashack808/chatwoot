@@ -18,6 +18,10 @@ const props = defineProps({
   showAssignee: { type: Boolean, default: false },
   showExpanded: { type: Boolean, default: false },
   mailboxRole: { type: String, default: '' },
+  displayTimestamp: {
+    type: [String, Date, Number],
+    default: '',
+  },
 });
 
 const router = useRouter();
@@ -201,6 +205,7 @@ const onMailboxAction = action => {
     :show-assignee="showAssigneeForExpandedCard"
     :show-inbox-name="showInboxName"
     :is-inbox-view="isInboxView"
+    :display-timestamp="displayTimestamp"
     @select-conversation="onExpandedSelect"
     @de-select-conversation="onExpandedSelect"
     @click="onCardClick"
@@ -218,6 +223,7 @@ const onMailboxAction = action => {
     :is-active-chat="isActiveChat"
     :show-assignee="showAssignee"
     :show-inbox-name="showInboxName"
+    :display-timestamp="displayTimestamp"
     @click="onCardClick"
     @contextmenu="openContextMenu"
     @select-conversation="selectConversation"

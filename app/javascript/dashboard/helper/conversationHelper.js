@@ -1,3 +1,5 @@
+import { MESSAGE_TYPE } from 'shared/constants/messages';
+
 /**
  * Determines the last non-activity message between store and API messages.
  * @param {Object} messageInStore - The last non-activity message from the store.
@@ -68,6 +70,40 @@ export const getLastMessage = m => {
     lastNonActivityMessageFromAPI
   );
 };
+
+/**
+ * Retrieves the latest public non-activity message available from the list
+ * payload and any newer messages received by the store.
+ * @param {Object} conversation - Conversation list payload.
+ * @returns {Object|null} Latest public non-activity message.
+ */
+export const getLastPublicNonActivityMessage = conversation => {
+  const payloadMessage = conversation.last_public_non_activity_message || null;
+
+  return (conversation.messages || []).reduce((latestMessage, message) => {
+    if (message.private || message.message_type === MESSAGE_TYPE.ACTIVITY) {
+      return latestMessage;
+    }
+
+    if (
+      !latestMessage ||
+      Number(message.created_at) >= Number(latestMessage.created_at)
+    ) {
+      return message;
+    }
+
+    return latestMessage;
+  }, payloadMessage);
+};
+
+/**
+ * Reports whether the latest public non-activity message is outgoing.
+ * @param {Object} conversation - Conversation list payload.
+ * @returns {boolean} Whether an agent most recently replied publicly.
+ */
+export const isConversationReplied = conversation =>
+  getLastPublicNonActivityMessage(conversation)?.message_type ===
+  MESSAGE_TYPE.OUTGOING;
 
 /**
  * Filters messages that have been read by the agent.

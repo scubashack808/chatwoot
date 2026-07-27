@@ -1,6 +1,9 @@
 <script setup>
 import { computed, useTemplateRef } from 'vue';
-import { getLastMessage } from 'dashboard/helper/conversationHelper';
+import {
+  getLastMessage,
+  isConversationReplied,
+} from 'dashboard/helper/conversationHelper';
 import CardAvatar from './CardAvatar.vue';
 import CardContent from './CardContent.vue';
 import CardLabels from './CardLabelsV5.vue';
@@ -24,6 +27,10 @@ const props = defineProps({
   showAssignee: { type: Boolean, default: false },
   showInboxName: { type: Boolean, default: false },
   isInboxView: { type: Boolean, default: false },
+  displayTimestamp: {
+    type: [String, Date, Number],
+    default: '',
+  },
 });
 
 const emit = defineEmits([
@@ -34,6 +41,7 @@ const emit = defineEmits([
 ]);
 
 const lastMessageInChat = computed(() => getLastMessage(props.chat));
+const hasReplied = computed(() => isConversationReplied(props.chat));
 const showLabelsSection = computed(() => props.chat.labels?.length > 0);
 
 const voiceCallData = computed(() => {
@@ -187,12 +195,24 @@ const selectedModel = computed({
         <SLACardLabel ref="slaCardLabel" :chat="chat" />
       </div>
 
-      <div class="flex-shrink-0 w-[4.375rem] text-end">
+      <div
+        class="flex-shrink-0 w-28 flex items-center justify-end gap-0.5 text-end"
+      >
+        <Icon
+          v-if="hasReplied"
+          v-tooltip.top="$t('CHAT_LIST.REPLIED')"
+          data-testid="replied-marker"
+          :aria-label="$t('CHAT_LIST.REPLIED')"
+          icon="i-lucide-check"
+          class="flex-shrink-0 size-3 text-n-teal-11"
+        />
         <TimeAgo
           :conversation-id="chat.id"
           :last-activity-timestamp="chat.timestamp"
           :created-at-timestamp="chat.created_at"
-          class="font-440 !text-xs text-n-slate-11"
+          :display-timestamp="displayTimestamp"
+          show-calendar-timestamp
+          class="font-440 !ml-0 !text-xs text-n-slate-11"
         />
       </div>
     </div>
