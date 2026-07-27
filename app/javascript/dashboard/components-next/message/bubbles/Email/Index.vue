@@ -41,10 +41,13 @@ const originalEmailText = computed(() => {
   return sanitizeTextForRender(text);
 });
 
-const originalEmailHtml = computed(
-  () =>
+const emailMetadata = computed(() => contentAttributes?.value?.email || {});
+
+const originalEmailHtml = computed(() =>
+  EmailQuoteExtractor.prepareForRender(
     contentAttributes?.value?.email?.htmlContent?.full ||
-    originalEmailText.value
+      originalEmailText.value
+  )
 );
 
 const hasEmailContent = computed(() => {
@@ -82,11 +85,11 @@ const fullHTML = computed(() => {
 });
 
 const unquotedHTML = computed(() =>
-  EmailQuoteExtractor.extractQuotes(fullHTML.value)
+  EmailQuoteExtractor.extractQuotes(fullHTML.value, emailMetadata.value)
 );
 
 const hasQuotedMessage = computed(() =>
-  EmailQuoteExtractor.hasQuotes(fullHTML.value)
+  EmailQuoteExtractor.hasQuotes(fullHTML.value, emailMetadata.value)
 );
 
 // Ensure unique keys for <Letter> when toggling between original and translated views.

@@ -14,6 +14,15 @@ const QUOTE_INDICATORS = [
 
 const BLOCKQUOTE_FALLBACK_SELECTOR = 'blockquote';
 
+const LEGACY_QUOTE_CSS_PATTERN =
+  /<!--\s*chatwoot-bq-fix-v2\s*-->\s*<style\b[^>]*>[\s\S]*?<\/style\s*>/gi;
+
+const FORWARDED_SUBJECT_PATTERN = /^\s*fwd?\s*:/i;
+const FORWARDED_BODY_PATTERNS = [
+  /-{2,}\s*Forwarded message\s*-{2,}/i,
+  /Begin forwarded message:/i,
+];
+
 // Regex patterns for quote identification
 const QUOTE_PATTERNS = [
   /On .* wrote:/i,
@@ -26,12 +35,17 @@ export class EmailQuoteExtractor {
   /**
    * Remove quotes from email HTML and return cleaned HTML
    * @param {string} htmlContent - Full HTML content of the email
+   * @param {Object} emailMetadata - Stored email metadata used to identify forwards
    * @returns {string} HTML content with quotes removed
    */
-  static extractQuotes(htmlContent) {
+  static extractQuotes(htmlContent, emailMetadata = {}) {
     // Create a temporary DOM element to parse HTML
     const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = DOMPurify.sanitize(htmlContent);
+    tempDiv.innerHTML = DOMPurify.sanitize(this.prepareForRender(htmlContent));
+
+    if (this.isForwardedEmail(tempDiv, emailMetadata)) {
+      return tempDiv.innerHTML;
+    }
 
     // Remove elements matching class selectors
     QUOTE_INDICATORS.forEach(selector => {
@@ -54,11 +68,16 @@ export class EmailQuoteExtractor {
   /**
    * Check if HTML content contains any quotes
    * @param {string} htmlContent - Full HTML content of the email
+   * @param {Object} emailMetadata - Stored email metadata used to identify forwards
    * @returns {boolean} True if quotes are detected, false otherwise
    */
-  static hasQuotes(htmlContent) {
+  static hasQuotes(htmlContent, emailMetadata = {}) {
     const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = DOMPurify.sanitize(htmlContent);
+    tempDiv.innerHTML = DOMPurify.sanitize(this.prepareForRender(htmlContent));
+
+    if (this.isForwardedEmail(tempDiv, emailMetadata)) {
+      return false;
+    }
 
     // Check for class-based quotes
     // eslint-disable-next-line no-restricted-syntax
@@ -75,6 +94,34 @@ export class EmailQuoteExtractor {
     // Check for text-based quotes
     const textNodeQuotes = this.findTextNodeQuotes(tempDiv);
     return textNodeQuotes.length > 0;
+  }
+
+  /**
+   * Remove the known legacy quote-hiding style block before rendering.
+   * @param {string} htmlContent - Full HTML content of the email
+   * @returns {string} HTML content without the legacy injected style
+   */
+  static prepareForRender(htmlContent) {
+    return (htmlContent || '').replace(LEGACY_QUOTE_CSS_PATTERN, '');
+  }
+
+  /**
+   * Determine whether the email body is forwarded content rather than a reply quote.
+   * @param {Element} rootElement - Parsed email body
+   * @param {Object} emailMetadata - Stored email metadata
+   * @returns {boolean} True if the email is a forward
+   */
+  static isForwardedEmail(rootElement, emailMetadata) {
+    if (FORWARDED_SUBJECT_PATTERN.test(emailMetadata?.subject || '')) {
+      return true;
+    }
+
+    if (emailMetadata?.inReplyTo) {
+      return false;
+    }
+
+    const body = rootElement.textContent || '';
+    return FORWARDED_BODY_PATTERNS.some(pattern => pattern.test(body));
   }
 
   /**
