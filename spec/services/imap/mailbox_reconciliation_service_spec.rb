@@ -88,7 +88,22 @@ RSpec.describe Imap::MailboxReconciliationService do
     end
   end
 
-  after { Redis::Alfred.delete(lease_key) }
+  def full_scan_key
+    format(Redis::RedisKeys::IMAP_FULL_SCAN_AT, inbox_id: inbox.id)
+  end
+
+  # The first cycle for an inbox always enumerates, because there is no trustworthy picture to
+  # probe against yet. Recording a recent enumeration is what puts the inbox into the steady state
+  # the probe exists for.
+  def already_enumerated
+    Redis::Alfred.set(full_scan_key, Time.current.to_i)
+  end
+
+  after do
+    Redis::Alfred.delete(lease_key)
+    Redis::Alfred.delete(full_scan_key)
+    Redis::Alfred.delete(format(Redis::RedisKeys::IMAP_RECONCILED_AT, inbox_id: inbox.id))
+  end
 
   describe 'reading the server' do
     it 'opens every scanned mailbox read only so reconciliation cannot mutate the provider' do
@@ -558,6 +573,156 @@ RSpec.describe Imap::MailboxReconciliationService do
       end
 
       expect(counts).to eq [2, 2]
+    end
+  end
+
+  # Row 9 and row 10. The probe exists so an ordinary cycle stops before enumerating anything.
+  #
+  # `list('', '*')` is the honest discriminator between the two paths: the full scan must call it
+  # to discover folders, and the probe never does because it only visits mailboxes Chatwoot has
+  # already recorded. Asserting on it therefore proves the enumeration did not happen, rather than
+  # proving something about how this test is wired.
+  describe 'the probe gate' do
+    context 'when the server still agrees with every stored identity (row 9)' do
+      before do
+        place('INBOX', 11, 'a@example.com')
+        place('INBOX.Archive', 5, 'b@example.com')
+        tracked_message('a@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 11)
+        tracked_message('b@example.com', mailbox: 'INBOX.Archive', uidvalidity: 778, uid: 5, roles: ['archive'])
+      end
+
+      it 'enumerates on the very first cycle and not on the next one' do
+        reconcile
+        reconcile
+
+        expect(imap).to have_received(:list).with('', '*').once
+      end
+
+      it 'never enumerates the server once the inbox has been enumerated recently' do
+        already_enumerated
+
+        reconcile
+
+        expect(imap).not_to have_received(:list)
+      end
+
+      it 'reports that it did not scan, and stays conclusive' do
+        already_enumerated
+
+        report = reconcile
+
+        expect(report).to include(scanned: false, conclusive: true, unchanged: 2)
+      end
+
+      it 'reads only the mailboxes that hold tracked identities, not every folder' do
+        already_enumerated
+
+        reconcile
+
+        expect(imap).to have_received(:examine).with('INBOX').at_least(:once)
+        expect(imap).to have_received(:examine).with('INBOX.Archive').at_least(:once)
+        expect(imap).not_to have_received(:examine).with('INBOX.Junk')
+        expect(imap).not_to have_received(:examine).with('INBOX.Projects')
+      end
+
+      it 'enumerates again once the interval has elapsed, so a new copy cannot hide forever' do
+        Redis::Alfred.set(full_scan_key, (Time.current - described_class::FULL_SCAN_INTERVAL - 1.minute).to_i)
+
+        reconcile
+
+        expect(imap).to have_received(:list).with('', '*')
+      end
+
+      it 'leaves every stored identity exactly as it was' do
+        already_enumerated
+        before_identity = Message.find_by(source_id: 'a@example.com').imap_identity
+
+        reconcile
+
+        after_identity = Message.find_by(source_id: 'a@example.com').imap_identity
+        expect(after_identity.version).to eq before_identity.version
+        expect(after_identity.locations).to eq before_identity.locations
+        expect(after_identity.sync_state).to eq Imap::MessageIdentity::SYNC_STATE_VERIFIED
+      end
+    end
+
+    context 'when something has actually moved (row 10)' do
+      it 'escalates and resolves a move into a role folder' do
+        place('INBOX.Archive', 5, 'a@example.com')
+        tracked_message('a@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 11)
+
+        report = reconcile
+
+        expect(imap).to have_received(:list).with('', '*')
+        expect(report).to include(scanned: true, moved: 1)
+        expect(Message.find_by(source_id: 'a@example.com').imap_identity.locations.first)
+          .to include('mailbox' => 'INBOX.Archive', 'uid' => 5)
+      end
+
+      it 'resolves a move into a custom folder without ever tombstoning it' do
+        place('INBOX.Projects', 9, 'a@example.com')
+        tracked_message('a@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 11)
+
+        report = reconcile
+
+        expect(report).to include(scanned: true, marked_missing: 0, tombstoned: 0)
+        expect(tracker.deleted?('a@example.com')).to be false
+        expect(Message.find_by(source_id: 'a@example.com').imap_identity.sync_state)
+          .to eq Imap::MessageIdentity::SYNC_STATE_VERIFIED
+      end
+
+      it 'escalates on a UIDVALIDITY change rather than reading it as mass deletion' do
+        place('INBOX', 11, 'a@example.com')
+        tracked_message('a@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 11)
+        server['INBOX'][:uidvalidity] = 999
+
+        report = reconcile
+
+        expect(imap).to have_received(:list).with('', '*')
+        expect(report).to include(scanned: true, marked_missing: 0)
+        expect(Message.find_by(source_id: 'a@example.com').imap_identity.sync_state)
+          .to eq Imap::MessageIdentity::SYNC_STATE_VERIFIED
+      end
+
+      it 'still needs two cycles to conclude a deletion' do
+        tracked_message('a@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 11)
+
+        first = reconcile
+        expect(first).to include(scanned: true, absent_once: 1, marked_missing: 0)
+        expect(tracker.deleted?('a@example.com')).to be false
+
+        second = reconcile
+        expect(second).to include(marked_missing: 1)
+        expect(tracker.deleted?('a@example.com')).to be true
+      end
+    end
+
+    # Without this, one deleted message makes its stored UID vanish on every future probe, so every
+    # subsequent cycle would escalate to a full scan forever.
+    context 'when a message has already been concluded missing' do
+      before do
+        place('INBOX', 11, 'a@example.com')
+        tracked_message('a@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 11)
+        message = tracked_message('gone@example.com', mailbox: 'INBOX', uidvalidity: 777, uid: 99)
+        message.write_imap_identity!(message.imap_identity.with_sync_state('missing'))
+      end
+
+      it 'settles instead of escalating forever' do
+        already_enumerated
+
+        report = reconcile
+
+        expect(imap).not_to have_received(:list)
+        expect(report).to include(scanned: false)
+      end
+
+      it 'still refreshes the tombstone, because that TTL is shorter than the absence' do
+        already_enumerated
+
+        reconcile
+
+        expect(tracker.deleted?('gone@example.com')).to be true
+      end
     end
   end
 end

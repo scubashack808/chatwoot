@@ -38,20 +38,90 @@ class Imap::MailboxReconciliationService
 
   pattr_initialize [:channel!]
 
-  # The scan and the writes happen inside one lease on purpose. If the lease were released
-  # between them, a mailbox operation could move a message and rewrite its identity while this
-  # pass still held a pre-move scan, and the pass would then silently revert the user's move in
-  # Chatwoot's own records. The lease is what serializes all per-inbox mailbox work.
+  # The probe, the scan and the writes all happen inside one lease on purpose. If the lease were
+  # released between them, a mailbox operation could move a message and rewrite its identity while
+  # this pass still held a pre-move view, and the pass would then silently revert the user's move
+  # in Chatwoot's own records. The lease is what serializes all per-inbox mailbox work.
+  #
+  # How long a cycle may rely on the probe alone before enumerating again. The probe detects a
+  # tracked message LEAVING a location it was recorded in. It cannot see a copy APPEARING somewhere
+  # new, because nothing it asks about covers a mailbox Chatwoot has no identity in: a Gmail label
+  # added to an existing message, or a plain IMAP COPY, leaves the original exactly where it was.
+  # Only enumeration finds those, so enumeration still happens on this interval regardless.
+  FULL_SCAN_INTERVAL = 15.minutes
+
+  # An ordinary cycle stops at the probe. Full enumeration is what makes a conclusion of absence
+  # honest and is the only thing that sees a new copy appear, but neither is needed on a cycle where
+  # every tracked message is still exactly where Chatwoot left it.
+  #
+  # The result is that a move or a delete is reflected within a cycle, while a copy or a label is
+  # reflected within FULL_SCAN_INTERVAL, which is no slower than enumerating on every cycle was.
   def perform
     reason = blocking_reason
-    return skipped(reason) if reason
+    return Imap::ReconciliationReport.skipped(inbox_id: channel.inbox.id, reason: reason) if reason
 
     Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|
-      reconcile(read_server(client, session))
+      next scan_and_reconcile(client, session, nil) if full_scan_due?
+
+      probe = probe_server(client, session)
+      probe.settled? ? settled(probe) : scan_and_reconcile(client, session, probe)
     end
   end
 
   private
+
+  def scan_and_reconcile(client, session, probe)
+    report = reconcile(read_server(client, session), probe)
+    full_scan_clock.record
+    report
+  end
+
+  # An inbox that has never been enumerated has no trustworthy picture to probe against, so the
+  # first cycle always enumerates.
+  def full_scan_due?
+    full_scan_clock.due?(FULL_SCAN_INTERVAL)
+  end
+
+  def full_scan_clock
+    @full_scan_clock ||= Imap::CycleClock.new(inbox: channel.inbox, key_template: Redis::RedisKeys::IMAP_FULL_SCAN_AT)
+  end
+
+  def probe_server(client, session)
+    Imap::MailboxProbe.new(client: client, session: session, locations: tracked.probe_locations).perform
+  end
+
+  def tracked
+    @tracked ||= Imap::TrackedIdentities.new(inbox: channel.inbox)
+  end
+
+  # Nothing moved, so no identity changes and no scan happens. The one thing a settled cycle still
+  # owes is refreshing the tombstones of messages already concluded missing: that TTL is two days
+  # and a message deleted on the provider stays deleted for very much longer than that.
+  def settled(probe)
+    tombstones = tracked.missing_source_ids
+    deleted_message_tracker.record(tombstones) if tombstones.any?
+
+    Imap::ReconciliationReport.settled(inbox_id: channel.inbox.id, probe: probe,
+                                       tombstoned: tombstones.length, recovered: promote_recovered)
+  end
+
+  # A settled probe found every tracked identity exactly where it was recorded, which includes any
+  # that a previous cycle had written off as stale. That is a recovery and it has to reset the
+  # streak, or one transient IMAP failure would leave a live message one cycle away from being
+  # marked missing for as long as the probe keeps settling.
+  def promote_recovered
+    ids = tracked.stale_ids
+    return 0 if ids.blank?
+
+    Message.where(id: ids).find_each do |message|
+      identity = message.imap_identity
+      next if identity.nil?
+
+      message.write_imap_identity!(identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_VERIFIED))
+    end
+
+    ids.length
+  end
 
   # Reconciliation is dark twice over: the account feature flag and the per-inbox mode. `observe`
   # is enough, because nothing here mutates the provider.
@@ -93,8 +163,8 @@ class Imap::MailboxReconciliationService
     resolved.to_h.merge(Imap::MailboxSyncConfig::RESTORE_TARGET => 'inbox')
   end
 
-  def reconcile(scan)
-    report = empty_report(scan)
+  def reconcile(scan, probe)
+    report = Imap::ReconciliationReport.for_scan(inbox_id: channel.inbox.id, scan: scan, probe: probe)
     tombstones = []
 
     candidates.find_each(batch_size: CANDIDATE_BATCH_SIZE) do |message|
@@ -194,19 +264,5 @@ class Imap::MailboxReconciliationService
 
   def deleted_message_tracker
     @deleted_message_tracker ||= Imap::DeletedMessageTracker.new(inbox: channel.inbox)
-  end
-
-  def skipped(reason)
-    { status: 'skipped', reason: reason, inbox_id: channel.inbox.id }
-  end
-
-  def empty_report(scan)
-    {
-      status: 'completed', reason: nil, inbox_id: channel.inbox.id,
-      mailboxes_scanned: scan.mailboxes, conclusive: scan.conclusive?,
-      candidates: 0, untracked: 0, unchanged: 0, moved: 0, uidvalidity_resolved: 0,
-      recovered: 0, absent_once: 0, marked_missing: 0, still_missing: 0,
-      inconclusive: 0, tombstoned: 0
-    }
   end
 end
