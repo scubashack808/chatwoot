@@ -9,6 +9,11 @@ class Inboxes::FetchImapEmailInboxesJob < ApplicationJob
 
       ::Inboxes::FetchImapEmailsJob.perform_later(inbox.channel)
       ::Inboxes::ReconcileImapMailboxJob.perform_later(inbox.channel) if should_reconcile?(inbox)
+      # Sent synchronisation rides this one existing trigger rather than adding a second scheduler.
+      # It is a separate job so a Sent failure cannot break ingestion, and it takes the same
+      # per-inbox lease, so the jobs on this fan-out defer to each other instead of opening extra
+      # connections.
+      ::Inboxes::SyncImapSentJob.perform_later(inbox.channel)
     end
   end
 

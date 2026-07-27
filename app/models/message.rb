@@ -184,6 +184,30 @@ class Message < ApplicationRecord
     self
   end
 
+  # Sent-synchronisation state for an outgoing message. This is deliberately not the same fact as
+  # message.status: SMTP already said whether delivery succeeded, and a Sent-sync failure must
+  # never be re-reported as a delivery failure.
+  def imap_sent_sync
+    Imap::SentSyncState.parse(external_source_ids&.dig(Imap::MessageIdentity::NAMESPACE, Imap::SentSyncState::KEY))
+  end
+
+  # Writes the Sent-sync state, and the identity alongside it once the server copy has been
+  # located, in one row lock and one callback-free update. Same reasoning as write_imap_identity!
+  # above: dispatch_update_event would push internal synchronisation state to contacts, webhooks,
+  # bots and CRM processors.
+  def write_imap_sent_sync!(state, identity: nil)
+    with_lock do
+      namespace = identity ? identity.to_h : (external_source_ids || {})[Imap::MessageIdentity::NAMESPACE] || {}
+      merged = (external_source_ids || {}).merge(
+        Imap::MessageIdentity::NAMESPACE => namespace.merge(Imap::SentSyncState::KEY => state.to_h)
+      )
+      # rubocop:disable Rails/SkipsModelValidations
+      update_columns(external_source_ids: merged)
+      # rubocop:enable Rails/SkipsModelValidations
+    end
+    self
+  end
+
   def conversation_push_event_data
     {
       assignee_id: conversation.assignee_id,

@@ -1,5 +1,6 @@
 export const MAILBOX_ROLES = Object.freeze([
   'inbox',
+  'sent',
   'archive',
   'spam',
   'trash',

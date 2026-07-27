@@ -65,4 +65,27 @@ RSpec.describe Inboxes::FetchImapEmailInboxesJob do
       described_class.perform_now
     end
   end
+
+  # Plan section 9's rule is the pattern for all mail work in this stack: one scheduler, the
+  # existing */1 trigger, the same per-inbox lease. Sent sync rides this fan-out as its own
+  # isolated job, so a Sent failure cannot break ingestion and no second cron entry is added.
+  context 'with Sent synchronization' do
+    it 'enqueues Sent sync from the same fan-out, for the same eligible channels' do
+      allow(Inboxes::FetchImapEmailsJob).to receive(:perform_later)
+      expect(Inboxes::SyncImapSentJob).to receive(:perform_later).with(imap_email_channel).once
+      expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later).with(imap_email_channel_suspended)
+      expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later).with(disabled_imap_channel)
+      expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later).with(reauth_required_channel)
+
+      described_class.perform_now
+    end
+
+    it 'adds no second scheduler entry: the IMAP trigger set is unchanged from base' do
+      schedule = YAML.load_file(Rails.root.join('config/schedule.yml'))
+      imap_triggers = schedule.select { |_name, entry| entry['class'].to_s.start_with?('Inboxes::') }
+
+      expect(imap_triggers.keys).to eq(['trigger_imap_email_inboxes_job'])
+      expect(imap_triggers.values.map { |entry| entry['cron'] }).to eq(['*/1 * * * *'])
+    end
+  end
 end

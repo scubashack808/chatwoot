@@ -1,7 +1,9 @@
 # Applies one mailbox-role EXISTS predicate to a conversation relation before sorting and
 # pagination.
 class Imap::MailboxRoleFilter
-  MAILBOX_ROLES = %w[inbox archive trash spam].freeze
+  INCOMING_ROLES = %w[inbox archive trash spam].freeze
+  SENT_ROLE = 'sent'.freeze
+  MAILBOX_ROLES = (INCOMING_ROLES + [SENT_ROLE]).freeze
 
   pattr_initialize [:conversations!, :role!, :account!]
 
@@ -9,15 +11,36 @@ class Imap::MailboxRoleFilter
     return conversations if role.blank? || !account.feature_enabled?('email_mailbox_actions')
     return conversations.none unless MAILBOX_ROLES.include?(role)
 
-    messages = Message.unscoped
-                      .where('messages.conversation_id = conversations.id')
-                      .where(message_type: Message.message_types[:incoming])
-                      .where(mailbox_role_condition)
-                      .select(1)
-    conversations.where(messages.arel.exists)
+    conversations.where(exists_predicate)
   end
 
   private
+
+  def exists_predicate
+    role == SENT_ROLE ? sent_messages.arel.exists : incoming_messages.arel.exists
+  end
+
+  def incoming_messages
+    Message.unscoped
+           .where('messages.conversation_id = conversations.id')
+           .where(message_type: Message.message_types[:incoming])
+           .where(mailbox_role_condition)
+           .select(1)
+  end
+
+  # M07 keeps the meaning the deployed Sent view always had, conversation-centric, and clarifies
+  # it: a conversation is in Sent when it holds an outgoing message that actually went out as mail.
+  # That covers a Chatwoot send and a reply written in another client that Imap::SentInboundImport
+  # threaded back in, and neither one waits for Sent-sync to have completed. It reads no message
+  # identity at all, which is what makes Inbox membership and Sent membership independent by
+  # construction rather than by careful bookkeeping.
+  def sent_messages
+    Message.unscoped
+           .where('messages.conversation_id = conversations.id')
+           .where(message_type: Message.message_types[:outgoing], private: false)
+           .where.not(source_id: nil)
+           .select(1)
+  end
 
   def mailbox_role_condition
     tracked = <<~SQL.squish

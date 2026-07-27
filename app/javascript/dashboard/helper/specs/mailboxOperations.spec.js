@@ -10,7 +10,13 @@ import {
 describe('mailboxOperations', () => {
   describe('MAILBOX_ROLES', () => {
     it('exposes only the server-backed views and retires Drafts', () => {
-      expect(MAILBOX_ROLES).toEqual(['inbox', 'archive', 'spam', 'trash']);
+      expect(MAILBOX_ROLES).toEqual([
+        'inbox',
+        'sent',
+        'archive',
+        'spam',
+        'trash',
+      ]);
       expect(MAILBOX_ROLES).not.toContain('drafts');
     });
   });
