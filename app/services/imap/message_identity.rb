@@ -14,8 +14,14 @@
 class Imap::MessageIdentity
   NAMESPACE = 'imap'.freeze
 
+  # verified : the last server read found the message where these coordinates say it is.
+  # stale    : one conclusive server read did not find it. Nothing derived changes on this state;
+  #            it exists so that a second consecutive confirmed absence, and only a second, can
+  #            promote to missing.
+  # missing  : the provider no longer holds this message.
   SYNC_STATE_VERIFIED = 'verified'.freeze
   SYNC_STATE_STALE = 'stale'.freeze
+  SYNC_STATE_MISSING = 'missing'.freeze
 
   attr_reader :version, :provider_id, :sync_state, :last_verified_at, :locations
 
@@ -104,6 +110,27 @@ class Imap::MessageIdentity
   def moved_to(mailbox:, uidvalidity:, uid:, roles: [], source_mailbox: self.mailbox)
     replacement = self.class.location_for(mailbox: mailbox, uidvalidity: uidvalidity, uid: uid, roles: roles)
     update_location(replacement, provider_id: nil, replaces: source_mailbox)
+  end
+
+  # Records what the latest server read said about whether this message is still there, without
+  # touching the coordinates or the monotonic version. An observation is not a location change, so
+  # an operation frozen against this identity stays valid. last_verified_at is deliberately left
+  # alone: it keeps meaning "when these coordinates were last confirmed", which is exactly the
+  # thing a stale or missing identity no longer has.
+  def with_sync_state(state)
+    return self if sync_state == state
+
+    self.class.new(version: version, provider_id: provider_id, sync_state: state,
+                   last_verified_at: last_verified_at, locations: locations)
+  end
+
+  # Replaces the whole location set from an authoritative server read. Unlike with_location this
+  # does not merge: a reconciliation pass has just seen every copy the server holds, so anything
+  # not in that list is no longer there.
+  def with_locations(new_locations, provider_id: nil)
+    self.class.new(version: version + 1, provider_id: provider_id.presence || self.provider_id,
+                   sync_state: SYNC_STATE_VERIFIED, last_verified_at: Time.current.iso8601,
+                   locations: new_locations)
   end
 
   def to_h

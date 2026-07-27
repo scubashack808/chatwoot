@@ -12,10 +12,6 @@
 # Message-ID that appears in more than one place is ambiguous and is never recorded, because a
 # generic IMAP server gives no way to tell the copies apart.
 class Imap::IdentityBackfillService
-  MAILBOX_BATCH_SIZE = 500
-  MESSAGE_ID_HEADER = 'BODY[HEADER.FIELDS (MESSAGE-ID)]'.freeze
-  MESSAGE_ID_FETCH = 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]'.freeze
-
   pattr_initialize [:channel!]
 
   def dry_run
@@ -34,19 +30,17 @@ class Imap::IdentityBackfillService
   private
 
   def scan
-    server_index, mailboxes = read_server
-    classify(server_index, mailboxes)
+    classify(read_server)
   end
 
-  # One connection, one lease, for the whole scan.
+  # One connection, one lease, for the whole scan. The reading itself is Imap::MailboxScan, which
+  # this shares with reconciliation; the backfill sets no size bound, so its windows are the same
+  # unbounded full-mailbox reads they have always been.
   def read_server
     Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|
-      index = Hash.new { |hash, key| hash[key] = [] }
-      scanned = mailboxes_to_scan(client, session).map do |mailbox|
-        scan_mailbox(client, session, mailbox, index)
-      end
-
-      [index, scanned]
+      Imap::MailboxScan.new(
+        client: client, session: session, mailboxes: mailboxes_to_scan(client, session), max_messages: nil
+      ).perform
     end
   end
 
@@ -64,58 +58,12 @@ class Imap::IdentityBackfillService
     ([[Imap::MailboxSyncConfig::RESTORE_TARGET, 'inbox']] + role_mailboxes).uniq { |mailbox, _role| mailbox }
   end
 
-  def scan_mailbox(client, session, mailbox_and_role, index)
-    mailbox, role = mailbox_and_role
-
-    # EXAMINE, never SELECT: read-only, so no flag is set and nothing is expunged.
-    session.command { client.examine(mailbox) }
-    uidvalidity = Array(client.responses('UIDVALIDITY')).last
-    uids = Array(session.command { client.uid_search(['ALL']) })
-
-    context = { mailbox: mailbox, role: role, uidvalidity: uidvalidity }
-    uids.each_slice(MAILBOX_BATCH_SIZE) do |batch|
-      collect_batch(client, session, batch, context, index)
-    end
-
-    context.merge(message_count: uids.length)
-  end
-
-  def collect_batch(client, session, batch, context, index)
-    Array(session.command { client.uid_fetch(batch, fetch_attributes(client)) }).each do |data|
-      message_id = extract_message_id(data)
-      next if message_id.blank?
-
-      index[message_id] << context.merge(uid: data.attr['UID'], provider_id: data.attr['X-GM-MSGID']&.to_s)
-    end
-  end
-
-  def fetch_attributes(client)
-    return ['UID', MESSAGE_ID_FETCH, 'X-GM-MSGID'] if gmail_extensions?(client)
-
-    ['UID', MESSAGE_ID_FETCH]
-  end
-
-  def gmail_extensions?(client)
-    return @gmail_extensions if defined?(@gmail_extensions)
-
-    @gmail_extensions = client.capabilities.include?('X-GM-EXT-1')
-  rescue StandardError
-    @gmail_extensions = false
-  end
-
-  def extract_message_id(data)
-    raw = data.attr[MESSAGE_ID_HEADER]
-    return nil if raw.blank?
-
-    Mail.read_from_string(raw).message_id
-  end
-
-  def classify(server_index, mailboxes)
-    report = empty_report(mailboxes)
+  def classify(scan)
+    report = empty_report(scan.mailboxes)
 
     candidates.find_each do |message|
       report[:candidates] += 1
-      classify_message(message, server_index[message.source_id], report)
+      classify_message(message, scan.hits_for(message.source_id), report)
     end
 
     report
