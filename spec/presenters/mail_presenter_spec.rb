@@ -124,8 +124,10 @@ RSpec.describe MailPresenter do
       html_content = described_class.new(raw_html_mail).serialized_data[:html_content]
 
       expect(html_content[:full]).to eq(raw_html)
-      expect(html_content.values).to all(exclude('chatwoot-bq-fix'))
-      expect(html_content.values).to all(exclude('<style>'))
+      html_content.each_value do |value|
+        expect(value).not_to include('chatwoot-bq-fix')
+        expect(value).not_to include('<style>')
+      end
     end
 
     it 'encodes email to UTF-8' do
