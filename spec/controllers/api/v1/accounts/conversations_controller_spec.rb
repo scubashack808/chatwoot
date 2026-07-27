@@ -35,6 +35,50 @@ RSpec.describe 'Conversations API', type: :request do
         expect(body[:data][:payload].first[:messages].first[:id]).to eq(message.id)
       end
 
+      it 'returns the latest public non-activity message direction for list cards' do
+        create(
+          :message,
+          conversation: conversation,
+          account: account,
+          message_type: :incoming,
+          created_at: 3.minutes.ago
+        )
+        public_reply = create(
+          :message,
+          conversation: conversation,
+          account: account,
+          message_type: :outgoing,
+          created_at: 2.minutes.ago
+        )
+        create(
+          :message,
+          conversation: conversation,
+          account: account,
+          message_type: :incoming,
+          private: true,
+          created_at: 1.minute.ago
+        )
+        create(
+          :message,
+          conversation: conversation,
+          account: account,
+          message_type: :activity,
+          created_at: Time.current
+        )
+
+        get "/api/v1/accounts/#{account.id}/conversations",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:success)
+        expect(
+          response.parsed_body.dig('data', 'payload', 0, 'last_public_non_activity_message')
+        ).to eq(
+          'message_type' => Message.message_types[:outgoing],
+          'created_at' => public_reply.created_at.to_i
+        )
+      end
+
       it 'returns conversations with empty messages array for conversations with out messages' do
         get "/api/v1/accounts/#{account.id}/conversations",
             headers: agent.create_new_auth_token,
