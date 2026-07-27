@@ -4,6 +4,13 @@ module Redis::RedisKeys
   ROUND_ROBIN_AGENTS = 'ROUND_ROBIN_AGENTS:%<inbox_id>d'.freeze
   # Track recently deleted IMAP messages to prevent them from being synced again
   IMAP_DELETED_MESSAGE = 'IMAP_DELETED_MESSAGE::%<inbox_id>d::%<message_id_digest>s'.freeze
+  # When a managed inbox last completed a reconciliation cycle. Read to detect an inbox that has
+  # silently stopped reconciling, which would otherwise look identical to one with no external
+  # changes.
+  IMAP_RECONCILED_AT = 'IMAP_RECONCILED_AT::%<inbox_id>d'.freeze
+  # When a managed inbox was last fully enumerated. The cheap probe cannot see a new copy appear,
+  # so enumeration still runs on an interval regardless of what the probe reports.
+  IMAP_FULL_SCAN_AT = 'IMAP_FULL_SCAN_AT::%<inbox_id>d'.freeze
 
   ## Conversation keys
   # Detect whether to send an email reply to the conversation
