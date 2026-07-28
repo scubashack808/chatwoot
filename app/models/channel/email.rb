@@ -63,6 +63,7 @@ class Channel::Email < ApplicationRecord
   validates :forward_to_email, uniqueness: true
   validate :validate_mailbox_sync_config
   validate :validate_folder_overrides_against_server, if: :folder_overrides_changed?
+  validate :aliases_are_email_addresses
   validate :aliases_exclude_the_primary_address
   validate :aliases_are_unique_across_channels
   validate :primary_address_is_not_another_channels_alias
@@ -143,7 +144,30 @@ class Channel::Email < ApplicationRecord
   end
 
   def normalize_aliases
-    self.aliases = Array(aliases).map { |value| value.to_s.downcase.strip }.compact_blank.uniq
+    self.aliases = Array(aliases).filter_map { |value| normalized_alias(value) }.uniq
+  end
+
+  # Stored the way the inbound finder LOOKS ALIASES UP: downcased and with any plus extension
+  # stripped. channel_from_email normalises the recipient and then does exact array containment, so
+  # an alias stored as donations+2026@example.com could never be matched and every mail sent to it
+  # was discarded by DefaultMailbox while the address stayed selectable as a From identity.
+  # A value that is not already a well formed address is kept VERBATIM rather than normalised,
+  # because normalising it would rewrite it into something valid-looking ("info" becomes
+  # "info@info", "a@b@c.com" becomes "a@c.com") and hide it from the format validation below.
+  def normalized_alias(value)
+    trimmed = value.to_s.downcase.strip
+    return if trimmed.blank?
+
+    trimmed.match?(URI::MailTo::EMAIL_REGEXP) ? normalize_email_with_plus_addressing(trimmed) : trimmed
+  end
+
+  # The UI's input rule is not a server-side guard: the API accepts whatever it is handed. A
+  # malformed alias then shows up in the From picker and makes assert_from_address! refuse the send.
+  def aliases_are_email_addresses
+    invalid = aliases.to_a.grep_v(URI::MailTo::EMAIL_REGEXP)
+    return if invalid.empty?
+
+    errors.add(:aliases, "are not valid email addresses: #{invalid.join(', ')}")
   end
 
   def aliases_exclude_the_primary_address
@@ -155,7 +179,14 @@ class Channel::Email < ApplicationRecord
   def aliases_are_unique_across_channels
     return if aliases.blank?
 
-    scope = self.class.where('aliases && ARRAY[:values]::varchar[] OR LOWER(email) = ANY (ARRAY[:values]::varchar[])', values: aliases)
+    # forward_to_email is matched by the inbound router alongside email and aliases, with an
+    # unordered find_by that compiles to LIMIT 1. Leaving it out of this check let one address have
+    # two owners, and which inbox received the mail was then whichever row Postgres emitted first.
+    scope = self.class.where(
+      'aliases && ARRAY[:values]::varchar[] OR LOWER(email) = ANY (ARRAY[:values]::varchar[]) ' \
+      'OR LOWER(forward_to_email) = ANY (ARRAY[:values]::varchar[])',
+      values: aliases
+    )
     scope = scope.where.not(id: id) if persisted?
 
     errors.add(:aliases, 'are already in use on another email inbox') if scope.exists?

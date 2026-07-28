@@ -50,6 +50,48 @@ RSpec.describe 'Inbox email aliases API', type: :request do
         expect(response).to have_http_status(:unprocessable_entity)
       end
 
+      # Review finding P2-1. The UI's vuelidate rule is not a server-side guard, so this is the
+      # path a malformed alias actually arrives on.
+      it 'refuses a malformed alias' do
+        patch "/api/v1/accounts/#{account.id}/inboxes/#{inbox.id}",
+              params: { channel: { aliases: ['not-an-address'] } },
+              headers: administrator.create_new_auth_token
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(channel.reload.aliases).to eq([])
+      end
+
+      it 'refuses a display-name alias' do
+        patch "/api/v1/accounts/#{account.id}/inboxes/#{inbox.id}",
+              params: { channel: { aliases: ['"Info" <info@example.com>'] } },
+              headers: administrator.create_new_auth_token
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(channel.reload.aliases).to eq([])
+      end
+
+      it 'stores a plus-addressed alias in the form the inbound finder looks up' do
+        patch "/api/v1/accounts/#{account.id}/inboxes/#{inbox.id}",
+              params: { channel: { aliases: ['Donations+2026@example.com'] } },
+              headers: administrator.create_new_auth_token
+
+        expect(response).to have_http_status(:success)
+        expect(channel.reload.aliases).to eq(['donations@example.com'])
+        expect(response.parsed_body['aliases']).to eq(['donations@example.com'])
+      end
+
+      # Review finding P3-1.
+      it 'refuses an alias that is another inbox forwarding address' do
+        other = create(:channel_email, account: account, email: 'sales@example.com')
+
+        patch "/api/v1/accounts/#{account.id}/inboxes/#{inbox.id}",
+              params: { channel: { aliases: [other.forward_to_email] } },
+              headers: administrator.create_new_auth_token
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(channel.reload.aliases).to eq([])
+      end
+
       it 'clears the aliases when an empty list is sent' do
         channel.update!(aliases: ['nonprofit@example.com'])
 

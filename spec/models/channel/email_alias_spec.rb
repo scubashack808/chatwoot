@@ -24,6 +24,70 @@ RSpec.describe Channel::Email do
 
       expect(channel.aliases).to eq(['nonprofit@example.com'])
     end
+
+    # Review finding P2-1. The inbound finder plus-strips the recipient before an exact array
+    # containment check, so an alias stored WITH its plus extension can never be matched and the
+    # mail is silently dropped. Storage has to use the same spelling the lookup uses.
+    it 'strips a plus extension so the stored value is the one the inbound finder looks up' do
+      channel = create(:channel_email, account: account, aliases: ['Donations+2026@Example.com'])
+
+      expect(channel.reload.aliases).to eq(['donations@example.com'])
+    end
+
+    it 'de-duplicates two plus variants of the same address' do
+      channel = create(:channel_email, account: account, aliases: ['donations+2026@example.com', 'donations+gala@example.com'])
+
+      expect(channel.reload.aliases).to eq(['donations@example.com'])
+    end
+
+    # Normalising a value that is not an address would REWRITE it into something valid-looking
+    # ("info" becomes "info@info", "a@b@c.com" becomes "a@c.com"), so the administrator's own text
+    # has to survive to the validation. Green on base; it exists to keep the fix honest.
+    it 'leaves a value that is not an address verbatim rather than rewriting it' do
+      channel = build(:channel_email, account: account, aliases: ['info', 'a@b@c.com'])
+      channel.valid?
+
+      expect(channel.aliases).to eq(['info', 'a@b@c.com'])
+    end
+  end
+
+  # Review finding P2-1, second half. The UI's vuelidate rule is not a server-side guard, so the
+  # API stores whatever it is handed. A malformed alias then appears in the From picker and makes
+  # assert_from_address! reject the send.
+  describe 'alias format validation' do
+    it 'refuses a value with no @' do
+      channel = build(:channel_email, account: account, aliases: ['info'])
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:aliases].join).to include('info')
+    end
+
+    it 'refuses a display-name form' do
+      channel = build(:channel_email, account: account, aliases: ['"Info" <info@example.com>'])
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:aliases]).to be_present
+    end
+
+    it 'refuses a value with an embedded newline' do
+      channel = build(:channel_email, account: account, aliases: ["info@example.com\nbcc: attacker@evil.com"])
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:aliases]).to be_present
+    end
+
+    it 'refuses a value with two @ signs instead of silently rewriting it' do
+      channel = build(:channel_email, account: account, aliases: ['a@b@c.com'])
+
+      expect(channel).not_to be_valid
+      expect(channel.aliases).to eq(['a@b@c.com'])
+    end
+
+    it 'accepts a well formed address' do
+      channel = build(:channel_email, account: account, aliases: ['info@example.com'])
+
+      expect(channel).to be_valid
+    end
   end
 
   describe 'alias uniqueness' do
@@ -63,6 +127,33 @@ RSpec.describe Channel::Email do
       existing.aliases = ['nonprofit@example.com', 'donate@example.com']
 
       expect(existing).to be_valid
+    end
+
+    # Review finding P2-1, the interaction case. A plus variant normalises INTO the primary, so the
+    # existing exclusion rule has to catch it rather than the channel storing an alias that is
+    # really its own primary address.
+    it 'refuses a plus variant of the channel primary' do
+      channel = build(:channel_email, account: account, email: 'sales@example.com', aliases: ['sales+ops@example.com'])
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:aliases].join).to include('primary')
+    end
+
+    it 'refuses a plus variant of another channel primary' do
+      channel = build(:channel_email, account: account, email: 'sales@example.com', aliases: ['care+ops@example.com'])
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:aliases]).to be_present
+    end
+
+    # Review finding P3-1. The router matches forward_to_email with an unordered find_by LIMIT 1,
+    # so an alias equal to another inbox's forwarding address gives one address two owners and
+    # Postgres picks whichever row it likes.
+    it 'refuses an alias that is another channel forwarding address' do
+      channel = build(:channel_email, account: account, email: 'sales@example.com', aliases: [existing.forward_to_email])
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:aliases]).to be_present
     end
   end
 
