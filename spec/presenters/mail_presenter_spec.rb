@@ -106,6 +106,30 @@ RSpec.describe MailPresenter do
       )
     end
 
+    it 'keeps new raw HTML unmodified for storage' do
+      raw_html = <<~HTML
+        <div>Fresh reply</div>
+        <div class="gmail_quote">
+          <blockquote>Stored quoted reply</blockquote>
+        </div>
+      HTML
+      raw_html_mail = Mail.new(
+        from: 'sender@example.com',
+        to: 'inbox@example.com',
+        subject: 'Re: Raw storage',
+        content_type: 'text/html; charset=UTF-8',
+        body: raw_html
+      )
+
+      html_content = described_class.new(raw_html_mail).serialized_data[:html_content]
+
+      expect(html_content[:full]).to eq(raw_html)
+      html_content.each_value do |value|
+        expect(value).not_to include('chatwoot-bq-fix')
+        expect(value).not_to include('<style>')
+      end
+    end
+
     it 'encodes email to UTF-8' do
       decorated_html_mail = described_class.new(ascii_mail)
       expect(decorated_html_mail.subject).to eq('أهلين عميلنا الكريم ')

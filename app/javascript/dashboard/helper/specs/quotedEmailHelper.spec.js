@@ -13,6 +13,7 @@ import {
   truncatePreviewText,
   appendQuotedTextToMessage,
 } from '../quotedEmailHelper';
+import { PRODUCTION_LEGACY_QUOTE_CSS_HTML } from './fixtures/legacyQuoteCssFixtures';
 
 describe('quotedEmailHelper', () => {
   describe('extractPlainTextFromHtml', () => {
@@ -374,6 +375,39 @@ describe('quotedEmailHelper', () => {
     it('returns empty string for null or missing email', () => {
       expect(extractQuotedEmailText(null)).toBe('');
       expect(extractQuotedEmailText({})).toBe('');
+    });
+
+    // Historical rows store a quote-hiding style element inside html_content.
+    // DOMPurify keeps style elements under its default config, so without a strip
+    // the CSS rule text would land in the agent's reply draft. Both cases below
+    // reach the html branches only because text_content is absent, which is the
+    // precondition for this path.
+    it('does not leak the legacy stored CSS from html_content.reply into the draft', () => {
+      const lastEmail = {
+        content_attributes: {
+          email: { html_content: { reply: PRODUCTION_LEGACY_QUOTE_CSS_HTML } },
+        },
+      };
+
+      const quoted = extractQuotedEmailText(lastEmail);
+
+      expect(quoted).not.toContain('display: none');
+      expect(quoted).not.toContain('blockquote {');
+      expect(quoted).toContain('cooking with fire');
+    });
+
+    it('does not leak the legacy stored CSS from html_content.full into the draft', () => {
+      const lastEmail = {
+        content_attributes: {
+          email: { html_content: { full: PRODUCTION_LEGACY_QUOTE_CSS_HTML } },
+        },
+      };
+
+      const quoted = extractQuotedEmailText(lastEmail);
+
+      expect(quoted).not.toContain('display: none');
+      expect(quoted).not.toContain('blockquote {');
+      expect(quoted).toContain('cooking with fire');
     });
   });
 
