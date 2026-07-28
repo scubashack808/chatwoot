@@ -13,9 +13,15 @@ class Imap::SentOutboundSync
   MAX_PER_CYCLE = 100
 
   # A retry that keeps failing the same way is not going to start working inside the retry window,
-  # and every attempt is an APPEND that may or may not have landed. After this many consecutive
-  # failures the message stops being appended and says so, instead of retrying every minute for
+  # and every attempt is an APPEND that may or may not have landed. Past this many recorded
+  # attempts the message stops being appended and says so, instead of retrying every minute for
   # seven days.
+  #
+  # `attempts` is cumulative across every state this message has passed through, not a strictly
+  # consecutive failure count, so a message that spent cycles in `awaiting_provider_copy` before
+  # the inbox switched to append mode reaches the cap after fewer than five real append failures.
+  # That errs toward stopping early, which is the safe direction for a command that writes to a
+  # mail server.
   MAX_APPEND_ATTEMPTS = 5
 
   # Rails' JSON store coder can persist this jsonb column as either a JSON object or a JSON string.
@@ -80,6 +86,7 @@ class Imap::SentOutboundSync
     return record_attempts_exhausted(message) if attempts_exhausted?(message)
 
     mail = rendered_mail(message)
+    return record_unrenderable(message) if mail.message_id.blank?
     return record_message_id_mismatch(message, mail.message_id) unless mail.message_id == message.source_id
 
     location = sent_mailbox.append(
@@ -102,12 +109,25 @@ class Imap::SentOutboundSync
     ConversationReplyMailer.with(account: message.account).email_reply(message).message
   end
 
+  # No Message-ID at all means the mailer did not render. ConversationReplyMailer#email_reply
+  # returns early, yielding a NullMail, when the inbox cannot currently send: SMTP switched off, or
+  # the global SMTP configuration removed. Nothing was attempted and no APPEND was issued, so this
+  # is transient and safe to retry, and it stays under the same attempt cap as any other failure.
+  #
+  # It is deliberately NOT abandoned. Abandonment is terminal, and this condition is one a human
+  # undoes by fixing the inbox: treating it as terminal would burn through the whole backlog in a
+  # cycle and leave nothing recoverable once the configuration was restored.
+  def record_unrenderable(message)
+    record_failure(message, 'the reply could not be rendered: the inbox cannot currently send mail')
+  end
+
   # Everything about not duplicating rests on the premise that the source being appended carries
   # the Message-ID the search looks for. Two inputs to that deterministic id, the account's
   # inbound email domain and the channel address, can change after the message was delivered.
   # When they do, the search finds nothing, the append lands a copy under a new id, and the next
-  # cycle does it again. So the premise is checked rather than assumed, and a mismatch is
-  # abandoned rather than retried: retrying is precisely what would duplicate.
+  # cycle does it again. So the premise is checked rather than assumed. A DIFFERENT id is real
+  # drift and is abandoned rather than retried, because retrying is precisely what would duplicate.
+  # A MISSING id is the separate, recoverable case handled above.
   def record_message_id_mismatch(message, rendered_id)
     record_state(message, Imap::SentSyncState::ABANDONED,
                  error: "rendered Message-ID #{rendered_id.inspect} does not match the delivered #{message.source_id.inspect}")

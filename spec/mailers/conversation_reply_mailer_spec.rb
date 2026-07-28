@@ -894,6 +894,50 @@ RSpec.describe ConversationReplyMailer do
         expect(mail.subject).to eq described_class.email_reply(latest).message.subject
       end
 
+      # N2. Pinned deliberately, because this IS a delivery-behaviour change and it should be
+      # recorded as intent rather than discovered later as an accident.
+      #
+      # `messages.outgoing` excludes template messages, so under the old conversation-derived
+      # lookup a CSAT survey resolved its recipients to the last genuine agent reply, inheriting
+      # that reply's To, Cc AND Bcc. Reading the message being rendered instead means a survey is
+      # addressed to the contact and to nobody else. That is the intended behaviour: a satisfaction
+      # survey carrying an unrelated reply's Bcc list was itself a disclosure, not a feature.
+      context 'when rendering a template message such as a CSAT survey' do
+        let(:survey_contact) { create(:contact, account: account, email: 'buyer@example.com') }
+        let(:survey_conversation) do
+          create(:conversation, assignee: agent, inbox: email_channel.inbox, account: account, contact: survey_contact).reload
+        end
+        let!(:agent_reply) do
+          create(:message, conversation: survey_conversation, account: account, message_type: 'outgoing', content: 'agent reply',
+                           content_attributes: { to_emails: ['someone-else@example.com'], cc_emails: ['cc@example.com'],
+                                                 bcc_emails: ['bcc@example.com'] })
+        end
+        let!(:survey) do
+          create(:message, conversation: survey_conversation, account: account, message_type: 'template',
+                           content_type: 'input_csat', content: 'How would you rate our support?', sender: agent)
+        end
+
+        it 'addresses the survey to the contact only, inheriting no Cc or Bcc from an earlier reply' do
+          with_modified_env 'FRONTEND_URL' => 'https://app.chatwoot.com' do
+            mail = described_class.email_reply(survey).message
+
+            expect(mail.to).to eq ['buyer@example.com']
+            expect(mail.cc).to be_nil
+            expect(mail.bcc).to be_nil
+          end
+        end
+
+        it 'still addresses an ordinary agent reply from that reply itself' do
+          with_modified_env 'FRONTEND_URL' => 'https://app.chatwoot.com' do
+            mail = described_class.email_reply(agent_reply).message
+
+            expect(mail.to).to eq ['someone-else@example.com']
+            expect(mail.cc).to eq ['cc@example.com']
+            expect(mail.bcc).to eq ['bcc@example.com']
+          end
+        end
+      end
+
       context 'with a subject on the conversation' do
         before do
           conversation.update!(additional_attributes: { 'mail_subject' => 'Dive booking' })

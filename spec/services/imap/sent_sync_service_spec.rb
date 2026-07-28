@@ -514,6 +514,33 @@ RSpec.describe Imap::SentSyncService do
 
       expect(imap).to have_received(:append)
     end
+
+    # N1. A mail that did not render at all is not the same thing as one that rendered with the
+    # wrong id. ConversationReplyMailer#email_reply returns early, giving a NullMail with no
+    # Message-ID, whenever the inbox cannot currently send. That is a misconfiguration a human can
+    # undo, and abandoning it would permanently drop the entire backlog in one cycle.
+    it 'treats a mail that could not be rendered as a transient failure, not a permanent abandonment' do
+      outgoing_message
+      channel.update!(smtp_enabled: false)
+
+      report = described_class.new(channel: channel).perform
+
+      expect(imap).not_to have_received(:append)
+      expect(report[:outbound][:failed]).to eq 1
+      expect(outgoing_message.reload.imap_sent_sync.state).to eq 'failed'
+    end
+
+    it 'recovers an unrenderable message once the inbox can send again' do
+      outgoing_message
+      channel.update!(smtp_enabled: false)
+      described_class.new(channel: channel).perform
+
+      channel.update!(smtp_enabled: true)
+      report = described_class.new(channel: channel).perform
+
+      expect(report[:outbound][:appended]).to eq 1
+      expect(outgoing_message.reload.imap_sent_sync.state).to eq 'synced'
+    end
   end
 
   # F4, the outbound half. See the import half inside the M06 block above.
