@@ -35,6 +35,61 @@ RSpec.describe 'Conversations API', type: :request do
         expect(body[:data][:payload].first[:messages].first[:id]).to eq(message.id)
       end
 
+      # The list card marks a conversation replied when the newest public incoming message has a
+      # later successful agent reply, so the payload ships those two anchors and nothing else.
+      def list_payload
+        get "/api/v1/accounts/#{account.id}/conversations",
+            headers: agent.create_new_auth_token,
+            as: :json
+        response.parsed_body.dig('data', 'payload', 0)
+      end
+
+      it 'returns the reply anchors a list card needs, ignoring private, activity and template messages' do
+        incoming = create(:message, conversation: conversation, account: account, message_type: :incoming,
+                                    created_at: 5.minutes.ago)
+        reply = create(:message, conversation: conversation, account: account, message_type: :outgoing,
+                                 created_at: 4.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :incoming, private: true,
+                         created_at: 3.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :activity,
+                         created_at: 2.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :template,
+                         content_type: :input_csat, created_at: 1.minute.ago)
+
+        payload = list_payload
+
+        expect(response).to have_http_status(:success)
+        expect(payload['last_public_incoming_message']).to eq('id' => incoming.id, 'created_at' => incoming.created_at.to_i)
+        expect(payload['last_agent_reply_message']).to eq('id' => reply.id, 'created_at' => reply.created_at.to_i)
+      end
+
+      it 'does not treat a send that failed as a reply' do
+        reply = create(:message, conversation: conversation, account: account, message_type: :outgoing,
+                                 created_at: 3.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :outgoing, status: :failed,
+                         created_at: 1.minute.ago)
+
+        expect(list_payload['last_agent_reply_message']).to eq('id' => reply.id, 'created_at' => reply.created_at.to_i)
+      end
+
+      it 'breaks an exact-second tie between two replies on message id' do
+        moment = 2.minutes.ago.change(usec: 0)
+        create(:message, conversation: conversation, account: account, message_type: :outgoing, created_at: moment)
+        newest_reply = create(:message, conversation: conversation, account: account, message_type: :outgoing,
+                                        created_at: moment)
+
+        expect(list_payload['last_agent_reply_message']).to eq('id' => newest_reply.id, 'created_at' => moment.to_i)
+      end
+
+      it 'reports no reply anchor when the conversation has only incoming messages' do
+        create(:message, conversation: conversation, account: account, message_type: :incoming, created_at: 1.minute.ago)
+
+        payload = list_payload
+
+        expect(payload['last_agent_reply_message']).to be_nil
+        expect(payload['last_public_incoming_message']).not_to be_nil
+      end
+
       it 'returns conversations with empty messages array for conversations with out messages' do
         get "/api/v1/accounts/#{account.id}/conversations",
             headers: agent.create_new_auth_token,

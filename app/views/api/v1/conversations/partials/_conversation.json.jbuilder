@@ -55,6 +55,15 @@ json.timestamp conversation.last_activity_at.to_i
 json.first_reply_created_at conversation.first_reply_created_at.to_i
 json.unread_count conversation.unread_incoming_messages.count
 json.last_non_activity_message conversation.messages.where(account_id: conversation.account_id).non_activity_messages.first.try(:push_event_data)
+# A list card marks a conversation replied when the newest public incoming message has a later
+# successful agent reply. Only these two anchors are needed to decide that, and filtering on
+# message_type keeps activity and template messages out of the answer on both sides.
+public_messages = conversation.messages.where(account_id: conversation.account_id, private: false)
+newest_first = { created_at: :desc, id: :desc }
+incoming_anchor = public_messages.incoming.reorder(newest_first).first
+reply_anchor = public_messages.outgoing.where.not(status: :failed).reorder(newest_first).first
+json.last_public_incoming_message incoming_anchor && { id: incoming_anchor.id, created_at: incoming_anchor.created_at.to_i }
+json.last_agent_reply_message reply_anchor && { id: reply_anchor.id, created_at: reply_anchor.created_at.to_i }
 json.last_activity_at conversation.last_activity_at.to_i
 json.priority conversation.priority
 json.waiting_since conversation.waiting_since.to_i.to_i

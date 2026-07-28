@@ -1,6 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { getLastMessage } from 'dashboard/helper/conversationHelper';
+import {
+  getLastMessage,
+  isConversationReplied,
+} from 'dashboard/helper/conversationHelper';
 import Avatar from 'next/avatar/Avatar.vue';
 import Icon from 'dashboard/components-next/icon/Icon.vue';
 import MessagePreview from './MessagePreview.vue';
@@ -25,6 +28,14 @@ const props = defineProps({
   showInboxName: { type: Boolean, default: false },
   hideThumbnail: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  displayTimestamp: {
+    type: [String, Date, Number],
+    default: '',
+  },
+  // The conversation list opts into these. Every other consumer, such as the
+  // contact sidebar, keeps the presentation it had before.
+  showRepliedMarker: { type: Boolean, default: false },
+  showCalendarTimestamp: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -39,6 +50,12 @@ const hovered = ref(false);
 const unreadCount = computed(() => props.chat.unread_count);
 const hasUnread = computed(() => unreadCount.value > 0);
 const lastMessageInChat = computed(() => getLastMessage(props.chat));
+const hasReplied = computed(
+  () => props.showRepliedMarker && isConversationReplied(props.chat)
+);
+const hasWideMetaColumn = computed(
+  () => props.showRepliedMarker || props.showCalendarTimestamp
+);
 
 const voiceCallData = computed(() => {
   const last = lastMessageInChat.value;
@@ -182,8 +199,11 @@ watch(
         </div>
       </div>
       <h4
-        class="conversation--user text-sm my-0 mx-2 capitalize pt-0.5 text-ellipsis overflow-hidden whitespace-nowrap flex-1 min-w-0 ltr:pr-16 rtl:pl-16 text-n-slate-12"
-        :class="hasUnread ? 'font-semibold' : 'font-medium'"
+        class="conversation--user text-sm my-0 mx-2 capitalize pt-0.5 text-ellipsis overflow-hidden whitespace-nowrap flex-1 min-w-0 text-n-slate-12"
+        :class="[
+          hasUnread ? 'font-semibold' : 'font-medium',
+          hasWideMetaColumn ? 'ltr:pr-28 rtl:pl-28' : 'ltr:pr-16 rtl:pl-16',
+        ]"
       >
         {{ currentContact.name }}
       </h4>
@@ -225,11 +245,25 @@ watch(
         class="absolute flex flex-col ltr:right-3 rtl:left-3"
         :class="showMetaSection ? 'top-8' : 'top-4'"
       >
-        <span class="ml-auto font-normal leading-4 text-xxs">
+        <span
+          class="ml-auto font-normal leading-4 text-xxs"
+          :class="{ 'flex items-center gap-0.5': showRepliedMarker }"
+        >
+          <Icon
+            v-if="hasReplied"
+            v-tooltip.top="$t('CHAT_LIST.REPLIED')"
+            data-testid="replied-marker"
+            :aria-label="$t('CHAT_LIST.REPLIED')"
+            icon="i-lucide-check"
+            class="flex-shrink-0 size-3 text-n-teal-11"
+          />
           <TimeAgo
             :last-activity-timestamp="chat.timestamp"
             :created-at-timestamp="chat.created_at"
             :conversation-id="chat.id"
+            :display-timestamp="displayTimestamp"
+            :show-calendar-timestamp="showCalendarTimestamp"
+            :class="{ '!ml-0': showRepliedMarker }"
           />
         </span>
         <UnreadBadge

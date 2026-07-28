@@ -1,3 +1,5 @@
+import { MESSAGE_STATUS, MESSAGE_TYPE } from 'shared/constants/messages';
+
 /**
  * Determines the last non-activity message between store and API messages.
  * @param {Object} messageInStore - The last non-activity message from the store.
@@ -67,6 +69,75 @@ export const getLastMessage = m => {
     lastNonActivityMessageInStore,
     lastNonActivityMessageFromAPI
   );
+};
+
+const UNSUCCESSFUL_STATUSES = [MESSAGE_STATUS.FAILED, MESSAGE_STATUS.PROGRESS];
+
+/**
+ * Compares two message anchors. Both sides carry whole-second timestamps, so
+ * collisions are ordinary and are broken on id rather than on the order the
+ * messages happen to sit in the store array.
+ * @param {Object} candidate - Message being considered.
+ * @param {Object|null} current - Best message found so far.
+ * @returns {boolean} Whether the candidate is the later message.
+ */
+const isNewerAnchor = (candidate, current) => {
+  if (!current) return true;
+
+  const candidateTime = Number(candidate.created_at);
+  const currentTime = Number(current.created_at);
+  if (candidateTime !== currentTime) return candidateTime > currentTime;
+
+  return Number(candidate.id) > Number(current.id);
+};
+
+const isPublicIncoming = message =>
+  !message.private && message.message_type === MESSAGE_TYPE.INCOMING;
+
+const isSuccessfulReply = message =>
+  !message.private &&
+  message.message_type === MESSAGE_TYPE.OUTGOING &&
+  !UNSUCCESSFUL_STATUSES.includes(message.status);
+
+/**
+ * Merges the server anchor with any newer store message that matches. The list
+ * payload only carries the newest message, so the store is a tail rather than a
+ * history and neither source alone is authoritative.
+ * @param {Object} conversation - Conversation list payload.
+ * @param {Object|null} seed - Anchor supplied by the server.
+ * @param {Function} matches - Predicate selecting eligible store messages.
+ * @returns {Object|null} The latest matching message.
+ */
+const latestAnchor = (conversation, seed, matches) =>
+  (conversation.messages || []).reduce(
+    (latest, message) =>
+      matches(message) && isNewerAnchor(message, latest) ? message : latest,
+    seed || null
+  );
+
+/**
+ * Reports whether the newest public incoming message has a later successful
+ * agent reply. Template and activity messages count on neither side, so a CSAT
+ * survey or an auto-resolve notice cannot erase the marker, and a send that
+ * failed or is still in flight cannot create it.
+ * @param {Object} conversation - Conversation list payload.
+ * @returns {boolean} Whether the agent has answered the latest inbound message.
+ */
+export const isConversationReplied = conversation => {
+  const reply = latestAnchor(
+    conversation,
+    conversation.last_agent_reply_message,
+    isSuccessfulReply
+  );
+  if (!reply) return false;
+
+  const incoming = latestAnchor(
+    conversation,
+    conversation.last_public_incoming_message,
+    isPublicIncoming
+  );
+
+  return isNewerAnchor(reply, incoming);
 };
 
 /**

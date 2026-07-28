@@ -1088,6 +1088,7 @@ watch(conversationFilters, (newVal, oldVal) => {
     />
     <ConversationList
       :conversation-list="conversationList"
+      :sort-by="activeSortBy"
       :is-loading="chatListLoading"
       :show-end-of-list-message="showEndOfListMessage"
       :label="label"
