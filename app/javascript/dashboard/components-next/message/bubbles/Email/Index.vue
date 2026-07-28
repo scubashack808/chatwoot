@@ -41,7 +41,15 @@ const originalEmailText = computed(() => {
   return sanitizeTextForRender(text);
 });
 
-const emailMetadata = computed(() => contentAttributes?.value?.email || {});
+const emailMetadata = computed(() => {
+  const email = contentAttributes?.value?.email || {};
+  // Outgoing messages have no email.inReplyTo, but the composer stores the parent
+  // message id at the top level of content_attributes, so fall back to it.
+  return {
+    ...email,
+    inReplyTo: email.inReplyTo ?? contentAttributes?.value?.inReplyTo ?? null,
+  };
+});
 
 const originalEmailHtml = computed(() =>
   EmailQuoteExtractor.prepareForRender(

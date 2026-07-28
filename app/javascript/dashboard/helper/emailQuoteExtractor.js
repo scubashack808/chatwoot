@@ -17,10 +17,23 @@ const BLOCKQUOTE_FALLBACK_SELECTOR = 'blockquote';
 const LEGACY_QUOTE_CSS_PATTERN =
   /<!--\s*chatwoot-bq-fix-v2\s*-->\s*<style\b[^>]*>[\s\S]*?<\/style\s*>/gi;
 
-const FORWARDED_SUBJECT_PATTERN = /^\s*fwd?\s*:/i;
+// Forward prefixes across the clients we see, including the common non-English
+// Outlook prefixes (WG, TR, RV, VS, Enc, I). A false positive here only costs a
+// collapse that could have happened, while a false negative can hide forwarded
+// content, so the pattern errs wide.
+const FORWARDED_SUBJECT_PATTERN = /^\s*(fwd?|wg|tr|rv|vs|enc|i)\s*:/i;
 const FORWARDED_BODY_PATTERNS = [
   /-{2,}\s*Forwarded message\s*-{2,}/i,
   /Begin forwarded message:/i,
+];
+
+// Attribution lines that only ever introduce quoted reply history. Deliberately
+// narrower than QUOTE_PATTERNS below: "From:" and "Sent:" also appear inside a
+// forward's own attribution block, so they cannot order forward evidence against
+// reply evidence.
+const REPLY_ATTRIBUTION_PATTERNS = [
+  /On .* wrote:/i,
+  /-----Original Message-----/i,
 ];
 
 // Regex patterns for quote identification
@@ -107,6 +120,20 @@ export class EmailQuoteExtractor {
 
   /**
    * Determine whether the email body is forwarded content rather than a reply quote.
+   *
+   * The tie-breaker for every ambiguous case is: never hide forwarded content.
+   * Over-showing a quote chain that could have collapsed is the acceptable failure.
+   * That is why the checks run in this order:
+   *
+   * 1. A forward prefix in the subject is the sender declaring this message is a
+   *    forward, so it wins outright. It stays ahead of the inReplyTo check on
+   *    purpose: a genuine forward can be sent inside a thread and carry
+   *    In-Reply-To, so letting that header outrank the subject would collapse
+   *    forwarded content.
+   * 2. A known In-Reply-To means the client told us this is a reply.
+   * 3. Otherwise fall back to body markers, scoped by hasOwnForwardMarker so that
+   *    quoted history cannot decide the classification.
+   *
    * @param {Element} rootElement - Parsed email body
    * @param {Object} emailMetadata - Stored email metadata
    * @returns {boolean} True if the email is a forward
@@ -120,8 +147,47 @@ export class EmailQuoteExtractor {
       return false;
     }
 
+    return this.hasOwnForwardMarker(rootElement);
+  }
+
+  /**
+   * Decide whether a forward marker in the body belongs to this message or to the
+   * reply history it quotes.
+   *
+   * A marker that appears after a reply attribution line sits inside quoted
+   * history, which is the shape of a reply that quotes a forward rather than a
+   * forward. When the marker comes first, or when there is no attribution at all,
+   * it is treated as this message's own marker, because the tie-breaker is to
+   * never hide forwarded content.
+   * @param {Element} rootElement - Parsed email body
+   * @returns {boolean} True if a forward marker belongs to this message
+   */
+  static hasOwnForwardMarker(rootElement) {
     const body = rootElement.textContent || '';
-    return FORWARDED_BODY_PATTERNS.some(pattern => pattern.test(body));
+    const forwardIndex = this.firstMatchIndex(body, FORWARDED_BODY_PATTERNS);
+
+    if (forwardIndex === -1) {
+      return false;
+    }
+
+    const replyIndex = this.firstMatchIndex(body, REPLY_ATTRIBUTION_PATTERNS);
+    return replyIndex === -1 || forwardIndex < replyIndex;
+  }
+
+  /**
+   * Index of the earliest match of any pattern, or -1 when none match.
+   * @param {string} text - Text to search
+   * @param {RegExp[]} patterns - Patterns to search for
+   * @returns {number} Earliest match index, or -1 when nothing matches
+   */
+  static firstMatchIndex(text, patterns) {
+    return patterns.reduce((earliest, pattern) => {
+      const index = text.search(pattern);
+      if (index === -1) {
+        return earliest;
+      }
+      return earliest === -1 ? index : Math.min(earliest, index);
+    }, -1);
   }
 
   /**
