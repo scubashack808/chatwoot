@@ -31,6 +31,10 @@ const props = defineProps({
     type: [String, Date, Number],
     default: '',
   },
+  // The conversation list opts into these; every other consumer keeps the
+  // presentation it had before.
+  showRepliedMarker: { type: Boolean, default: false },
+  showCalendarTimestamp: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -41,7 +45,12 @@ const emit = defineEmits([
 ]);
 
 const lastMessageInChat = computed(() => getLastMessage(props.chat));
-const hasReplied = computed(() => isConversationReplied(props.chat));
+const hasReplied = computed(
+  () => props.showRepliedMarker && isConversationReplied(props.chat)
+);
+const hasWideMetaColumn = computed(
+  () => props.showRepliedMarker || props.showCalendarTimestamp
+);
 const showLabelsSection = computed(() => props.chat.labels?.length > 0);
 
 const voiceCallData = computed(() => {
@@ -196,7 +205,12 @@ const selectedModel = computed({
       </div>
 
       <div
-        class="flex-shrink-0 w-28 flex items-center justify-end gap-0.5 text-end"
+        class="flex-shrink-0 text-end"
+        :class="
+          hasWideMetaColumn
+            ? 'w-28 flex items-center justify-end gap-0.5'
+            : 'w-[4.375rem]'
+        "
       >
         <Icon
           v-if="hasReplied"
@@ -211,8 +225,9 @@ const selectedModel = computed({
           :last-activity-timestamp="chat.timestamp"
           :created-at-timestamp="chat.created_at"
           :display-timestamp="displayTimestamp"
-          show-calendar-timestamp
-          class="font-440 !ml-0 !text-xs text-n-slate-11"
+          :show-calendar-timestamp="showCalendarTimestamp"
+          class="font-440 !text-xs text-n-slate-11"
+          :class="{ '!ml-0': showRepliedMarker }"
         />
       </div>
     </div>

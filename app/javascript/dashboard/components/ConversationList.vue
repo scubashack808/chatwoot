@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, provide } from 'vue';
+import { ref, computed, onBeforeUnmount, onMounted, provide } from 'vue';
 import { Virtualizer } from 'virtua/vue';
 import { useBreakpoints } from '@vueuse/core';
 import { differenceInDays, fromUnixTime, isToday, isYesterday } from 'date-fns';
@@ -61,26 +61,48 @@ const defaultDisplayTimestamp = conversation =>
   conversation.timestamp ||
   conversation.created_at;
 
-const bucketForTimestamp = timestamp => {
+const bucketForTimestamp = (timestamp, referenceDate) => {
   const date = fromUnixTime(timestamp);
+  // A row dated ahead of the viewer's clock belongs at the top rather than
+  // stranded in an older bucket. differenceInDays truncates towards zero, so a
+  // sub-24h future timestamp would otherwise read as an age of 0 and land in
+  // THIS_WEEK above the Today header.
+  if (date > referenceDate) return BUCKET_KEYS.TODAY;
   if (isToday(date)) return BUCKET_KEYS.TODAY;
   if (isYesterday(date)) return BUCKET_KEYS.YESTERDAY;
 
-  const ageInDays = differenceInDays(new Date(), date);
+  const ageInDays = differenceInDays(referenceDate, date);
   if (ageInDays < 7) return BUCKET_KEYS.THIS_WEEK;
   if (ageInDays < 30) return BUCKET_KEYS.THIS_MONTH;
   return BUCKET_KEYS.OLDER;
 };
 
+// Bucket assignment depends on the wall clock, not only on the list, so a list
+// left open across local midnight has to be told that the day changed.
+const BUCKET_REFRESH_INTERVAL = 60 * 1000;
+const now = ref(new Date());
+let bucketRefreshTimer = null;
+
+onMounted(() => {
+  bucketRefreshTimer = setInterval(() => {
+    now.value = new Date();
+  }, BUCKET_REFRESH_INTERVAL);
+});
+
+onBeforeUnmount(() => clearInterval(bucketRefreshTimer));
+
 const conversationRows = computed(() => {
   const sortTimestamp = chronologicalSortFields[props.sortBy];
+  const referenceDate = now.value;
   let previousBucket = null;
 
   return props.conversationList.map(conversation => {
     const displayTimestamp = sortTimestamp
       ? sortTimestamp(conversation)
       : defaultDisplayTimestamp(conversation);
-    const bucket = sortTimestamp ? bucketForTimestamp(displayTimestamp) : null;
+    const bucket = sortTimestamp
+      ? bucketForTimestamp(displayTimestamp, referenceDate)
+      : null;
     const bucketHeader = bucket !== previousBucket ? bucket : null;
 
     previousBucket = bucket;
@@ -122,7 +144,7 @@ defineExpose({ conversationListRef });
       ref="virtualListRef"
       v-slot="{ item }"
       :data="conversationRows"
-      class="[&>div:has(+_div_.active)>*]:!border-n-surface-1 [&>div:has(+_div_.selected)>*]:!border-n-surface-1"
+      class="[&>div:has(+_div_.active)_.conversation]:!border-n-surface-1 [&>div:has(+_div_.selected)_.conversation]:!border-n-surface-1"
     >
       <div>
         <div
@@ -142,6 +164,8 @@ defineExpose({ conversationListRef });
           :show-assignee="showAssignee"
           :show-expanded="showExpandedCards"
           :mailbox-role="mailboxRole"
+          show-replied-marker
+          show-calendar-timestamp
         />
       </div>
     </Virtualizer>

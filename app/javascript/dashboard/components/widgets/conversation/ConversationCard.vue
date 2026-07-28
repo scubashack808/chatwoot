@@ -32,6 +32,10 @@ const props = defineProps({
     type: [String, Date, Number],
     default: '',
   },
+  // The conversation list opts into these. Every other consumer, such as the
+  // contact sidebar, keeps the presentation it had before.
+  showRepliedMarker: { type: Boolean, default: false },
+  showCalendarTimestamp: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -46,7 +50,12 @@ const hovered = ref(false);
 const unreadCount = computed(() => props.chat.unread_count);
 const hasUnread = computed(() => unreadCount.value > 0);
 const lastMessageInChat = computed(() => getLastMessage(props.chat));
-const hasReplied = computed(() => isConversationReplied(props.chat));
+const hasReplied = computed(
+  () => props.showRepliedMarker && isConversationReplied(props.chat)
+);
+const hasWideMetaColumn = computed(
+  () => props.showRepliedMarker || props.showCalendarTimestamp
+);
 
 const voiceCallData = computed(() => {
   const last = lastMessageInChat.value;
@@ -190,8 +199,11 @@ watch(
         </div>
       </div>
       <h4
-        class="conversation--user text-sm my-0 mx-2 capitalize pt-0.5 text-ellipsis overflow-hidden whitespace-nowrap flex-1 min-w-0 ltr:pr-28 rtl:pl-28 text-n-slate-12"
-        :class="hasUnread ? 'font-semibold' : 'font-medium'"
+        class="conversation--user text-sm my-0 mx-2 capitalize pt-0.5 text-ellipsis overflow-hidden whitespace-nowrap flex-1 min-w-0 text-n-slate-12"
+        :class="[
+          hasUnread ? 'font-semibold' : 'font-medium',
+          hasWideMetaColumn ? 'ltr:pr-28 rtl:pl-28' : 'ltr:pr-16 rtl:pl-16',
+        ]"
       >
         {{ currentContact.name }}
       </h4>
@@ -234,7 +246,8 @@ watch(
         :class="showMetaSection ? 'top-8' : 'top-4'"
       >
         <span
-          class="ml-auto flex items-center gap-0.5 font-normal leading-4 text-xxs"
+          class="ml-auto font-normal leading-4 text-xxs"
+          :class="{ 'flex items-center gap-0.5': showRepliedMarker }"
         >
           <Icon
             v-if="hasReplied"
@@ -249,8 +262,8 @@ watch(
             :created-at-timestamp="chat.created_at"
             :conversation-id="chat.id"
             :display-timestamp="displayTimestamp"
-            show-calendar-timestamp
-            class="!ml-0"
+            :show-calendar-timestamp="showCalendarTimestamp"
+            :class="{ '!ml-0': showRepliedMarker }"
           />
         </span>
         <UnreadBadge

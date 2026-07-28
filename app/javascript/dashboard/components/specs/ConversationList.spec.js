@@ -47,12 +47,14 @@ const conversation = ({ id, lastActivityAt, createdAt = lastActivityAt }) => ({
 
 const ConversationItemStub = {
   name: 'ConversationItem',
-  props: [
-    'source',
-    'displayTimestamp',
-    'showRepliedMarker',
-    'showCalendarTimestamp',
-  ],
+  // Typed rather than declared as a name list so a valueless boolean attribute
+  // resolves to true here exactly as it does on the real component.
+  props: {
+    source: { type: Object, default: () => ({}) },
+    displayTimestamp: { type: [String, Number], default: '' },
+    showRepliedMarker: { type: Boolean, default: false },
+    showCalendarTimestamp: { type: Boolean, default: false },
+  },
   template: `
     <div
       data-testid="conversation-card"

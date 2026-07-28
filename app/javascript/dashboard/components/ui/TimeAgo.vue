@@ -45,6 +45,10 @@ export default {
       displayTimestampTimeAgo: dynamicTime(
         this.displayTimestamp || this.lastActivityTimestamp
       ),
+      // Held as data rather than computed because it depends on the wall clock,
+      // which changes without any prop changing. Seeded in created() so it is
+      // correct even when auto refresh is disabled.
+      calendarTimestamp: '',
       timer: null,
     };
   },
@@ -57,12 +61,6 @@ export default {
     },
     effectiveDisplayTimestamp() {
       return this.displayTimestamp || this.lastActivityTimestamp;
-    },
-    calendarTimestamp() {
-      return relativeDayTimestamp(
-        this.effectiveDisplayTimestamp,
-        this.$t('CHAT_LIST.TIME_BUCKETS.YESTERDAY')
-      );
     },
     displayTime() {
       return shortTimestamp(this.displayTimestampTimeAgo);
@@ -101,6 +99,7 @@ export default {
       if (!this.displayTimestamp) {
         this.displayTimestampTimeAgo = dynamicTime(this.lastActivityTimestamp);
       }
+      this.updateCalendarTimestamp();
     },
     createdAtTimestamp() {
       this.createdAtTimeAgo = dynamicTime(this.createdAtTimestamp);
@@ -109,6 +108,7 @@ export default {
       this.displayTimestampTimeAgo = dynamicTime(
         this.effectiveDisplayTimestamp
       );
+      this.updateCalendarTimestamp();
     },
     conversationId() {
       // Reset display values and timer when the row is recycled to a different conversation.
@@ -117,11 +117,15 @@ export default {
       this.displayTimestampTimeAgo = dynamicTime(
         this.effectiveDisplayTimestamp
       );
+      this.updateCalendarTimestamp();
       if (this.isAutoRefreshEnabled) {
         clearTimeout(this.timer);
         this.createTimer();
       }
     },
+  },
+  created() {
+    this.updateCalendarTimestamp();
   },
   mounted() {
     if (this.isAutoRefreshEnabled) {
@@ -132,6 +136,16 @@ export default {
     clearTimeout(this.timer);
   },
   methods: {
+    updateCalendarTimestamp() {
+      // Only the calendar presentation renders this label, and most consumers
+      // of this component never ask for it.
+      if (!this.showCalendarTimestamp) return;
+
+      this.calendarTimestamp = relativeDayTimestamp(
+        this.effectiveDisplayTimestamp,
+        this.$t('CHAT_LIST.TIME_BUCKETS.YESTERDAY')
+      );
+    },
     createTimer() {
       this.timer = setTimeout(() => {
         this.lastActivityAtTimeAgo = dynamicTime(this.lastActivityTimestamp);
@@ -139,19 +153,37 @@ export default {
         this.displayTimestampTimeAgo = dynamicTime(
           this.effectiveDisplayTimestamp
         );
+        this.updateCalendarTimestamp();
         this.createTimer();
       }, this.refreshTime());
     },
+    millisecondsUntilNextDay() {
+      const now = new Date();
+      const nextDay = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        1
+      );
+      return nextDay.getTime() - now.getTime();
+    },
     refreshTime() {
       const timeDiff = Date.now() - this.effectiveDisplayTimestamp * 1000;
+      let interval = MINUTE_IN_MILLI_SECONDS;
       if (timeDiff > DAY_IN_MILLI_SECONDS) {
-        return DAY_IN_MILLI_SECONDS;
-      }
-      if (timeDiff > HOUR_IN_MILLI_SECONDS) {
-        return HOUR_IN_MILLI_SECONDS;
+        interval = DAY_IN_MILLI_SECONDS;
+      } else if (timeDiff > HOUR_IN_MILLI_SECONDS) {
+        interval = HOUR_IN_MILLI_SECONDS;
       }
 
-      return MINUTE_IN_MILLI_SECONDS;
+      // The calendar label changes at local midnight, so the timer must never
+      // sleep past it. Without this a yesterday-dated row keeps a stale label
+      // for most of a day.
+      if (!this.showCalendarTimestamp) return interval;
+
+      return Math.min(interval, this.millisecondsUntilNextDay());
     },
   },
 };
