@@ -10,7 +10,13 @@ import {
 describe('mailboxOperations', () => {
   describe('MAILBOX_ROLES', () => {
     it('exposes only the server-backed views and retires Drafts', () => {
-      expect(MAILBOX_ROLES).toEqual(['inbox', 'archive', 'spam', 'trash']);
+      expect(MAILBOX_ROLES).toEqual([
+        'inbox',
+        'sent',
+        'archive',
+        'spam',
+        'trash',
+      ]);
       expect(MAILBOX_ROLES).not.toContain('drafts');
     });
   });
@@ -113,6 +119,26 @@ describe('mailboxOperations', () => {
           'inbox'
         )
       ).toBe(true);
+    });
+
+    // Sent membership has no mailbox_state fact behind it. Imap::ConversationMailboxState
+    // computes roles from INCOMING messages only, and its vocabulary is inbox/archive/trash/spam,
+    // so roles can never contain 'sent'. Returning false here would make ChatList's
+    // "am I still in this view" check unconditionally false for the Sent tab, and every terminal
+    // mailbox operation would redirect the agent out of the conversation they have open.
+    // Mailbox operations act on incoming mail and never change Sent membership.
+    it('keeps a conversation in the Sent view, which has no roles entry behind it', () => {
+      expect(
+        mailboxStateIncludesRole(
+          { state: 'archive', roles: ['archive'], untracked_count: 0 },
+          'sent'
+        )
+      ).toBe(true);
+    });
+
+    it('keeps the Sent view stable even with no mailbox state at all', () => {
+      expect(mailboxStateIncludesRole(undefined, 'sent')).toBe(true);
+      expect(mailboxStateIncludesRole({ roles: [] }, 'sent')).toBe(true);
     });
   });
 });

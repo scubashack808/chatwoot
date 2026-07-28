@@ -11,6 +11,7 @@ const { t } = useI18n();
 
 const roleLabels = computed(() => ({
   inbox: t('CHAT_LIST.MAILBOX_ROLES.INBOX'),
+  sent: t('CHAT_LIST.MAILBOX_ROLES.SENT'),
   archive: t('CHAT_LIST.MAILBOX_ROLES.ARCHIVE'),
   spam: t('CHAT_LIST.MAILBOX_ROLES.SPAM'),
   trash: t('CHAT_LIST.MAILBOX_ROLES.TRASH'),

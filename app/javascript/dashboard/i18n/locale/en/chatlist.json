@@ -17,6 +17,7 @@
     "MAILBOX_ROLES": {
       "LABEL": "Mailbox views",
       "INBOX": "Inbox",
+      "SENT": "Sent",
       "ARCHIVE": "Archive",
       "SPAM": "Spam",
       "TRASH": "Trash"
