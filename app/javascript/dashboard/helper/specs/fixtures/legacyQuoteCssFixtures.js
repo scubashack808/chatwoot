@@ -8,8 +8,12 @@
  * then the message body and its Gmail quote container. 1,969 stored messages across
  * 1,414 conversations carry this shape.
  *
- * These bytes are the assertion of record for the legacy strip. Do not reformat them:
- * a fixture edited to match the regex proves nothing about production.
+ * These bytes are the assertion of record for the legacy strip. They are byte-identical to
+ * the captured row apart from CRLF normalization: the repo lint pipeline rewrites CR out of
+ * a source file, so the two CRLF breaks in the mail body arrive here as LF, 972 characters
+ * against the row's 974. The non-ASCII inventory (U+202F, the emoji) is preserved exactly,
+ * and the marker and style region the strip targets is LF in the row itself. Do not
+ * reformat them further: a fixture edited to match the regex proves nothing about production.
  *
  * The body carries a narrow no-break space (U+202F) in the Gmail attribution line,
  * which is why no-irregular-whitespace is disabled here. Real mail contains
