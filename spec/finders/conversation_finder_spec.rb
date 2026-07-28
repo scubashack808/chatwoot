@@ -364,6 +364,77 @@ describe ConversationFinder do
       end
     end
 
+    # M07: "Chatwoot and threadable external outgoing messages appear; Inbox membership is
+    # independent." The Sent view keeps the conversation-centric meaning it always had, clarified
+    # so that a reply sent from another client and imported by the Sent patch counts too.
+    context 'with the sent mailbox role' do
+      let(:params) { { status: 'all', mailbox_role: 'sent' } }
+
+      before do
+        account.enable_features!(:email_mailbox_actions)
+      end
+
+      it 'lists conversations with a Chatwoot outgoing message and with an imported external one' do
+        chatwoot_sent = create(:conversation, account: account, inbox: inbox)
+        create(:message, account: account, inbox: inbox, conversation: chatwoot_sent,
+                         message_type: :outgoing, source_id: 'chatwoot-send@example.test')
+
+        external_sent = create(:conversation, account: account, inbox: inbox)
+        imported = create(:message, account: account, inbox: inbox, conversation: external_sent,
+                                    message_type: :outgoing, source_id: 'from-phone@example.test')
+        imported.write_imap_identity!(
+          Imap::MessageIdentity.build(mailbox: 'INBOX.SentItems', uidvalidity: 7001, uid: 9, roles: ['sent'])
+        )
+
+        # Both of these carry a source_id, exactly as real ingested and real sent mail does, so
+        # that the outgoing and the not-private halves of the rule are each genuinely exercised
+        # rather than passing because source_id happened to be nil.
+        incoming_only = create(:conversation, account: account, inbox: inbox)
+        create(:message, account: account, inbox: inbox, conversation: incoming_only,
+                         message_type: :incoming, source_id: 'customer-mail@example.test')
+
+        private_note_only = create(:conversation, account: account, inbox: inbox)
+        create(:message, account: account, inbox: inbox, conversation: private_note_only,
+                         message_type: :outgoing, private: true, source_id: 'private-note@example.test')
+
+        sent_ids = described_class.new(user_1, status: 'all', mailbox_role: 'sent').perform[:conversations].map(&:id)
+
+        expect(sent_ids).to include(chatwoot_sent.id, external_sent.id)
+        expect(sent_ids).not_to include(incoming_only.id, private_note_only.id)
+      end
+
+      it 'keeps Inbox membership independent of Sent membership' do
+        both = create(:conversation, account: account, inbox: inbox)
+        incoming = create(:message, account: account, inbox: inbox, conversation: both, message_type: :incoming)
+        incoming.write_imap_identity!(
+          Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 1, roles: ['inbox'])
+        )
+        outgoing = create(:message, account: account, inbox: inbox, conversation: both,
+                                    message_type: :outgoing, source_id: 'reply@example.test')
+        outgoing.write_imap_identity!(
+          Imap::MessageIdentity.build(mailbox: 'INBOX.SentItems', uidvalidity: 7001, uid: 2, roles: ['sent'])
+        )
+
+        inbox_ids = described_class.new(user_1, status: 'all', mailbox_role: 'inbox').perform[:conversations].map(&:id)
+        sent_ids = described_class.new(user_1, status: 'all', mailbox_role: 'sent').perform[:conversations].map(&:id)
+
+        expect(inbox_ids).to include(both.id)
+        expect(sent_ids).to include(both.id)
+        expect(Imap::ConversationMailboxState.new(conversation: both).to_h[:state]).to eq 'inbox'
+      end
+
+      it 'ignores the sent role entirely while the mailbox feature is off, exactly as the other roles do' do
+        account.disable_features!(:email_mailbox_actions)
+        conversation = create(:conversation, account: account, inbox: inbox)
+        create(:message, account: account, inbox: inbox, conversation: conversation,
+                         message_type: :outgoing, source_id: 'chatwoot-send@example.test')
+
+        result = described_class.new(user_1, status: 'all', mailbox_role: 'sent').perform
+
+        expect(result[:conversations].map(&:id)).to include(conversation.id)
+      end
+    end
+
     context 'with perform_meta_only' do
       let(:params) { { assignee_type: 'assigned' } }
 
