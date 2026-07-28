@@ -9,10 +9,10 @@ class Email::FromBuilder < Email::BaseBuilder
                       :google_oauth,
                       :microsoft_oauth,
                       :forwarding_own_smtp
-                   channel.email
+                   channel.outbound_address_for(conversation, message: message)
                  when :imap_chatwoot_smtp,
                       :forwarding_chatwoot_smtp
-                   channel.verified_for_sending ? channel.email : account_support_email
+                   channel.verified_for_sending ? channel.outbound_address_for(conversation, message: message) : account_support_email
                  else
                    account_support_email
                  end

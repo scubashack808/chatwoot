@@ -282,6 +282,8 @@
       "COPILOT_THINKING": "Copilot is thinking",
       "EMAIL_HEAD": {
         "TO": "TO",
+        "FROM": "FROM",
+        "REPLY_ALL": "Reply all",
         "ADD_BCC": "Add bcc",
         "CC": {
           "LABEL": "CC",

@@ -3,6 +3,7 @@
 # Table name: channel_email
 #
 #  id                        :bigint           not null, primary key
+#  aliases                   :string           default([]), is an Array
 #  email                     :string           not null
 #  forward_to_email          :string           not null
 #  imap_address              :string           default("")
@@ -32,6 +33,7 @@
 #
 # Indexes
 #
+#  index_channel_email_on_aliases           (aliases) USING gin
 #  index_channel_email_on_email             (email) UNIQUE
 #  index_channel_email_on_forward_to_email  (forward_to_email) UNIQUE
 #
@@ -39,6 +41,7 @@
 class Channel::Email < ApplicationRecord
   include Channelable
   include Reauthorizable
+  include ::EmailHelper
 
   AUTHORIZATION_ERROR_THRESHOLD = 10
 
@@ -54,13 +57,17 @@ class Channel::Email < ApplicationRecord
   EDITABLE_ATTRS = [:email, :imap_enabled, :imap_login, :imap_password, :imap_address, :imap_port, :imap_enable_ssl, :imap_authentication,
                     :smtp_enabled, :smtp_login, :smtp_password, :smtp_address, :smtp_port, :smtp_domain, :smtp_enable_starttls_auto,
                     :smtp_enable_ssl_tls, :smtp_openssl_verify_mode, :smtp_authentication, :provider, :verified_for_sending,
-                    { mailbox_sync_config: {} }].freeze
+                    { mailbox_sync_config: {}, aliases: [] }].freeze
 
   validates :email, uniqueness: true
   validates :forward_to_email, uniqueness: true
   validate :validate_mailbox_sync_config
   validate :validate_folder_overrides_against_server, if: :folder_overrides_changed?
+  validate :aliases_exclude_the_primary_address
+  validate :aliases_are_unique_across_channels
+  validate :primary_address_is_not_another_channels_alias
 
+  before_validation :normalize_aliases
   before_validation :ensure_forward_to_email, on: :create
 
   def name
@@ -87,7 +94,81 @@ class Channel::Email < ApplicationRecord
     imap_enabled && imap_address == 'imap.gmail.com'
   end
 
+  # Every address this inbox accepts mail at and may send from: the primary plus its aliases.
+  def all_addresses
+    ([email] + aliases.to_a).compact_blank.uniq
+  end
+
+  # The configured address matching the candidate, or nil. Matching uses the same
+  # case-insensitive, plus-addressing rules the inbound finder already uses, and it returns the
+  # CONFIGURED spelling rather than the candidate, so the address we send from is always one an
+  # administrator typed rather than one a header happened to contain.
+  def owned_address(candidate)
+    canonical_address(candidate, all_addresses)
+  end
+
+  # Wider than owned_address on purpose: forward_to_email is not a sending identity, but mail
+  # addressed to it lands back in this inbox, so it must never appear on an outgoing recipient
+  # list either.
+  def routes_to_self?(candidate)
+    canonical_address(candidate, all_addresses + [forward_to_email]).present?
+  end
+
+  # The address a reply is sent from, in precedence order:
+  #   1. the agent's per-message choice
+  #   2. the address the LATEST inbound message on this conversation arrived at
+  #   3. the channel primary
+  # A candidate this channel does not own is dropped rather than trusted, so no stored, stale or
+  # tampered value can put an address we do not own on the wire.
+  def outbound_address_for(conversation, message: nil)
+    owned_address(message&.content_attributes&.dig('from_email')) ||
+      Email::InboundRecipientFinder.new(channel: self, conversation: conversation).perform ||
+      email
+  end
+
   private
+
+  def canonical_address(candidate, addresses)
+    normalized = normalized_address(candidate)
+    return if normalized.blank?
+
+    addresses.compact_blank.find { |address| normalized_address(address) == normalized }
+  end
+
+  def normalized_address(value)
+    return if value.blank?
+    return unless value.to_s.include?('@')
+
+    normalize_email_with_plus_addressing(value.to_s.strip)
+  end
+
+  def normalize_aliases
+    self.aliases = Array(aliases).map { |value| value.to_s.downcase.strip }.compact_blank.uniq
+  end
+
+  def aliases_exclude_the_primary_address
+    return if aliases.blank? || email.blank?
+
+    errors.add(:aliases, 'cannot include the primary email address') if aliases.include?(email.to_s.downcase.strip)
+  end
+
+  def aliases_are_unique_across_channels
+    return if aliases.blank?
+
+    scope = self.class.where('aliases && ARRAY[:values]::varchar[] OR LOWER(email) = ANY (ARRAY[:values]::varchar[])', values: aliases)
+    scope = scope.where.not(id: id) if persisted?
+
+    errors.add(:aliases, 'are already in use on another email inbox') if scope.exists?
+  end
+
+  def primary_address_is_not_another_channels_alias
+    return if email.blank?
+
+    scope = self.class.where('aliases @> ARRAY[?]::varchar[]', [email.to_s.downcase.strip])
+    scope = scope.where.not(id: id) if persisted?
+
+    errors.add(:email, 'is already configured as an alias on another email inbox') if scope.exists?
+  end
 
   def ensure_forward_to_email
     self.forward_to_email ||= "#{SecureRandom.hex}@#{account.inbound_email_domain}"

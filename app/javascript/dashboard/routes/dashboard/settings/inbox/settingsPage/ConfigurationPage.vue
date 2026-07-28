@@ -11,6 +11,7 @@ import SettingsAccordion from 'dashboard/components-next/Settings/SettingsAccord
 import ImapSettings from '../ImapSettings.vue';
 import SmtpSettings from '../SmtpSettings.vue';
 import MailboxSyncSettings from '../MailboxSyncSettings.vue';
+import EmailAliasSettings from '../EmailAliasSettings.vue';
 import { useVuelidate } from '@vuelidate/core';
 import { required } from '@vuelidate/validators';
 import NextButton from 'dashboard/components-next/button/Button.vue';
@@ -25,6 +26,7 @@ export default {
     ImapSettings,
     SmtpSettings,
     MailboxSyncSettings,
+    EmailAliasSettings,
     NextButton,
     TextArea,
   },
@@ -389,6 +391,7 @@ export default {
         </div>
       </SettingsFieldSection>
     </div>
+    <EmailAliasSettings :inbox="inbox" />
     <ImapSettings :inbox="inbox" />
     <SmtpSettings v-if="inbox.imap_enabled" :inbox="inbox" />
     <MailboxSyncSettings v-if="inbox.imap_enabled" :inbox="inbox" />

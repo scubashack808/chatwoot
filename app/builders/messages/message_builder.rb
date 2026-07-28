@@ -77,18 +77,15 @@ class Messages::MessageBuilder
   end
 
   def process_emails
-    return unless @conversation.inbox&.inbox_type == 'Email'
+    return unless email_inbox?
 
-    cc_emails = process_email_string(@params[:cc_emails])
-    bcc_emails = process_email_string(@params[:bcc_emails])
-    to_emails = process_email_string(@params[:to_emails])
+    guard = Email::OutboundAddressGuard.new(channel: @conversation.inbox.channel)
+    guard.assert_from_address!(content_attributes&.dig(:from_email))
 
-    all_email_addresses = cc_emails + bcc_emails + to_emails
-    validate_email_addresses(all_email_addresses)
+    recipients = %i[cc_emails bcc_emails to_emails].index_with { |key| process_email_string(@params[key]) }
+    validate_email_addresses(recipients.values.flatten)
 
-    @message.content_attributes[:cc_emails] = cc_emails
-    @message.content_attributes[:bcc_emails] = bcc_emails
-    @message.content_attributes[:to_emails] = to_emails
+    @message.content_attributes.merge!(recipients.transform_values { |addresses| guard.sanitize(addresses) })
   end
 
   def process_email_content

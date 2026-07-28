@@ -145,6 +145,9 @@ class MailPresenter < SimpleDelegator
     headers = {
       'x-original-from' => @mail['X-Original-From']&.value,
       'x-original-sender' => @mail['X-Original-Sender']&.value,
+      # Kept so a later reply can tell which of our addresses actually received this message when
+      # a forwarder rewrote the visible To header. Nothing else persists the envelope recipient.
+      'x-original-to' => @mail['X-Original-To']&.value,
       'x-forwarded-for' => @mail['X-Forwarded-For']&.value
     }.compact
 
