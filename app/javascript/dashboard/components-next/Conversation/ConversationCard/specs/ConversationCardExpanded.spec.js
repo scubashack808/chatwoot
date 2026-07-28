@@ -5,14 +5,15 @@ const defaultChat = {
   id: 1,
   labels: [],
   messages: [],
-  last_public_non_activity_message: null,
+  last_public_incoming_message: null,
+  last_agent_reply_message: null,
   priority: null,
   unread_count: 0,
   timestamp: 1700000000,
   created_at: 1700000000,
 };
 
-const mountComponent = chat =>
+const mountComponent = (chat, props = {}) =>
   shallowMount(ConversationCardExpanded, {
     props: {
       chat: { ...defaultChat, ...chat },
@@ -22,6 +23,7 @@ const mountComponent = chat =>
         availability_status: 'offline',
       },
       inbox: { id: 1 },
+      ...props,
     },
     global: {
       mocks: {
@@ -30,28 +32,63 @@ const mountComponent = chat =>
     },
   });
 
-describe('ConversationCardExpanded', () => {
-  it('shows the replied marker when the latest public non-activity message is outgoing', () => {
-    const wrapper = mountComponent({
-      waiting_since: 1700000100,
-      last_public_non_activity_message: {
-        message_type: 1,
-        created_at: 1700000200,
-      },
-    });
+const listProps = { showRepliedMarker: true, showCalendarTimestamp: true };
 
-    expect(wrapper.find('[data-testid="replied-marker"]').exists()).toBe(true);
+const repliedChat = {
+  last_public_incoming_message: { id: 10, created_at: 1700000100 },
+  last_agent_reply_message: { id: 11, created_at: 1700000200 },
+};
+
+describe('ConversationCardExpanded', () => {
+  it('carries the conversation class the list seam rule targets', () => {
+    expect(mountComponent({}).classes()).toContain('conversation');
   });
 
-  it('does not infer the replied marker from a blank waiting_since', () => {
-    const wrapper = mountComponent({
-      waiting_since: null,
-      last_public_non_activity_message: {
-        message_type: 0,
-        created_at: 1700000200,
-      },
+  describe('when the list opts into the new presentation', () => {
+    it('shows the replied marker when a successful reply is newer than the newest incoming', () => {
+      const wrapper = mountComponent(
+        { waiting_since: 1700000100, ...repliedChat },
+        listProps
+      );
+
+      expect(wrapper.find('[data-testid="replied-marker"]').exists()).toBe(
+        true
+      );
     });
 
-    expect(wrapper.find('[data-testid="replied-marker"]').exists()).toBe(false);
+    it('does not infer the replied marker from a blank waiting_since', () => {
+      const wrapper = mountComponent(
+        {
+          waiting_since: null,
+          last_public_incoming_message: { id: 12, created_at: 1700000200 },
+          last_agent_reply_message: null,
+        },
+        listProps
+      );
+
+      expect(wrapper.find('[data-testid="replied-marker"]').exists()).toBe(
+        false
+      );
+    });
+  });
+
+  describe('by default, for any consumer that does not opt in', () => {
+    it('renders no replied marker even when the payload says replied', () => {
+      const wrapper = mountComponent(repliedChat);
+
+      expect(wrapper.find('[data-testid="replied-marker"]').exists()).toBe(
+        false
+      );
+    });
+
+    it('leaves TimeAgo on its created-and-last-activity presentation', () => {
+      const wrapper = mountComponent(repliedChat);
+
+      expect(
+        wrapper
+          .findComponent({ name: 'TimeAgo' })
+          .props('showCalendarTimestamp')
+      ).toBe(false);
+    });
   });
 });
