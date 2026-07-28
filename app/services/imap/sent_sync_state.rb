@@ -20,6 +20,14 @@ class Imap::SentSyncState
   # More than one copy already matches this Message-ID. Appending another would compound it, so
   # the item stops here and stays visible.
   CONFLICT = 'conflict'.freeze
+  # Given up on deliberately, and NOT retried: either the source re-rendered with a Message-ID
+  # that is not the one being searched for, which would make every append a duplicate, or the
+  # append has failed the maximum number of consecutive times. Distinct from FAILED, which is
+  # transient and is retried on the next cycle.
+  ABANDONED = 'abandoned'.freeze
+
+  # States that stop a message being considered again. `failed` is deliberately not among them.
+  TERMINAL = [SYNCED, ABANDONED].freeze
 
   MAX_ERROR_LENGTH = 200
 

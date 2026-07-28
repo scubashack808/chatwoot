@@ -28,6 +28,15 @@ export const isMailboxOperationTerminal = operation =>
 
 export const mailboxStateIncludesRole = (mailboxState, mailboxRole) => {
   const roles = mailboxState?.roles || [];
+  // Sent has no mailbox_state fact behind it. Imap::ConversationMailboxState derives roles from
+  // INCOMING messages, and its vocabulary is inbox/archive/trash/spam, so roles never contains
+  // 'sent'. Falling through to roles.includes would make this permanently false for the Sent view,
+  // and ChatList's "is this conversation still in the view I am looking at" check would redirect
+  // the agent out of an open conversation on every terminal mailbox operation. Mailbox operations
+  // move incoming mail; they never change whether a conversation has an outgoing message.
+  if (mailboxRole === 'sent') {
+    return true;
+  }
   if (mailboxRole === 'inbox') {
     return (
       mailboxState?.state === 'inbox' ||

@@ -40,6 +40,10 @@ class Imap::SentInboundImport
     return @counts[:already_present] += 1 if already_present?(message_id)
 
     thread(header, data.attr['UID'], message_id)
+  rescue Imap::Lease::LeaseLostError
+    # Losing the lease says nothing about this message. Counting it as an import failure would
+    # turn one contention event into a batch of failures. Stop the pass; the job reports it.
+    raise
   rescue StandardError => e
     @counts[:failed] += 1
     Rails.logger.error "[IMAP::SENT_SYNC] Could not import a Sent message for inbox #{channel.inbox.id}: #{e.class}"

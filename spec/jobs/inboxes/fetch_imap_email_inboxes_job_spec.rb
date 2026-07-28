@@ -70,12 +70,45 @@ RSpec.describe Inboxes::FetchImapEmailInboxesJob do
   # existing */1 trigger, the same per-inbox lease. Sent sync rides this fan-out as its own
   # isolated job, so a Sent failure cannot break ingestion and no second cron entry is added.
   context 'with Sent synchronization' do
+    # Sent sync is dark twice over, exactly like reconciliation: the account feature flag AND the
+    # per-inbox mode. Without both, nothing is enqueued at all, so a dark feature costs no job.
+    before do
+      account.enable_features!(:email_mailbox_actions)
+      imap_email_channel.update!(mailbox_sync_config: { 'mode' => 'observe', 'sent_mode' => 'append' })
+    end
+
     it 'enqueues Sent sync from the same fan-out, for the same eligible channels' do
       allow(Inboxes::FetchImapEmailsJob).to receive(:perform_later)
       expect(Inboxes::SyncImapSentJob).to receive(:perform_later).with(imap_email_channel).once
       expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later).with(imap_email_channel_suspended)
       expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later).with(disabled_imap_channel)
       expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later).with(reauth_required_channel)
+
+      described_class.perform_now
+    end
+
+    it 'enqueues nothing for Sent when the account feature flag is off' do
+      account.disable_features!(:email_mailbox_actions)
+      allow(Inboxes::FetchImapEmailsJob).to receive(:perform_later)
+
+      expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later)
+
+      described_class.perform_now
+    end
+
+    it 'enqueues nothing for Sent when the inbox mailbox sync mode is off' do
+      imap_email_channel.update!(mailbox_sync_config: { 'mode' => 'off', 'sent_mode' => 'append' })
+      allow(Inboxes::FetchImapEmailsJob).to receive(:perform_later)
+
+      expect(Inboxes::SyncImapSentJob).not_to receive(:perform_later)
+
+      described_class.perform_now
+    end
+
+    it 'still fetches mail for an inbox whose Sent sync is gated off' do
+      account.disable_features!(:email_mailbox_actions)
+
+      expect(Inboxes::FetchImapEmailsJob).to receive(:perform_later).with(imap_email_channel).once
 
       described_class.perform_now
     end

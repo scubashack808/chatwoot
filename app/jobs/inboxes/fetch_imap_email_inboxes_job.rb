@@ -13,7 +13,7 @@ class Inboxes::FetchImapEmailInboxesJob < ApplicationJob
       # It is a separate job so a Sent failure cannot break ingestion, and it takes the same
       # per-inbox lease, so the jobs on this fan-out defer to each other instead of opening extra
       # connections.
-      ::Inboxes::SyncImapSentJob.perform_later(inbox.channel)
+      ::Inboxes::SyncImapSentJob.perform_later(inbox.channel) if should_sync_sent?(inbox)
     end
   end
 
@@ -26,6 +26,19 @@ class Inboxes::FetchImapEmailInboxesJob < ApplicationJob
   #
   # This is a strictly narrower gate than should_fetch_emails?, which has already passed here.
   def should_reconcile?(inbox)
+    return false unless inbox.account.feature_enabled?('email_mailbox_actions')
+
+    !inbox.channel.mailbox_sync.off?
+  end
+
+  # Sent sync is dark on the same two gates as reconciliation. It is a separate predicate rather
+  # than a shared one because the two jobs answer to different halves of the config and will
+  # diverge (Sent has its own sent_mode), and because reusing reconciliation's predicate would
+  # make a later change to one silently change the other.
+  #
+  # Gating at enqueue time rather than only inside the job is what keeps a dark feature free: with
+  # either gate off, no job is queued at all, instead of one no-op job per email inbox per minute.
+  def should_sync_sent?(inbox)
     return false unless inbox.account.feature_enabled?('email_mailbox_actions')
 
     !inbox.channel.mailbox_sync.off?

@@ -12,11 +12,18 @@ class Imap::SentOutboundSync
   RETRY_WINDOW = 7.days
   MAX_PER_CYCLE = 100
 
+  # A retry that keeps failing the same way is not going to start working inside the retry window,
+  # and every attempt is an APPEND that may or may not have landed. After this many consecutive
+  # failures the message stops being appended and says so, instead of retrying every minute for
+  # seven days.
+  MAX_APPEND_ATTEMPTS = 5
+
   # Rails' JSON store coder can persist this jsonb column as either a JSON object or a JSON string.
   # Extracting the root as text and casting it normalises both, exactly as Imap::MailboxRoleFilter
   # does for the read surface.
-  NOT_SYNCED_SQL = <<~SQL.squish.freeze
-    COALESCE((messages.external_source_ids #>> '{}')::jsonb #>> '{imap,sent_sync,state}', '') != 'synced'
+  NOT_TERMINAL_SQL = <<~SQL.squish.freeze
+    COALESCE((messages.external_source_ids #>> '{}')::jsonb #>> '{imap,sent_sync,state}', '')
+      NOT IN (#{Imap::SentSyncState::TERMINAL.map { |state| "'#{state}'" }.join(', ')})
   SQL
 
   def initialize(channel:, sent_mailbox:)
@@ -38,7 +45,7 @@ class Imap::SentOutboundSync
                            .where(message_type: :outgoing, private: false)
                            .where.not(source_id: nil)
                            .where(created_at: RETRY_WINDOW.ago..)
-                           .where(NOT_SYNCED_SQL)
+                           .where(NOT_TERMINAL_SQL)
                            .limit(MAX_PER_CYCLE)
                            .to_a
   end
@@ -54,6 +61,12 @@ class Imap::SentOutboundSync
     return record_conflict(message, existing) if existing.many?
 
     sent_mailbox.append_allowed? ? append(message) : await_provider_copy(message)
+  rescue Imap::Lease::LeaseLostError
+    # Contention is not a per-message data failure. Imap::Session raises this before every command
+    # once the lease is gone, so swallowing it here would mark the whole remaining batch failed and
+    # inflate every attempt count for something that was never about these messages. The job
+    # already has a handler for it. Same shape as Imap::MailboxOperationExecutor.
+    raise
   rescue StandardError => e
     record_failure(message, e)
   end
@@ -64,8 +77,13 @@ class Imap::SentOutboundSync
   end
 
   def append(message)
+    return record_attempts_exhausted(message) if attempts_exhausted?(message)
+
+    mail = rendered_mail(message)
+    return record_message_id_mismatch(message, mail.message_id) unless mail.message_id == message.source_id
+
     location = sent_mailbox.append(
-      source: rendered_source(message),
+      source: mail.encoded,
       message_id: message.source_id,
       internal_date: message.created_at.to_time
     )
@@ -77,9 +95,37 @@ class Imap::SentOutboundSync
 
   # The same renderer and the same entry point that delivered the message. It is rendered, never
   # delivered: ActionMailer::MessageDelivery#message builds the mail without handing it to a
-  # delivery method, so this cannot send a second copy to the contact.
-  def rendered_source(message)
-    ConversationReplyMailer.with(account: message.account).email_reply(message).message.encoded
+  # delivery method, so this cannot send a second copy to the contact. The Mail object is returned
+  # rather than its encoding, so the Message-ID can be read off the exact object about to be
+  # appended instead of re-parsing what was encoded.
+  def rendered_mail(message)
+    ConversationReplyMailer.with(account: message.account).email_reply(message).message
+  end
+
+  # Everything about not duplicating rests on the premise that the source being appended carries
+  # the Message-ID the search looks for. Two inputs to that deterministic id, the account's
+  # inbound email domain and the channel address, can change after the message was delivered.
+  # When they do, the search finds nothing, the append lands a copy under a new id, and the next
+  # cycle does it again. So the premise is checked rather than assumed, and a mismatch is
+  # abandoned rather than retried: retrying is precisely what would duplicate.
+  def record_message_id_mismatch(message, rendered_id)
+    record_state(message, Imap::SentSyncState::ABANDONED,
+                 error: "rendered Message-ID #{rendered_id.inspect} does not match the delivered #{message.source_id.inspect}")
+    @counts[:message_id_mismatch] += 1
+  end
+
+  # A consecutive-failure cap. Without it a message that fails the same way every time is appended
+  # once a minute for the whole seven-day retry window, and each of those attempts may have left a
+  # copy on the server.
+  def attempts_exhausted?(message)
+    state = message.imap_sent_sync
+    state.present? && state.state == Imap::SentSyncState::FAILED && state.attempts >= MAX_APPEND_ATTEMPTS
+  end
+
+  def record_attempts_exhausted(message)
+    record_state(message, Imap::SentSyncState::ABANDONED,
+                 error: "gave up after #{MAX_APPEND_ATTEMPTS} consecutive failed attempts")
+    @counts[:attempts_exhausted] += 1
   end
 
   def await_provider_copy(message)

@@ -11,7 +11,11 @@ require 'rails_helper'
 # Gate D in the execution plan.
 RSpec.describe Imap::SentSyncService do
   let(:account) { create(:account) }
-  let(:channel) { create(:channel_email, :imap_email, account: account, mailbox_sync_config: config) }
+  # smtp_enabled matters and was missing. ConversationReplyMailer#email_reply returns early unless
+  # the inbox can actually send, so without it the mailer never renders and `rendered_source`
+  # produces an unprocessed, header-less mail. Every one of these examples describes an inbox whose
+  # Chatwoot replies really did go out over SMTP, which is exactly an inbox with SMTP enabled.
+  let(:channel) { create(:channel_email, :imap_email, account: account, smtp_enabled: true, mailbox_sync_config: config) }
   let(:config) { { 'mode' => 'active', 'sent_mode' => 'append' } }
   let(:inbox) { channel.inbox }
   let(:conversation) do
@@ -28,16 +32,32 @@ RSpec.describe Imap::SentSyncService do
   end
   let(:imap) { instance_double(Net::IMAP, disconnected?: false, disconnect: true, logout: true) }
 
-  # A Chatwoot send that already went out over SMTP: SendOnEmailService stores the RFC Message-ID
-  # it received back from the mailer on the message's source_id.
+  # A Chatwoot send that already went out over SMTP. SendOnEmailService stores the RFC Message-ID
+  # the mailer actually produced (`message.update(source_id: reply_mail.message_id)`), so in
+  # production the stored id and the re-rendered id agree by construction. The fixture is built the
+  # same way rather than with a made-up string, because the whole search-before-append guard is
+  # only meaningful when those two agree, and a fixture that faked it could not detect the day
+  # they stop agreeing.
   let(:outgoing_message) do
-    create(:message, account: account, inbox: inbox, conversation: conversation,
-                     message_type: :outgoing, source_id: 'chatwoot-send-1@example.test')
+    message = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing)
+    message.update!(source_id: delivered_message_id(message))
+    message
   end
 
   # UIDPLUS APPENDUID as net-imap parses it.
   let(:append_response) do
     tagged_response('APPENDUID', Struct.new(:uidvalidity, :assigned_uid).new(7001, 42))
+  end
+
+  # Exactly what SendOnEmailService records at delivery time.
+  def delivered_message_id(message)
+    ConversationReplyMailer.with(account: message.account).email_reply(message).message.message_id
+  end
+
+  # A method rather than a let, deliberately: the M06 group is already at RuboCop's memoized-helper
+  # limit, and this needs no memoisation of its own because outgoing_message is already memoised.
+  def sent_message_id
+    outgoing_message.source_id
   end
 
   def tagged_response(name, data)
@@ -46,6 +66,9 @@ RSpec.describe Imap::SentSyncService do
   end
 
   before do
+    # Sent sync is dark twice over, like every other mailbox path in this stack: the account
+    # feature flag AND the per-inbox mode. These examples are about what happens once it is on.
+    account.enable_features!(:email_mailbox_actions)
     allow(Net::IMAP).to receive(:new).and_return(imap)
     allow(imap).to receive(:authenticate)
     allow(imap).to receive(:login)
@@ -114,7 +137,7 @@ RSpec.describe Imap::SentSyncService do
       outgoing_message
       described_class.new(channel: channel).perform
 
-      expect(imap).to have_received(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test'])
+      expect(imap).to have_received(:uid_search).with(['HEADER', 'Message-ID', sent_message_id])
     end
 
     it 'captures APPENDUID and persists it as the message identity with the sent role' do
@@ -149,7 +172,7 @@ RSpec.describe Imap::SentSyncService do
     it 'confirms the copy by search when the server returns no APPENDUID' do
       outgoing_message
       allow(imap).to receive(:append).and_return(tagged_response(nil, nil))
-      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test']).and_return([], [99])
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([], [99])
 
       described_class.new(channel: channel).perform
 
@@ -160,7 +183,7 @@ RSpec.describe Imap::SentSyncService do
   describe 'rerun deduplicates (M05)' do
     it 'attaches the existing copy instead of appending a second one' do
       outgoing_message
-      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test']).and_return([55])
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([55])
 
       report = described_class.new(channel: channel).perform
 
@@ -172,7 +195,7 @@ RSpec.describe Imap::SentSyncService do
 
     it 'records a conflict rather than appending when the server already holds two copies' do
       outgoing_message
-      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test']).and_return([55, 56])
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([55, 56])
 
       report = described_class.new(channel: channel).perform
 
@@ -187,7 +210,7 @@ RSpec.describe Imap::SentSyncService do
 
     it 'never issues an APPEND, and attaches the copy the provider made' do
       outgoing_message
-      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test']).and_return([31])
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([31])
 
       report = described_class.new(channel: channel).perform
 
@@ -235,7 +258,7 @@ RSpec.describe Imap::SentSyncService do
 
     it 'attaches the copy Gmail SMTP already saved' do
       outgoing_message
-      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test']).and_return([12])
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([12])
 
       described_class.new(channel: channel).perform
 
@@ -271,7 +294,7 @@ RSpec.describe Imap::SentSyncService do
     it 'runs in observe mode, because attaching an existing copy mutates nothing on the server' do
       outgoing_message
       channel.update!(mailbox_sync_config: config.merge('mode' => 'observe'))
-      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', 'chatwoot-send-1@example.test']).and_return([55])
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([55])
 
       report = described_class.new(channel: channel).perform
 
@@ -405,13 +428,116 @@ RSpec.describe Imap::SentSyncService do
       allow(imap).to receive(:uid_fetch).with([external_uid], array_including('BODY.PEEK[HEADER]')).and_return(
         [instance_double(Net::IMAP::FetchData,
                          attr: { 'UID' => external_uid,
-                                 'BODY[HEADER]' => "From: care@example.test\nSubject: ours\nMessage-ID: <chatwoot-send-1@example.test>\n\n" })]
+                                 'BODY[HEADER]' => "From: care@example.test\nSubject: ours\nMessage-ID: <#{sent_message_id}>\n\n" })]
       )
 
       report = described_class.new(channel: channel).perform
 
       expect(report[:inbound][:imported]).to eq 0
       expect(report[:inbound][:already_present]).to eq 1
+    end
+
+    # F4. Imap::Session#command renews the lease before every command, so a lost lease surfaces
+    # here as an exception. The blanket rescue used to swallow it and count it as a per-message
+    # import failure, which records contention as a data failure.
+    it 'lets a lost lease propagate out of the import pass rather than counting it as a failure' do
+      allow(imap).to receive(:uid_fetch).with(external_uid, array_including('BODY.PEEK[]')).and_raise(Imap::Lease::LeaseLostError)
+
+      expect { described_class.new(channel: channel).perform }.to raise_error(Imap::Lease::LeaseLostError)
+      expect(conversation.messages.find_by(source_id: external_message_id)).to be_nil
+    end
+  end
+
+  # F1. Every other mailbox path in this stack is dark twice over. This one checked only the
+  # per-inbox half, so an inbox admin could turn on Active plus Append from an un-gated settings
+  # UI and start APPENDing to a real mail server with the account feature flag off.
+  describe 'the email_mailbox_actions account gate (F1)' do
+    it 'does no Sent work at all when the account feature flag is off' do
+      outgoing_message
+      account.disable_features!(:email_mailbox_actions)
+
+      report = described_class.new(channel: channel).perform
+
+      expect(report[:status]).to eq 'skipped'
+      expect(report[:reason]).to eq 'feature_disabled'
+      expect(Net::IMAP).not_to have_received(:new)
+    end
+
+    it 'checks the account flag before the per-inbox mode, matching reconciliation ordering' do
+      outgoing_message
+      account.disable_features!(:email_mailbox_actions)
+      channel.update!(mailbox_sync_config: config.merge('mode' => 'off'))
+
+      expect(described_class.new(channel: channel).perform[:reason]).to eq 'feature_disabled'
+    end
+  end
+
+  # F3. The no-duplicates claim rests entirely on the re-rendered source carrying the same
+  # Message-ID the search looks for. Two inputs to that id are mutable after delivery, and nothing
+  # read the id back out of the source it was about to send.
+  describe 'idempotency backstop (F3)' do
+    it 'never APPENDs when the re-rendered source carries a different Message-ID' do
+      outgoing_message
+      account.update!(domain: 'changed.example.test')
+
+      report = described_class.new(channel: channel).perform
+
+      expect(imap).not_to have_received(:append)
+      expect(report[:outbound][:message_id_mismatch]).to eq 1
+      expect(outgoing_message.reload.imap_sent_sync.state).to eq 'abandoned'
+    end
+
+    it 'does not retry a mismatched message on the next cycle' do
+      outgoing_message
+      account.update!(domain: 'changed.example.test')
+      described_class.new(channel: channel).perform
+
+      expect(described_class.new(channel: channel).perform[:outbound][:candidates]).to eq 0
+    end
+
+    it 'stops appending after five consecutive failures rather than retrying for seven days' do
+      outgoing_message
+      outgoing_message.write_imap_sent_sync!(Imap::SentSyncState.build(state: Imap::SentSyncState::FAILED, attempts: 5))
+
+      report = described_class.new(channel: channel).perform
+
+      expect(imap).not_to have_received(:append)
+      expect(report[:outbound][:attempts_exhausted]).to eq 1
+      expect(outgoing_message.reload.imap_sent_sync.state).to eq 'abandoned'
+    end
+
+    it 'still retries a message that has failed fewer times than the cap' do
+      outgoing_message
+      outgoing_message.write_imap_sent_sync!(Imap::SentSyncState.build(state: Imap::SentSyncState::FAILED, attempts: 4))
+
+      described_class.new(channel: channel).perform
+
+      expect(imap).to have_received(:append)
+    end
+  end
+
+  # F4, the outbound half. See the import half inside the M06 block above.
+  describe 'lease loss propagates (F4)' do
+    it 'raises out of the outbound pass instead of recording a per-message Sent failure' do
+      outgoing_message
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_raise(Imap::Lease::LeaseLostError)
+
+      expect { described_class.new(channel: channel).perform }.to raise_error(Imap::Lease::LeaseLostError)
+      expect(outgoing_message.reload.imap_sent_sync).to be_nil
+    end
+  end
+
+  # F6. Imap::Session#command is the only path that renews the lease and applies the command
+  # timeout. CAPABILITY decides whether APPEND is allowed at all, so it is the last command that
+  # should be issued outside that invariant.
+  describe 'capabilities are read inside the session (F6)' do
+    it 'passes the session-read capabilities to the dialect selector instead of re-fetching them' do
+      outgoing_message
+      allow(Imap::MailboxCommand).to receive(:dialect_for).and_call_original
+
+      described_class.new(channel: channel).perform
+
+      expect(Imap::MailboxCommand).to have_received(:dialect_for).with(anything, capabilities: capabilities)
     end
   end
 end

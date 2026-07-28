@@ -848,5 +848,70 @@ RSpec.describe ConversationReplyMailer do
         expect(transcript.decoded).to include(message.content)
       end
     end
+
+    # F2. email_reply is now also used to RE-render an already delivered message, when Sent
+    # synchronization archives a copy into the mail server's Sent folder. Recipients and the
+    # Re: prefix were read from `@conversation.messages.outgoing.last`, which at delivery time IS
+    # the message being sent, but at re-render time is a newer, different message. The archived
+    # copy then misstated its own To, and carried another reply's Bcc list.
+    context 'when re-rendering a specific earlier message' do
+      let(:conversation) { create(:conversation, assignee: agent, inbox: email_channel.inbox, account: account).reload }
+      let!(:older_message) do
+        create(:message, conversation: conversation, account: account, message_type: 'outgoing', content: 'first reply',
+                         content_attributes: { to_emails: ['first@example.com'], cc_emails: ['cc-first@example.com'],
+                                               bcc_emails: ['bcc-first@example.com'] })
+      end
+      let!(:newer_message) do
+        create(:message, conversation: conversation, account: account, message_type: 'outgoing', content: 'second reply',
+                         content_attributes: { to_emails: ['second@example.com'], cc_emails: ['cc-second@example.com'],
+                                               bcc_emails: ['bcc-second@example.com'] })
+      end
+
+      it 'addresses the copy to the recipients of THAT message, not the newest one' do
+        mail = described_class.email_reply(older_message).message
+
+        expect(mail.to).to eq ['first@example.com']
+        expect(mail.cc).to eq ['cc-first@example.com']
+        expect(mail.bcc).to eq ['bcc-first@example.com']
+      end
+
+      it 'leaves the newest message rendering exactly as it always did' do
+        mail = described_class.email_reply(newer_message).message
+
+        expect(mail.to).to eq ['second@example.com']
+        expect(mail.cc).to eq ['cc-second@example.com']
+        expect(mail.bcc).to eq ['bcc-second@example.com']
+      end
+
+      # Delivery time is always the newest-message case, so this is the assertion that the fix
+      # cannot have changed what customers actually receive.
+      it 'renders the newest message identically to the conversation-derived values' do
+        mail = described_class.email_reply(newer_message).message
+        latest = conversation.messages.outgoing.last
+
+        expect(latest.id).to eq newer_message.id
+        expect(mail.to).to eq Array(latest.content_attributes[:to_emails])
+        expect(mail.subject).to eq described_class.email_reply(latest).message.subject
+      end
+
+      context 'with a subject on the conversation' do
+        before do
+          conversation.update!(additional_attributes: { 'mail_subject' => 'Dive booking' })
+        end
+
+        it 'computes the Re: prefix as of the message being rendered' do
+          first_chat = conversation.messages.chat.first
+          mail = described_class.email_reply(first_chat).message
+
+          expect(mail.subject).to eq 'Dive booking'
+        end
+
+        it 'still prefixes Re: for a later message in the same conversation' do
+          mail = described_class.email_reply(newer_message).message
+
+          expect(mail.subject).to eq 'Re: Dive booking'
+        end
+      end
+    end
   end
 end

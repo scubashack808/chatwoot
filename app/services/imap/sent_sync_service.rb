@@ -34,7 +34,14 @@ class Imap::SentSyncService
     @interval = interval
   end
 
+  # Dark twice over, the same as every other mailbox path in this stack: the account feature flag
+  # and the per-inbox mode. The flag is checked FIRST, matching
+  # Imap::MailboxReconciliationService#blocking_reason, so an inbox that is both un-flagged and off
+  # reports the outer reason rather than the inner one. Both this and the enqueue gate in
+  # Inboxes::FetchImapEmailInboxesJob are required: the enqueue gate keeps a dark feature free, and
+  # this one holds when the service is called directly.
   def perform
+    return skipped('feature_disabled') unless channel.account.feature_enabled?('email_mailbox_actions')
     return skipped('mailbox_sync_off') if config.off?
     return skipped('sent_sync_disabled') if config.sent_mode == DISABLED
 
@@ -52,7 +59,7 @@ class Imap::SentSyncService
   end
 
   def run(client, session)
-    gmail = gmail_dialect?(client)
+    gmail = gmail_dialect?(client, session)
     role = resolve_sent_role(client, session)
     return skipped('sent_folder_unavailable', gmail: gmail, detail: role.status) unless role.available?
 
@@ -71,8 +78,14 @@ class Imap::SentSyncService
     Imap::FolderDiscoveryService.result_for(folders: folders, config: config).for_role(SENT_ROLE)
   end
 
-  def gmail_dialect?(client)
-    Imap::MailboxCommand.dialect_for(client) == Imap::MailboxCommand::Gmail
+  # CAPABILITY goes through session.command like every other provider command, so it renews the
+  # lease first and runs inside the command timeout. It is read once and handed to the dialect
+  # selector rather than letting that re-fetch it, because this is the command that decides
+  # whether APPEND is allowed at all: it is the last one that should be able to reach the server
+  # after the lease was lost, or to hang unbounded.
+  def gmail_dialect?(client, session)
+    capabilities = session.command(&:capabilities)
+    Imap::MailboxCommand.dialect_for(client, capabilities: capabilities) == Imap::MailboxCommand::Gmail
   end
 
   def append_allowed?(gmail)
