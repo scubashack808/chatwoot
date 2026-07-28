@@ -259,6 +259,140 @@ const NEW_RAW_FIXTURE_MATRIX = [
   },
 ];
 
+// Ordering evidence. The attribution that orders forward evidence against reply
+// evidence has to introduce a line of its own. Prose that merely contains the
+// words "... wrote:" mid-sentence is not a reply attribution, and treating it as
+// one collapses a genuine forward out of the default view.
+const ORDERING_EVIDENCE_MATRIX = [
+  {
+    case: 'Gmail forward whose note above the marker says "Pat wrote:" mid-sentence',
+    metadata: {},
+    html: `
+      <div>Sharing this, based on what Pat wrote: see below.</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">---------- Forwarded message ---------</div>
+        <div>From: Pat Example</div>
+        <div>Forwarded Gmail body</div>
+      </div>
+    `,
+    visibleText: ['From: Pat Example', 'Forwarded Gmail body'],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    case: 'Apple Mail forward whose note says "on what Pat wrote:" mid-sentence',
+    metadata: {},
+    html: `
+      <div>Following up on what Pat wrote: earlier today.</div>
+      <blockquote type="cite">
+        <div>Begin forwarded message:</div>
+        <div>From: Pat Example</div>
+        <div>Forwarded Apple Mail body</div>
+      </blockquote>
+    `,
+    visibleText: ['From: Pat Example', 'Forwarded Apple Mail body'],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    case: 'control, Gmail forward of a reply thread with the marker first',
+    metadata: {},
+    html: `
+      <div>For the dive team</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">---------- Forwarded message ---------</div>
+        <div>Forwarded Gmail body</div>
+        <blockquote>
+          <div>On Sat, Jul 25, 2026 at 8:15 AM Sam wrote:</div>
+          <div>Older reply inside the forwarded body</div>
+        </blockquote>
+      </div>
+    `,
+    visibleText: [
+      'Forwarded Gmail body',
+      'Older reply inside the forwarded body',
+    ],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    case: 'control, Original Message separator ahead of the forward marker',
+    metadata: {},
+    html: `
+      <div>Latest note from the agent.</div>
+      <div>-----Original Message-----</div>
+      <div>---------- Forwarded message ---------</div>
+      <div>Forwarded body below the separator</div>
+    `,
+    visibleText: [
+      'Latest note from the agent.',
+      'Forwarded body below the separator',
+    ],
+    hiddenText: ['-----Original Message-----'],
+    hasQuotes: true,
+  },
+];
+
+// The bubble hands the extractor a top-level reply-to-a-specific-message id for
+// outgoing messages, which have no stored email.inReplyTo. That evidence must not
+// be applied to a message carrying its own forward marker.
+const OUTGOING_FALLBACK_MATRIX = [
+  {
+    case: 'outgoing forward pasted as paragraphs above a trailing quote',
+    email: {},
+    topLevelInReplyTo: 4271,
+    html: `
+      <p>Passing this along.</p>
+      <p>---------- Forwarded message ---------</p>
+      <p>From: Pat Example &lt;pat@example.com&gt;</p>
+      <p>Sent: Sunday, July 26, 2026 9:30 AM</p>
+      <p>Forwarded body the agent pasted</p>
+      <blockquote>
+        <p>On Sun, Jul 26, 2026 at 9:30 AM Sam wrote:</p>
+        <p>Older reply</p>
+      </blockquote>
+    `,
+    visibleText: [
+      'From: Pat Example',
+      'Sent: Sunday, July 26, 2026 9:30 AM',
+      'Forwarded body the agent pasted',
+    ],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    case: 'outgoing forward pasted inside a Gmail quote container',
+    email: {},
+    topLevelInReplyTo: 4271,
+    html: `
+      <p>Passing this along.</p>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">---------- Forwarded message ---------</div>
+        <div>From: Pat Example</div>
+        <div>Forwarded body the agent pasted</div>
+      </div>
+    `,
+    visibleText: ['From: Pat Example', 'Forwarded body the agent pasted'],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    case: 'outgoing reply to a specific message, quoted history and no forward',
+    email: {},
+    topLevelInReplyTo: 4271,
+    html: `
+      <div>Thanks, that works.</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">On Sun, Jul 26, 2026 at 9:30 AM Pat wrote:</div>
+        <blockquote class="gmail_quote">Older reply</blockquote>
+      </div>
+    `,
+    visibleText: ['Thanks, that works.'],
+    hiddenText: ['Older reply'],
+    hasQuotes: true,
+  },
+];
+
 const LEGACY_QUOTE_CSS = `
   <!-- chatwoot-bq-fix-v2 -->
   <style>
@@ -303,6 +437,51 @@ describe('EmailQuoteExtractor', () => {
         ).toBe(fixture.hasQuotes);
       }
     );
+  });
+
+  describe('reply attribution ordering', () => {
+    it.each(ORDERING_EVIDENCE_MATRIX)('$case', fixture => {
+      const container = document.createElement('div');
+      container.innerHTML = EmailQuoteExtractor.extractQuotes(
+        fixture.html,
+        fixture.metadata
+      );
+
+      fixture.visibleText.forEach(text => {
+        expect(container.textContent).toContain(text);
+      });
+      fixture.hiddenText.forEach(text => {
+        expect(container.textContent).not.toContain(text);
+      });
+      expect(
+        EmailQuoteExtractor.hasQuotes(fixture.html, fixture.metadata)
+      ).toBe(fixture.hasQuotes);
+    });
+  });
+
+  describe('outgoing top-level inReplyTo fallback', () => {
+    it.each(OUTGOING_FALLBACK_MATRIX)('$case', fixture => {
+      const metadata = EmailQuoteExtractor.buildMetadata({
+        email: fixture.email,
+        topLevelInReplyTo: fixture.topLevelInReplyTo,
+        htmlContent: fixture.html,
+      });
+      const container = document.createElement('div');
+      container.innerHTML = EmailQuoteExtractor.extractQuotes(
+        fixture.html,
+        metadata
+      );
+
+      fixture.visibleText.forEach(text => {
+        expect(container.textContent).toContain(text);
+      });
+      fixture.hiddenText.forEach(text => {
+        expect(container.textContent).not.toContain(text);
+      });
+      expect(EmailQuoteExtractor.hasQuotes(fixture.html, metadata)).toBe(
+        fixture.hasQuotes
+      );
+    });
   });
 
   describe('historical legacy fixture', () => {

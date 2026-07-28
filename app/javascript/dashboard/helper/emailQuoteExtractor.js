@@ -31,9 +31,15 @@ const FORWARDED_BODY_PATTERNS = [
 // narrower than QUOTE_PATTERNS below: "From:" and "Sent:" also appear inside a
 // forward's own attribution block, so they cannot order forward evidence against
 // reply evidence.
+//
+// Anchored to the start of a line, unlike the removal patterns. An attribution
+// introduces a line; prose that merely contains the words ("Sharing this, based
+// on what Pat wrote: see below.") does not. Left unanchored, that prose supplies
+// reply evidence ahead of a real forward marker and collapses the forward out of
+// the default view, which is the one outcome this file exists to prevent.
 const REPLY_ATTRIBUTION_PATTERNS = [
-  /On .* wrote:/i,
-  /-----Original Message-----/i,
+  /^[ \t>]*On .* wrote:/im,
+  /^[ \t>]*-----Original Message-----/im,
 ];
 
 // Regex patterns for quote identification
@@ -163,7 +169,7 @@ export class EmailQuoteExtractor {
    * @returns {boolean} True if a forward marker belongs to this message
    */
   static hasOwnForwardMarker(rootElement) {
-    const body = rootElement.textContent || '';
+    const body = this.flattenBlockText(rootElement);
     const forwardIndex = this.firstMatchIndex(body, FORWARDED_BODY_PATTERNS);
 
     if (forwardIndex === -1) {
@@ -172,6 +178,76 @@ export class EmailQuoteExtractor {
 
     const replyIndex = this.firstMatchIndex(body, REPLY_ATTRIBUTION_PATTERNS);
     return replyIndex === -1 || forwardIndex < replyIndex;
+  }
+
+  /**
+   * Flatten the body to text with one line per block element.
+   *
+   * `textContent` runs every block together, so an anchored attribution pattern
+   * would never find a line start to match. Breaking on block boundaries rather
+   * than on every text node is what keeps a Gmail attribution intact: Gmail
+   * splits it around a mailto link, so per-node breaking would cut
+   * "On ... &lt;a&gt;address&lt;/a&gt; wrote:" into three pieces and lose the match.
+   * @param {Element} rootElement - Parsed email body
+   * @returns {string} Body text with block boundaries rendered as line breaks
+   */
+  static flattenBlockText(rootElement) {
+    const treeWalker = document.createTreeWalker(
+      rootElement,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    );
+    let text = '';
+    let currentBlock = null;
+
+    for (
+      let currentNode = treeWalker.nextNode();
+      currentNode !== null;
+      currentNode = treeWalker.nextNode()
+    ) {
+      const block = this.findParentBlock(currentNode);
+      if (text !== '' && block !== currentBlock) {
+        text += '\n';
+      }
+      currentBlock = block;
+      text += currentNode.textContent;
+    }
+
+    return text;
+  }
+
+  /**
+   * Build the metadata a message bubble hands to `extractQuotes` and `hasQuotes`.
+   *
+   * Outgoing messages never carry `email.inReplyTo`, so the bubble falls back to
+   * the top-level parent message id the composer writes for
+   * reply-to-a-specific-message. That fallback is withheld from a body carrying
+   * this message's own forward marker: an agent who forwards while replying to a
+   * specific message would otherwise have the forwarded body collapsed out of
+   * the default view. Because `isForwardedEmail` only consults `inReplyTo` on
+   * the path where an own forward marker was found, withholding it there leaves
+   * the fallback unable to change the classification of any body.
+   * @param {Object} params - Metadata inputs from the bubble
+   * @param {Object} params.email - Stored email metadata hash, if any
+   * @param {*} params.topLevelInReplyTo - Top-level `content_attributes.in_reply_to`
+   * @param {string} params.htmlContent - Body HTML about to be rendered
+   * @returns {Object} Metadata for `extractQuotes` and `hasQuotes`
+   */
+  static buildMetadata({ email, topLevelInReplyTo, htmlContent } = {}) {
+    const storedEmail = email || {};
+
+    if (storedEmail.inReplyTo || !topLevelInReplyTo) {
+      return { ...storedEmail, inReplyTo: storedEmail.inReplyTo ?? null };
+    }
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = DOMPurify.sanitize(this.prepareForRender(htmlContent));
+
+    return {
+      ...storedEmail,
+      inReplyTo: this.hasOwnForwardMarker(tempDiv) ? null : topLevelInReplyTo,
+    };
   }
 
   /**

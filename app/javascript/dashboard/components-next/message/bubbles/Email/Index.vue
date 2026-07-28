@@ -41,16 +41,6 @@ const originalEmailText = computed(() => {
   return sanitizeTextForRender(text);
 });
 
-const emailMetadata = computed(() => {
-  const email = contentAttributes?.value?.email || {};
-  // Outgoing messages have no email.inReplyTo, but the composer stores the parent
-  // message id at the top level of content_attributes, so fall back to it.
-  return {
-    ...email,
-    inReplyTo: email.inReplyTo ?? contentAttributes?.value?.inReplyTo ?? null,
-  };
-});
-
 const originalEmailHtml = computed(() =>
   EmailQuoteExtractor.prepareForRender(
     contentAttributes?.value?.email?.htmlContent?.full ||
@@ -91,6 +81,17 @@ const fullHTML = computed(() => {
   // Otherwise show original HTML
   return originalEmailHtml.value;
 });
+
+// Outgoing messages have no email.inReplyTo, but the composer stores the parent
+// message id at the top level of content_attributes. The extractor decides
+// whether that fallback is safe to apply to this body.
+const emailMetadata = computed(() =>
+  EmailQuoteExtractor.buildMetadata({
+    email: contentAttributes?.value?.email,
+    topLevelInReplyTo: contentAttributes?.value?.inReplyTo,
+    htmlContent: fullHTML.value,
+  })
+);
 
 const unquotedHTML = computed(() =>
   EmailQuoteExtractor.extractQuotes(fullHTML.value, emailMetadata.value)
