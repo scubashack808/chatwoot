@@ -26,7 +26,11 @@ vi.mock('dashboard/composables/chatlist/useChatListKeyboardEvents', () => ({
   useChatListKeyboardEvents: vi.fn(),
 }));
 
-const originalTimezone = process.env.TZ;
+// Every instant below is built with the local-time Date constructor rather than
+// a fixed UTC offset, so calendar boundaries land the same way in whatever
+// timezone the suite runs in. Writing process.env.TZ here would not work: Node
+// resolves the zone once at startup and ignores later assignment.
+const at = (...parts) => new Date(...parts);
 
 const translations = {
   'CHAT_LIST.TIME_BUCKETS.TODAY': 'Today',
@@ -96,46 +100,23 @@ const renderedBucketLabels = wrapper =>
     .map(header => header.text());
 
 describe('ConversationList time buckets', () => {
-  beforeAll(() => {
-    process.env.TZ = 'Pacific/Honolulu';
-  });
-
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-27T12:00:00-10:00'));
+    vi.setSystemTime(at(2026, 6, 27, 12, 0, 0));
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  afterAll(() => {
-    process.env.TZ = originalTimezone;
-  });
-
-  it('renders HST calendar buckets from the last-activity sort timestamp', () => {
+  it('renders calendar buckets from the last-activity sort timestamp', () => {
     const wrapper = mountComponent({
       conversationList: [
-        conversation({
-          id: 1,
-          lastActivityAt: '2026-07-27T09:30:00-10:00',
-        }),
-        conversation({
-          id: 2,
-          lastActivityAt: '2026-07-26T23:30:00-10:00',
-        }),
-        conversation({
-          id: 3,
-          lastActivityAt: '2026-07-23T12:00:00-10:00',
-        }),
-        conversation({
-          id: 4,
-          lastActivityAt: '2026-07-10T12:00:00-10:00',
-        }),
-        conversation({
-          id: 5,
-          lastActivityAt: '2026-06-20T12:00:00-10:00',
-        }),
+        conversation({ id: 1, lastActivityAt: at(2026, 6, 27, 9, 30) }),
+        conversation({ id: 2, lastActivityAt: at(2026, 6, 26, 23, 30) }),
+        conversation({ id: 3, lastActivityAt: at(2026, 6, 23, 12) }),
+        conversation({ id: 4, lastActivityAt: at(2026, 6, 10, 12) }),
+        conversation({ id: 5, lastActivityAt: at(2026, 5, 20, 12) }),
       ],
     });
     expect(renderedBucketLabels(wrapper)).toEqual([
@@ -151,13 +132,13 @@ describe('ConversationList time buckets', () => {
     const conversations = [
       conversation({
         id: 8,
-        createdAt: '2026-07-27T08:00:00-10:00',
-        lastActivityAt: '2026-06-01T08:00:00-10:00',
+        createdAt: at(2026, 6, 27, 8),
+        lastActivityAt: at(2026, 5, 1, 8),
       }),
       conversation({
         id: 3,
-        createdAt: '2026-07-26T23:00:00-10:00',
-        lastActivityAt: '2026-07-27T11:00:00-10:00',
+        createdAt: at(2026, 6, 26, 23),
+        lastActivityAt: at(2026, 6, 27, 11),
       }),
     ];
     const wrapper = mountComponent({
@@ -177,18 +158,9 @@ describe('ConversationList time buckets', () => {
   it('keeps the supplied server order even when timestamps are non-monotonic', () => {
     const wrapper = mountComponent({
       conversationList: [
-        conversation({
-          id: 41,
-          lastActivityAt: '2026-07-26T12:00:00-10:00',
-        }),
-        conversation({
-          id: 7,
-          lastActivityAt: '2026-07-27T11:00:00-10:00',
-        }),
-        conversation({
-          id: 29,
-          lastActivityAt: '2026-07-10T12:00:00-10:00',
-        }),
+        conversation({ id: 41, lastActivityAt: at(2026, 6, 26, 12) }),
+        conversation({ id: 7, lastActivityAt: at(2026, 6, 27, 11) }),
+        conversation({ id: 29, lastActivityAt: at(2026, 6, 10, 12) }),
       ],
     });
 
@@ -197,24 +169,15 @@ describe('ConversationList time buckets', () => {
 
   it('does not duplicate a bucket header when another page continues that bucket', async () => {
     const firstPage = [
-      conversation({
-        id: 1,
-        lastActivityAt: '2026-07-27T11:00:00-10:00',
-      }),
+      conversation({ id: 1, lastActivityAt: at(2026, 6, 27, 11) }),
     ];
     const wrapper = mountComponent({ conversationList: firstPage });
 
     await wrapper.setProps({
       conversationList: [
         ...firstPage,
-        conversation({
-          id: 2,
-          lastActivityAt: '2026-07-27T10:00:00-10:00',
-        }),
-        conversation({
-          id: 3,
-          lastActivityAt: '2026-07-26T22:00:00-10:00',
-        }),
+        conversation({ id: 2, lastActivityAt: at(2026, 6, 27, 10) }),
+        conversation({ id: 3, lastActivityAt: at(2026, 6, 26, 22) }),
       ],
     });
 
@@ -225,14 +188,8 @@ describe('ConversationList time buckets', () => {
   it('renders the plain server sequence for a non-chronological sort', () => {
     const wrapper = mountComponent({
       conversationList: [
-        conversation({
-          id: 12,
-          lastActivityAt: '2026-07-10T12:00:00-10:00',
-        }),
-        conversation({
-          id: 4,
-          lastActivityAt: '2026-07-27T11:00:00-10:00',
-        }),
+        conversation({ id: 12, lastActivityAt: at(2026, 6, 10, 12) }),
+        conversation({ id: 4, lastActivityAt: at(2026, 6, 27, 11) }),
       ],
       sortBy: 'waiting_since_desc',
     });
@@ -244,7 +201,7 @@ describe('ConversationList time buckets', () => {
   it('opts the rendered cards into the list-only presentation', () => {
     const wrapper = mountComponent({
       conversationList: [
-        conversation({ id: 1, lastActivityAt: '2026-07-27T11:00:00-10:00' }),
+        conversation({ id: 1, lastActivityAt: at(2026, 6, 27, 11) }),
       ],
     });
     const item = wrapper.findComponent({ name: 'ConversationItem' });
@@ -254,12 +211,7 @@ describe('ConversationList time buckets', () => {
   });
 });
 
-// These tests build every instant with the local-time Date constructor rather
-// than a fixed UTC offset, so a real local-midnight boundary is crossed in
-// whatever timezone the suite happens to run in.
 describe('ConversationList wall clock handling', () => {
-  const at = (...parts) => new Date(...parts);
-
   beforeEach(() => {
     vi.useFakeTimers();
   });
