@@ -147,7 +147,10 @@ class MailPresenter < SimpleDelegator
       'x-original-sender' => @mail['X-Original-Sender']&.value,
       # Kept so a later reply can tell which of our addresses actually received this message when
       # a forwarder rewrote the visible To header. Nothing else persists the envelope recipient.
-      'x-original-to' => @mail['X-Original-To']&.value,
+      # Read through Array() because a chain of forwarders can stamp this header more than once, in
+      # which case Mail returns an Array of fields and #value raises. The raise would land inside
+      # message creation and cost us the customer's email entirely, so the outermost hop is kept.
+      'x-original-to' => Array(@mail['X-Original-To']).first&.value,
       'x-forwarded-for' => @mail['X-Forwarded-For']&.value
     }.compact
 
