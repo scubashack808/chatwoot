@@ -20,8 +20,22 @@ export default {
       type: String,
       default: '',
     },
+    fromEmail: {
+      type: String,
+      default: '',
+    },
+    fromEmailOptions: {
+      type: Array,
+      default: () => [],
+    },
   },
-  emits: ['update:bccEmails', 'update:ccEmails', 'update:toEmails'],
+  emits: [
+    'update:bccEmails',
+    'update:ccEmails',
+    'update:toEmails',
+    'update:fromEmail',
+    'replyAll',
+  ],
   setup() {
     return { v$: useVuelidate() };
   },
@@ -32,6 +46,12 @@ export default {
       bccEmailsVal: '',
       toEmailsVal: '',
     };
+  },
+  computed: {
+    // Only worth showing when there is something to choose between.
+    showFromPicker() {
+      return this.fromEmailOptions.length > 1;
+    },
   },
   watch: {
     bccEmails(newVal) {
@@ -82,12 +102,35 @@ export default {
       this.$emit('update:ccEmails', this.ccEmailsVal);
       this.$emit('update:toEmails', this.toEmailsVal);
     },
+    onFromChange(event) {
+      this.$emit('update:fromEmail', event.target.value);
+    },
   },
 };
 </script>
 
 <template>
   <div>
+    <div v-if="showFromPicker" class="input-group small">
+      <label class="input-group-label">
+        {{ $t('CONVERSATION.REPLYBOX.EMAIL_HEAD.FROM') }}
+      </label>
+      <div class="flex-1 min-w-0 m-0 rounded-none whitespace-nowrap">
+        <select
+          :value="fromEmail"
+          class="!mb-0 !bg-transparent !border-0 !outline-none h-8 text-sm w-full"
+          @change="onFromChange"
+        >
+          <option
+            v-for="address in fromEmailOptions"
+            :key="address"
+            :value="address"
+          >
+            {{ address }}
+          </option>
+        </select>
+      </div>
+    </div>
     <div v-if="toEmails">
       <div class="input-group small" :class="{ error: v$.toEmailsVal.$error }">
         <label class="input-group-label">
@@ -120,6 +163,13 @@ export default {
             @blur="onBlur"
           />
         </div>
+        <ButtonV4
+          :label="$t('CONVERSATION.REPLYBOX.EMAIL_HEAD.REPLY_ALL')"
+          ghost
+          xs
+          primary
+          @click="$emit('replyAll')"
+        />
         <ButtonV4
           v-if="!showBcc"
           :label="$t('CONVERSATION.REPLYBOX.EMAIL_HEAD.ADD_BCC')"
