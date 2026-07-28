@@ -57,7 +57,7 @@ class Channel::Email < ApplicationRecord
   EDITABLE_ATTRS = [:email, :imap_enabled, :imap_login, :imap_password, :imap_address, :imap_port, :imap_enable_ssl, :imap_authentication,
                     :smtp_enabled, :smtp_login, :smtp_password, :smtp_address, :smtp_port, :smtp_domain, :smtp_enable_starttls_auto,
                     :smtp_enable_ssl_tls, :smtp_openssl_verify_mode, :smtp_authentication, :provider, :verified_for_sending,
-                    { mailbox_sync_config: {}, aliases: [] }].freeze
+                    { mailbox_sync_config: {} }, { aliases: [] }].freeze
 
   validates :email, uniqueness: true
   validates :forward_to_email, uniqueness: true
