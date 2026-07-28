@@ -41,10 +41,11 @@ const originalEmailText = computed(() => {
   return sanitizeTextForRender(text);
 });
 
-const originalEmailHtml = computed(
-  () =>
+const originalEmailHtml = computed(() =>
+  EmailQuoteExtractor.prepareForRender(
     contentAttributes?.value?.email?.htmlContent?.full ||
-    originalEmailText.value
+      originalEmailText.value
+  )
 );
 
 const hasEmailContent = computed(() => {
@@ -81,12 +82,23 @@ const fullHTML = computed(() => {
   return originalEmailHtml.value;
 });
 
+// Outgoing messages have no email.inReplyTo, but the composer stores the parent
+// message id at the top level of content_attributes. The extractor decides
+// whether that fallback is safe to apply to this body.
+const emailMetadata = computed(() =>
+  EmailQuoteExtractor.buildMetadata({
+    email: contentAttributes?.value?.email,
+    topLevelInReplyTo: contentAttributes?.value?.inReplyTo,
+    htmlContent: fullHTML.value,
+  })
+);
+
 const unquotedHTML = computed(() =>
-  EmailQuoteExtractor.extractQuotes(fullHTML.value)
+  EmailQuoteExtractor.extractQuotes(fullHTML.value, emailMetadata.value)
 );
 
 const hasQuotedMessage = computed(() =>
-  EmailQuoteExtractor.hasQuotes(fullHTML.value)
+  EmailQuoteExtractor.hasQuotes(fullHTML.value, emailMetadata.value)
 );
 
 // Ensure unique keys for <Letter> when toggling between original and translated views.
