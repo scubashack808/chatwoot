@@ -30,7 +30,10 @@ class Api::V1::Accounts::Conversations::MessagesController < Api::V1::Accounts::
 
     service = Messages::StatusUpdateService.new(message, 'sent')
     service.perform
-    message.update!(content_attributes: {})
+    # The wipe clears the previous attempt's failure state. The agent's chosen From address is not
+    # failure state: dropping it would send the retry from a different address than the first
+    # attempt, which the customer sees and the agent does not.
+    message.update!(content_attributes: message.content_attributes.to_h.with_indifferent_access.slice(:from_email))
     ::SendReplyJob.perform_later(message.id)
   rescue StandardError => e
     render_could_not_create_error(e.message)

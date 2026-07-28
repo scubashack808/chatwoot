@@ -555,6 +555,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_25_060000) do
     t.string "imap_authentication", default: "plain"
     t.boolean "verified_for_sending", default: false, null: false
     t.jsonb "mailbox_sync_config", default: {"mode" => "off", "sent_mode" => "provider_managed", "folder_overrides" => {}}, null: false
+    t.string "aliases", default: [], array: true
+    t.index ["aliases"], name: "index_channel_email_on_aliases", using: :gin
     t.index ["email"], name: "index_channel_email_on_email", unique: true
     t.index ["forward_to_email"], name: "index_channel_email_on_forward_to_email", unique: true
   end

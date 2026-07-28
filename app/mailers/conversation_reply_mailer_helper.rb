@@ -107,7 +107,7 @@ module ConversationReplyMailerHelper
   def email_reply_to
     return Email::ReplyToBuilder.new(inbox: @inbox, message: current_message).build if @account.feature_enabled?(:reply_mailer_migration)
 
-    email_imap_enabled? ? @channel.email : reply_email
+    email_imap_enabled? ? @channel.outbound_address_for(@conversation, message: current_message) : reply_email
   end
 
   # Use channel email domain in case of account email domain is not set for custom message_id and in_reply_to
