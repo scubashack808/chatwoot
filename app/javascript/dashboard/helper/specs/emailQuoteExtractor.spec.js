@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { EmailQuoteExtractor } from '../emailQuoteExtractor.js';
+import { PRODUCTION_LEGACY_QUOTE_CSS_HTML } from './fixtures/legacyQuoteCssFixtures';
 
 const SAMPLE_EMAIL_HTML = `
 <p>method</p>
@@ -177,6 +178,85 @@ const NEW_RAW_FIXTURE_MATRIX = [
     hiddenText: [],
     hasQuotes: false,
   },
+  {
+    client: 'Gmail',
+    kind: 'reply quoting a forward, with inReplyTo',
+    metadata: { subject: 'Re: Dive plan', inReplyTo: '<parent@mail.example>' },
+    html: `
+      <div>Fresh reply above the quoted forward</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">On Sun, Jul 26, 2026 at 9:30 AM Pat wrote:</div>
+        <blockquote class="gmail_quote">
+          <div class="gmail_attr">---------- Forwarded message ---------</div>
+          <div>Forwarded body inside the quoted history</div>
+        </blockquote>
+      </div>
+    `,
+    visibleText: ['Fresh reply above the quoted forward'],
+    hiddenText: ['Forwarded body inside the quoted history'],
+    hasQuotes: true,
+  },
+  {
+    client: 'Chatwoot outgoing',
+    kind: 'agent reply quoting a forwarded parent, no stored email metadata',
+    metadata: {},
+    html: `
+      <p>Aloha, details below.</p>
+      <blockquote>
+        <p>On Tue, Apr 28, 2026 at 4:01 PM Pat wrote:</p>
+        <p>---------- Forwarded message ---------</p>
+        <p>Forwarded body carried into the quote</p>
+      </blockquote>
+    `,
+    visibleText: ['Aloha, details below.'],
+    hiddenText: ['Forwarded body carried into the quote'],
+    hasQuotes: true,
+  },
+  {
+    client: 'Gmail',
+    kind: 'forward whose subject prefix was edited away',
+    metadata: { subject: 'Dive plan' },
+    html: `
+      <div>For the dive team</div>
+      <div class="gmail_quote gmail_quote_container">
+        <div class="gmail_attr">---------- Forwarded message ---------</div>
+        <div>Forwarded body with an edited subject</div>
+        <blockquote>
+          <div>On Sat, Jul 25, 2026 at 8:15 AM Sam wrote:</div>
+          <div>Older reply inside the forwarded body</div>
+        </blockquote>
+      </div>
+    `,
+    visibleText: [
+      'For the dive team',
+      'Forwarded body with an edited subject',
+      'Older reply inside the forwarded body',
+    ],
+    hiddenText: [],
+    hasQuotes: false,
+  },
+  {
+    client: 'Outlook',
+    kind: 'German forward carrying a WG subject prefix',
+    metadata: { subject: 'WG: Charterdetails' },
+    html: `
+      <div>Bitte pruefen.</div>
+      <div id="divRplyFwdMsg">
+        <hr>
+        <div>From: Pat Example &lt;pat@example.com&gt;</div>
+        <div>Sent: Sunday, July 26, 2026 9:30 AM</div>
+        <div>Forwarded Outlook body</div>
+      </div>
+    `,
+    visibleText: [
+      'Bitte pruefen.',
+      'From: Pat Example',
+      'Sent: Sunday, July 26, 2026 9:30 AM',
+      'Forwarded Outlook body',
+    ],
+    hiddenText: [],
+    hasQuotes: false,
+  },
 ];
 
 const LEGACY_QUOTE_CSS = `
@@ -251,6 +331,36 @@ describe('EmailQuoteExtractor', () => {
       expect(
         EmailQuoteExtractor.hasQuotes(renderableHtml, LEGACY_FIXTURE.metadata)
       ).toBe(true);
+    });
+
+    it('strips the marker and style from the real production bytes', () => {
+      const renderableHtml = EmailQuoteExtractor.prepareForRender(
+        PRODUCTION_LEGACY_QUOTE_CSS_HTML
+      );
+
+      expect(renderableHtml).not.toContain('chatwoot-bq-fix-v2');
+      expect(renderableHtml).not.toMatch(/<style\b/);
+      expect(renderableHtml).not.toContain('display: none !important');
+      expect(renderableHtml).toContain('cooking with fire');
+      expect(renderableHtml).toContain(
+        'This is more or less just a test message'
+      );
+    });
+
+    it('collapses the real production row while keeping the quote available', () => {
+      const renderableHtml = EmailQuoteExtractor.prepareForRender(
+        PRODUCTION_LEGACY_QUOTE_CSS_HTML
+      );
+      const renderedHtml = EmailQuoteExtractor.extractQuotes(
+        renderableHtml,
+        {}
+      );
+
+      expect(renderedHtml).toContain('cooking with fire');
+      expect(renderedHtml).not.toContain(
+        'This is more or less just a test message'
+      );
+      expect(EmailQuoteExtractor.hasQuotes(renderableHtml, {})).toBe(true);
     });
 
     it('does not remove unmarked style elements from historical bodies', () => {
