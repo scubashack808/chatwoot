@@ -140,19 +140,22 @@ module RcBridgeDerivedTimestamps
 end
 
 module RcBridgeTerminalStatus
-  def perform
-    result = super
-    return result unless result
-    return result unless RcBridgeScope.message?(message)
+  private
 
+  def update_message_status
+    return super unless RcBridgeScope.message?(message)
+
+    # Stage the retry marker before Chatwoot's original update! call. Active Record
+    # then persists status, external_error, and content_attributes together, so the
+    # after_update_commit broadcast contains the marker on its first realtime event.
     attributes = (message.content_attributes || {}).deep_dup
-    changed = if status == 'failed'
-                attributes['rc_retry_disabled'] = true unless attributes['rc_retry_disabled'] == true
-              else
-                attributes.delete('rc_retry_disabled')
-              end
-    message.update_column(:content_attributes, attributes) if changed
-    result
+    if status == 'failed'
+      attributes['rc_retry_disabled'] = true
+    else
+      attributes.delete('rc_retry_disabled')
+    end
+    message.content_attributes = attributes
+    super
   end
 end
 
