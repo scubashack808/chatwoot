@@ -32,6 +32,28 @@ module RcBridgeScope
   end
 end
 
+module RcBridgePayload
+  module_function
+
+  def value(attributes, key)
+    attributes[key.to_s] || attributes[key.to_sym]
+  end
+
+  def numeric_identifier?(value)
+    value.to_s.match?(/\A\d+\z/)
+  end
+
+  def timestamp(raw_epoch)
+    epoch = Integer(raw_epoch, exception: false)
+    return unless epoch&.between?(
+      RcBridgeMessageTimestamp::MINIMUM_EPOCH,
+      Time.now.to_i + RcBridgeMessageTimestamp::MAXIMUM_FUTURE_SECONDS
+    )
+
+    Time.zone.at(epoch)
+  end
+end
+
 module RcBridgeMessageTimestamp
   MINIMUM_EPOCH = 946_684_800 # 2000-01-01 UTC
   MAXIMUM_FUTURE_SECONDS = 300
@@ -42,21 +64,20 @@ module RcBridgeMessageTimestamp
   def message_params
     values = super
     attributes = values[:content_attributes] || {}
-    surface = attributes['rc_source_surface'] || attributes[:rc_source_surface]
-    rc_message_id = attributes['rc_message_id'] || attributes[:rc_message_id]
-    raw_epoch = attributes['rc_created_at_epoch'] || attributes[:rc_created_at_epoch]
+    return values unless rc_bridge_payload?(attributes)
 
-    return values unless RcBridgeScope.inbox?(@conversation.inbox)
-    return values unless @conversation.inbox.channel_type == 'Channel::Api'
-    return values unless SURFACES.include?(surface.to_s)
-    return values unless rc_message_id.to_s.match?(/\A\d+\z/)
+    canonical_time = RcBridgePayload.timestamp(RcBridgePayload.value(attributes, :rc_created_at_epoch))
+    return values unless canonical_time
 
-    epoch = Integer(raw_epoch, exception: false)
-    return values unless epoch
-    return values unless epoch.between?(MINIMUM_EPOCH, Time.now.to_i + MAXIMUM_FUTURE_SECONDS)
-
-    canonical_time = Time.zone.at(epoch)
     values.merge(created_at: canonical_time, updated_at: canonical_time)
+  end
+
+  def rc_bridge_payload?(attributes)
+    inbox = @conversation.inbox
+    RcBridgeScope.inbox?(inbox) &&
+      inbox.channel_type == 'Channel::Api' &&
+      SURFACES.include?(RcBridgePayload.value(attributes, :rc_source_surface).to_s) &&
+      RcBridgePayload.numeric_identifier?(RcBridgePayload.value(attributes, :rc_message_id))
   end
 end
 
@@ -84,58 +105,83 @@ module RcBridgeConversationTimestamp
   def conversation_params
     values = super
     attributes = values[:custom_attributes] || {}
-    rc_conversation_id = attributes['rc_conversation_id'] || attributes[:rc_conversation_id]
-    raw_epoch = attributes['rc_initial_created_at_epoch'] || attributes[:rc_initial_created_at_epoch]
-    epoch = Integer(raw_epoch, exception: false)
+    return values unless rc_bridge_payload?(attributes)
 
-    return values unless RcBridgeScope.inbox?(@contact_inbox.inbox)
-    return values unless rc_conversation_id.to_s.match?(/\A\d+\z/)
-    return values unless epoch
-    return values unless epoch.between?(
-      RcBridgeMessageTimestamp::MINIMUM_EPOCH,
-      Time.now.to_i + RcBridgeMessageTimestamp::MAXIMUM_FUTURE_SECONDS
-    )
+    canonical_time = RcBridgePayload.timestamp(RcBridgePayload.value(attributes, :rc_initial_created_at_epoch))
+    return values unless canonical_time
 
-    canonical_time = Time.zone.at(epoch)
     values.merge(
       created_at: canonical_time,
       updated_at: canonical_time,
       last_activity_at: canonical_time
     )
   end
+
+  def rc_bridge_payload?(attributes)
+    RcBridgeScope.inbox?(@contact_inbox.inbox) &&
+      RcBridgePayload.numeric_identifier?(RcBridgePayload.value(attributes, :rc_conversation_id))
+  end
 end
 
 module RcBridgeDerivedTimestamps
   def rc_bridge_reconcile_derived_timestamps
-    return unless RcBridgeScope.message?(self)
+    return unless rc_bridge_source_message?
 
+    earliest, latest = rc_bridge_conversation_range
+    return unless earliest && latest
+
+    rc_bridge_update_conversation(earliest, latest)
+    rc_bridge_update_contact
+  end
+
+  private
+
+  def rc_bridge_source_message?
     attributes = content_attributes || {}
-    surface = attributes['rc_source_surface'] || attributes[:rc_source_surface]
-    return unless RcBridgeMessageTimestamp::SURFACES.include?(surface.to_s)
+    surface = RcBridgePayload.value(attributes, :rc_source_surface)
+    RcBridgeScope.message?(self) && RcBridgeMessageTimestamp::SURFACES.include?(surface.to_s)
+  end
 
-    user_message_types = [
+  def rc_bridge_user_message_types
+    [
       Message.message_types.fetch('incoming'),
       Message.message_types.fetch('outgoing')
     ]
-    scoped_messages = Message.where(
-      conversation_id: conversation_id,
-      message_type: user_message_types
-    )
-    earliest = scoped_messages.minimum(:created_at)
-    latest = scoped_messages.maximum(:created_at)
-    return unless earliest && latest
+  end
 
+  def rc_bridge_conversation_range
+    messages = Message.where(
+      conversation_id: conversation_id,
+      message_type: rc_bridge_user_message_types
+    )
+    [messages.minimum(:created_at), messages.maximum(:created_at)]
+  end
+
+  def rc_bridge_update_conversation(earliest, latest)
+    # This callback is itself reconciling denormalized timestamps after commit.
+    # Running validations or callbacks here would recurse and replace the imported
+    # historical time with Chatwoot's normal wall-clock value.
+    # rubocop:disable Rails/SkipsModelValidations
     conversation.update_columns(
       created_at: earliest,
       updated_at: latest,
       last_activity_at: latest
     )
+    # rubocop:enable Rails/SkipsModelValidations
+  end
 
+  def rc_bridge_update_contact
     contact_latest = Message.joins(:conversation)
                             .where(conversations: { contact_id: conversation.contact_id })
-                            .where(message_type: user_message_types)
+                            .where(message_type: rc_bridge_user_message_types)
                             .maximum('messages.created_at')
-    conversation.contact.update_column(:last_activity_at, contact_latest) if contact_latest
+    return unless contact_latest
+
+    # See rc_bridge_update_conversation: callbacks must not rewrite the
+    # historical timestamp that this reconciliation just established.
+    # rubocop:disable Rails/SkipsModelValidations
+    conversation.contact.update_column(:last_activity_at, contact_latest)
+    # rubocop:enable Rails/SkipsModelValidations
   end
 end
 
@@ -160,13 +206,13 @@ module RcBridgeTerminalStatus
 end
 
 module RcBridgeMessageRetryGuard
-  RETRY_ERROR = 'Automatic retry is disabled for RingCentral messages. Compose a new message instead.'.freeze
+  RETRY_ERROR = 'Automatic retry is disabled for RingCentral messages. Compose a new message instead.'
 
   def retry
     return super unless RcBridgeScope.inbox?(@conversation.inbox)
     return super unless message.failed?
 
-    render json: { error: RETRY_ERROR }, status: :unprocessable_entity
+    render json: { error: RETRY_ERROR }, status: :unprocessable_content
   end
 end
 
@@ -176,22 +222,14 @@ Rails.application.config.to_prepare do
   WebhookJob.log_arguments = false if WebhookJob.respond_to?(:log_arguments=)
   ActionCableBroadcastJob.log_arguments = false if ActionCableBroadcastJob.respond_to?(:log_arguments=)
 
-  unless Messages::MessageBuilder.ancestors.include?(RcBridgeMessageTimestamp)
-    Messages::MessageBuilder.prepend(RcBridgeMessageTimestamp)
-  end
-  unless SearchService.ancestors.include?(RcBridgeFullHistorySearch)
-    SearchService.prepend(RcBridgeFullHistorySearch)
-  end
-  unless ConversationBuilder.ancestors.include?(RcBridgeConversationTimestamp)
-    ConversationBuilder.prepend(RcBridgeConversationTimestamp)
-  end
-  unless Messages::StatusUpdateService.ancestors.include?(RcBridgeTerminalStatus)
-    Messages::StatusUpdateService.prepend(RcBridgeTerminalStatus)
-  end
-  unless Api::V1::Accounts::Conversations::MessagesController.ancestors.include?(RcBridgeMessageRetryGuard)
+  Messages::MessageBuilder.prepend(RcBridgeMessageTimestamp) unless Messages::MessageBuilder <= RcBridgeMessageTimestamp
+  SearchService.prepend(RcBridgeFullHistorySearch) unless SearchService <= RcBridgeFullHistorySearch
+  ConversationBuilder.prepend(RcBridgeConversationTimestamp) unless ConversationBuilder <= RcBridgeConversationTimestamp
+  Messages::StatusUpdateService.prepend(RcBridgeTerminalStatus) unless Messages::StatusUpdateService <= RcBridgeTerminalStatus
+  unless Api::V1::Accounts::Conversations::MessagesController <= RcBridgeMessageRetryGuard
     Api::V1::Accounts::Conversations::MessagesController.prepend(RcBridgeMessageRetryGuard)
   end
-  unless Message.ancestors.include?(RcBridgeDerivedTimestamps)
+  unless Message <= RcBridgeDerivedTimestamps
     Message.include(RcBridgeDerivedTimestamps)
     # Rails runs after-commit callbacks in reverse declaration order in this
     # build. Prepending makes this reconciliation run after Chatwoot's own
