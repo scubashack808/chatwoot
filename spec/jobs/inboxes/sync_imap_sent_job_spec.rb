@@ -16,11 +16,21 @@ RSpec.describe Inboxes::SyncImapSentJob do
     expect(service).to have_received(:perform)
   end
 
-  it 'defers quietly when another worker holds the per-inbox lease' do
+  it 'retries with bounded jitter when another worker holds the per-inbox lease' do
+    allow(Imap::SentSyncService).to receive(:new).with(channel: channel, interval: 1).and_return(service)
+    allow(service).to receive(:perform).and_raise(Imap::Lease::LeaseNotAcquiredError)
+    allow(Imap::Lease).to receive(:retry_delay).with(0).and_return(7.0)
+
+    expect { described_class.perform_now(channel) }
+      .to have_enqueued_job(described_class).with(channel, 1, 1)
+  end
+
+  it 'stops retrying after the bounded lease retry limit' do
     allow(Imap::SentSyncService).to receive(:new).with(channel: channel, interval: 1).and_return(service)
     allow(service).to receive(:perform).and_raise(Imap::Lease::LeaseNotAcquiredError)
 
-    expect { described_class.perform_now(channel) }.not_to raise_error
+    expect { described_class.perform_now(channel, 1, described_class::LEASE_RETRY_LIMIT) }
+      .not_to have_enqueued_job(described_class)
   end
 
   it 'does not run for a channel with IMAP disabled' do

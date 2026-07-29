@@ -23,11 +23,20 @@ RSpec.describe Inboxes::ReconcileImapMailboxJob do
     expect(service).to have_received(:perform)
   end
 
-  it 'defers politely when another worker already holds the mailbox lease' do
+  it 'retries with bounded jitter when another worker already holds the mailbox lease' do
+    allow(service).to receive(:perform).and_raise(Imap::Lease::LeaseNotAcquiredError)
+    allow(Imap::Lease).to receive(:retry_delay).with(0).and_return(7.0)
+
+    expect { described_class.perform_now(channel) }
+      .to have_enqueued_job(described_class).with(channel, 1)
+    expect(service).to have_received(:perform)
+  end
+
+  it 'stops retrying after the bounded lease retry limit' do
     allow(service).to receive(:perform).and_raise(Imap::Lease::LeaseNotAcquiredError)
 
-    expect { described_class.perform_now(channel) }.not_to raise_error
-    expect(service).to have_received(:perform)
+    expect { described_class.perform_now(channel, described_class::LEASE_RETRY_LIMIT) }
+      .not_to have_enqueued_job(described_class)
   end
 
   it 'does not report a lost lease as an application exception' do

@@ -16,11 +16,15 @@ class Inboxes::ReconcileImapMailboxJob < ApplicationJob
   # The execution plan's objective is a successful cycle every two minutes. Five minutes without
   # one means something is wrong rather than merely contended.
   STALL_THRESHOLD = 5.minutes
+  LEASE_RETRY_LIMIT = 4
 
-  def perform(channel)
+  def perform(channel, lease_attempt = 0)
     report = Imap::MailboxReconciliationService.new(channel: channel).perform
     handle(channel, report)
     report
+  rescue Imap::Lease::LeaseNotAcquiredError
+    retry_after_contention(channel, lease_attempt)
+    warn_if_stalled(channel)
   rescue StandardError => e
     log_failure(channel, e)
     warn_if_stalled(channel)
@@ -28,15 +32,31 @@ class Inboxes::ReconcileImapMailboxJob < ApplicationJob
 
   private
 
-  # Contention is not a failure: another worker holds this mailbox, so the pass defers to the next
-  # cycle rather than opening a second connection. Sustained contention IS a problem, which is why
-  # every branch here falls through to the stall check.
+  # The scheduler also starts ingestion every minute. Waiting for the next scheduler cycle after
+  # losing that race repeats the same ordering and can starve reconciliation forever. A bounded,
+  # jittered retry gives the current cycle another chance after ingestion releases the lease while
+  # preserving the rule that no second IMAP connection is opened.
+  def retry_after_contention(channel, lease_attempt)
+    if lease_attempt >= LEASE_RETRY_LIMIT
+      Rails.logger.warn(
+        "[IMAP] Lease remained busy for reconciliation - #{channel.inbox.id} after " \
+        "#{LEASE_RETRY_LIMIT} retries."
+      )
+      return
+    end
+
+    delay = Imap::Lease.retry_delay(lease_attempt)
+    Rails.logger.info(
+      "[IMAP] Lease busy for reconciliation - #{channel.inbox.id}, retrying in " \
+      "#{delay.round(2)} seconds."
+    )
+    self.class.set(wait: delay).perform_later(channel, lease_attempt + 1)
+  end
+
   def log_failure(channel, error)
     inbox_id = channel.inbox.id
 
     case error
-    when Imap::Lease::LeaseNotAcquiredError
-      Rails.logger.info "[IMAP] Lease busy for reconciliation - #{inbox_id}, deferring to the next cycle."
     when Imap::Lease::LeaseLostError
       Rails.logger.warn "[IMAP] Lease lost mid-reconciliation for #{inbox_id} : #{error.message}"
     when *ExceptionList::IMAP_EXCEPTIONS
