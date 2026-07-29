@@ -7,20 +7,20 @@ require 'net/imap'
 class Inboxes::SyncImapSentJob < ApplicationJob
   queue_as :scheduled_jobs
 
+  LEASE_RETRY_LIMIT = 4
+
   TRANSPORT_ERRORS = [
     IOError, OpenSSL::SSL::SSLError, Timeout::Error,
     Net::IMAP::NoResponseError, Net::IMAP::BadResponseError, Net::IMAP::InvalidResponseError,
     Net::IMAP::ResponseParseError, Net::IMAP::ResponseReadError, Net::IMAP::ResponseTooLargeError
   ].freeze
 
-  def perform(channel, interval = 1)
+  def perform(channel, interval = 1, lease_attempt = 0)
     return unless eligible?(channel)
 
     Imap::SentSyncService.new(channel: channel, interval: interval).perform
   rescue Imap::Lease::LeaseNotAcquiredError
-    # Contention is not a failure. Ingestion holds the mailbox this minute, so Sent work defers to
-    # the next cycle rather than opening a second connection as a fallback.
-    log(channel, 'lease busy, deferring to the next cycle')
+    retry_after_contention(channel, interval, lease_attempt)
   rescue Imap::Lease::LeaseLostError => e
     log(channel, "lease lost mid-cycle: #{e.message}")
   rescue *ExceptionList::IMAP_EXCEPTIONS, *TRANSPORT_ERRORS => e
@@ -30,6 +30,20 @@ class Inboxes::SyncImapSentJob < ApplicationJob
   end
 
   private
+
+  # Repeating the same immediate fan-out on the next minute can give ingestion the lease forever.
+  # Retry with the lease's existing bounded jitter so this cycle can run after ingestion releases
+  # it without ever opening a concurrent connection.
+  def retry_after_contention(channel, interval, lease_attempt)
+    if lease_attempt >= LEASE_RETRY_LIMIT
+      log(channel, "lease remained busy after #{LEASE_RETRY_LIMIT} retries")
+      return
+    end
+
+    delay = Imap::Lease.retry_delay(lease_attempt)
+    log(channel, "lease busy, retrying in #{delay.round(2)} seconds")
+    self.class.set(wait: delay).perform_later(channel, interval, lease_attempt + 1)
+  end
 
   def eligible?(channel)
     channel.imap_enabled? && !channel.reauthorization_required?
