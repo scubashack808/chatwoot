@@ -8,12 +8,8 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
   include Api::V1::Accounts::Concerns::WhatsappHealthManagement
 
   def index
-    scoped_inboxes = policy_scope(Current.account.inboxes)
-    membership_scope = Current.user.inbox_members.where(inbox_id: scoped_inboxes.select(:id))
-    @current_user_inbox_ids = membership_scope.pluck(:inbox_id).index_with(true)
-    @inboxes = scoped_inboxes
-               .includes(:channel, :portal, :working_hours, { avatar_attachment: :blob })
-               .order_by_name
+    @inboxes = policy_scope(Current.account.inboxes).includes(:channel, :portal, :working_hours, { avatar_attachment: :blob }).order_by_name
+    @current_user_inbox_ids = Current.user.inbox_members.where(inbox_id: @inboxes.select(:id)).pluck(:inbox_id).index_with(true)
   end
 
   def show; end
