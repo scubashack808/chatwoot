@@ -5,6 +5,7 @@ import { useMapGetter } from 'dashboard/composables/store';
 import { LOCAL_STORAGE_KEYS } from 'dashboard/constants/localStorage';
 import { LocalStorage } from 'shared/helpers/localStorage';
 import Icon from 'next/icon/Icon.vue';
+import SidebarGroupEmptyLeaf from './SidebarGroupEmptyLeaf.vue';
 import SidebarGroupLeaf from './SidebarGroupLeaf.vue';
 import SidebarGroupSeparator from './SidebarGroupSeparator.vue';
 
@@ -19,12 +20,15 @@ const props = defineProps({
   activeChild: { type: Object, default: undefined },
   sortOptions: { type: Array, default: () => [] },
   activeSort: { type: String, default: '' },
+  filterable: { type: Boolean, default: false },
+  filterActive: { type: Boolean, default: false },
+  filterLabel: { type: String, default: '' },
   collapsible: { type: Boolean, default: false },
   showTreeLine: { type: Boolean, default: false },
   endTreeLine: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update-sort']);
+const emit = defineEmits(['update-sort', 'toggle-filter']);
 
 const { isAllowed } = useSidebarContext();
 const scrollableContainer = ref(null);
@@ -126,7 +130,7 @@ watch([hasActiveChild, storageKey], expandSubGroupOnActiveChild, {
 
 <template>
   <li class="group/sidebar-section relative flex flex-col list-none min-w-0">
-    <template v-if="hasAccessibleItems">
+    <template v-if="hasAccessibleItems || filterable">
       <SidebarGroupSeparator
         v-show="isExpanded"
         :label
@@ -137,9 +141,13 @@ watch([hasActiveChild, storageKey], expandSubGroupOnActiveChild, {
         :end-tree-line="endTreeLine"
         :sort-options="sortOptions"
         :active-sort="activeSort"
+        :filterable="filterable"
+        :filter-active="filterActive"
+        :filter-label="filterLabel"
         class="my-1"
         @toggle="toggleSubGroup"
         @update-sort="sortBy => emit('update-sort', sortBy)"
+        @toggle-filter="emit('toggle-filter')"
       />
       <ul
         v-if="children.length"
@@ -176,6 +184,12 @@ watch([hasActiveChild, storageKey], expandSubGroupOnActiveChild, {
             class="w-4 h-6 text-n-slate-9 opacity-50 group-hover:opacity-100"
           />
         </div>
+      </ul>
+      <ul
+        v-else-if="isExpanded && isSubGroupExpanded"
+        class="m-0 list-none reset-base min-w-0"
+      >
+        <SidebarGroupEmptyLeaf />
       </ul>
     </template>
   </li>

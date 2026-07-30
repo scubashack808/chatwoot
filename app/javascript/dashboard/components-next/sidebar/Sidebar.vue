@@ -2,9 +2,11 @@
 import { h, ref, computed, onMounted, watch } from 'vue';
 import { provideSidebarContext, useSidebarResize } from './provider';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useConfig } from 'dashboard/composables/useConfig';
 import { useKbd } from 'dashboard/composables/utils/useKbd';
 import { useMapGetter } from 'dashboard/composables/store';
+import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useStore } from 'vuex';
 import { useI18n } from 'vue-i18n';
 import { useSidebarKeyboardShortcuts } from './useSidebarKeyboardShortcuts';
@@ -44,7 +46,9 @@ const emit = defineEmits([
 ]);
 
 const { accountScopedRoute, isOnChatwootCloud } = useAccount();
+const { isAdmin } = useAdmin();
 const { isEnterprise } = useConfig();
+const { uiSettings, updateUISettings } = useUISettings();
 const store = useStore();
 
 // Calls run on the enterprise-only API (cloud runs enterprise); hide the entry
@@ -245,9 +249,25 @@ const getSidebarSectionSort = useMapGetter(
   'sidebarSortPreferences/getSectionSort'
 );
 
+const assignedInboxesOnly = computed(
+  () => isAdmin.value && uiSettings.value.sidebar_assigned_inboxes_only === true
+);
+
+const visibleInboxes = computed(() => {
+  if (!assignedInboxesOnly.value) return inboxes.value;
+
+  return inboxes.value.filter(inbox => inbox.current_user_is_member);
+});
+
+const toggleAssignedInboxesOnly = () => {
+  updateUISettings({
+    sidebar_assigned_inboxes_only: !assignedInboxesOnly.value,
+  });
+};
+
 onMounted(() => {
   store.dispatch('labels/get');
-  store.dispatch('inboxes/get');
+  store.dispatch('inboxes/get', { cache: !isAdmin.value });
   store.dispatch('notifications/unReadCount');
   store.dispatch('teams/get');
   store.dispatch('attributes/get');
@@ -311,7 +331,7 @@ const sortedTeams = computed(() =>
 );
 
 const sortedInboxes = computed(() =>
-  sortSidebarItems(inboxes.value, {
+  sortSidebarItems(visibleInboxes.value, {
     sortBy: getSortForSection(SIDEBAR_SORT_SECTIONS.CHANNELS),
     labelKey: inbox => inbox.name,
     unreadCountKey: inbox => getInboxUnreadCount.value(inbox.id),
@@ -453,6 +473,12 @@ const menuItems = computed(() => {
           activeOn: ['conversation_through_inbox'],
           ...buildSortConfig(SIDEBAR_SORT_SECTIONS.CHANNELS),
           collapsible: true,
+          filterable: isAdmin.value,
+          filterActive: assignedInboxesOnly.value,
+          filterLabel: assignedInboxesOnly.value
+            ? t('SIDEBAR.SHOW_ALL_CHANNELS')
+            : t('SIDEBAR.SHOW_ASSIGNED_CHANNELS'),
+          onFilterToggle: toggleAssignedInboxesOnly,
           showTreeLine: true,
           children: sortedInboxes.value.map(inbox => ({
             name: `${inbox.name}-${inbox.id}`,

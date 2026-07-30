@@ -4,8 +4,10 @@ export const actions = {
   get(_, { inboxId }) {
     return InboxMembersAPI.show(inboxId);
   },
-  create(_, { inboxId, agentList }) {
-    return InboxMembersAPI.update({ inboxId, agentList });
+  async create({ dispatch }, { inboxId, agentList }) {
+    const response = await InboxMembersAPI.update({ inboxId, agentList });
+    await dispatch('inboxes/get', { cache: false }, { root: true });
+    return response;
   },
 };
 

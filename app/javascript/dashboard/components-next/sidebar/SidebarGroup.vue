@@ -118,7 +118,9 @@ const visibleChildren = computed(() => {
   if (!hasChildren.value) return [];
 
   return props.children.filter(child => {
-    if (child.children) return hasAccessibleSubChildren(child);
+    if (child.children) {
+      return child.filterable || hasAccessibleSubChildren(child);
+    }
 
     return child.to && isAllowed(child.to);
   });
@@ -319,7 +321,11 @@ watch(
             :active-child="activeChild"
             :sort-options="child.sortOptions"
             :active-sort="child.activeSort"
+            :filterable="child.filterable"
+            :filter-active="child.filterActive"
+            :filter-label="child.filterLabel"
             @update-sort="child.onSortChange"
+            @toggle-filter="child.onFilterToggle"
           />
           <SidebarGroupLeaf
             v-else-if="isAllowed(child.to)"

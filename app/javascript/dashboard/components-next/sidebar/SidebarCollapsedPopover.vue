@@ -6,6 +6,7 @@ import { useSidebarContext } from './provider';
 import { useMapGetter } from 'dashboard/composables/store';
 import Icon from 'next/icon/Icon.vue';
 import TeleportWithDirection from 'dashboard/components-next/TeleportWithDirection.vue';
+import SidebarGroupEmptyLeaf from './SidebarGroupEmptyLeaf.vue';
 import SidebarUnreadBadge from './SidebarUnreadBadge.vue';
 import SidebarSortMenu from './SidebarSortMenu.vue';
 
@@ -70,7 +71,10 @@ const transition = computed(() =>
 const accessibleChildren = computed(() => {
   return props.children.filter(child => {
     if (child.children) {
-      return child.children.some(subChild => isAllowed(subChild.to));
+      return (
+        child.filterable ||
+        child.children.some(subChild => isAllowed(subChild.to))
+      );
     }
     return child.to && isAllowed(child.to);
   });
@@ -149,6 +153,20 @@ onMounted(async () => {
                   <span class="flex-1 truncate text-sm">{{ child.label }}</span>
                 </button>
                 <div class="flex flex-shrink-0 items-center gap-1 pe-2">
+                  <button
+                    v-if="child.filterable"
+                    type="button"
+                    class="flex size-6 flex-shrink-0 items-center justify-center rounded-md text-n-slate-11 hover:bg-n-alpha-2 focus-visible:bg-n-alpha-2 focus-visible:outline-none"
+                    :class="{
+                      'bg-n-alpha-2 text-n-slate-12': child.filterActive,
+                    }"
+                    :title="child.filterLabel"
+                    :aria-label="child.filterLabel"
+                    :aria-pressed="child.filterActive"
+                    @click.stop="child.onFilterToggle()"
+                  >
+                    <span class="i-lucide-list-filter size-3 flex-shrink-0" />
+                  </button>
                   <SidebarSortMenu
                     v-if="child.sortOptions?.length"
                     :active-sort="child.activeSort"
@@ -176,6 +194,9 @@ onMounted(async () => {
                   v-if="expandedSubGroup === child.name"
                   class="m-0 p-0 list-none ltr:pl-4 rtl:pr-4 mt-1 overflow-hidden"
                 >
+                  <SidebarGroupEmptyLeaf
+                    v-if="getAccessibleSubChildren(child.children).length === 0"
+                  />
                   <li
                     v-for="subChild in getAccessibleSubChildren(child.children)"
                     :key="subChild.name"

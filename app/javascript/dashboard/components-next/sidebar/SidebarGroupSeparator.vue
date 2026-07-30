@@ -1,8 +1,9 @@
 <script setup>
+import { computed } from 'vue';
 import Icon from 'next/icon/Icon.vue';
 import SidebarSortMenu from './SidebarSortMenu.vue';
 
-defineProps({
+const props = defineProps({
   collapsible: {
     type: Boolean,
     default: false,
@@ -27,6 +28,18 @@ defineProps({
     type: String,
     default: '',
   },
+  filterable: {
+    type: Boolean,
+    default: false,
+  },
+  filterActive: {
+    type: Boolean,
+    default: false,
+  },
+  filterLabel: {
+    type: String,
+    default: '',
+  },
   showTreeLine: {
     type: Boolean,
     default: false,
@@ -37,7 +50,17 @@ defineProps({
   },
 });
 
-const emit = defineEmits(['toggle', 'update-sort']);
+const emit = defineEmits(['toggle', 'update-sort', 'toggle-filter']);
+
+const actionPadding = computed(() => {
+  const sortable = props.sortOptions.length > 0;
+
+  if (props.filterable && props.collapsible && sortable) return 'pe-20';
+  if (props.filterable && (props.collapsible || sortable)) return 'pe-14';
+  if (props.filterable || props.collapsible) return 'pe-8';
+  if (sortable) return 'pe-10';
+  return '';
+});
 
 const TREE_VERTICAL_LINE =
   "before:content-[''] before:absolute before:-top-1 before:w-0.5 before:bg-n-slate-4 before:start-[-0.5rem]";
@@ -54,15 +77,13 @@ const TREE_ELBOW =
       :title="label"
       class="relative flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-n-slate-10 select-none"
       :class="[
+        actionPadding,
         showTreeLine && TREE_VERTICAL_LINE,
         showTreeLine &&
           (endTreeLine ? `before:h-3 ${TREE_ELBOW}` : 'before:-bottom-1'),
         {
           'pointer-events-none': !collapsible,
           'cursor-pointer hover:bg-n-alpha-2': collapsible,
-          'pe-14': collapsible && sortOptions.length,
-          'pe-8': collapsible && !sortOptions.length,
-          'pe-10': !collapsible && sortOptions.length,
         },
       ]"
       @click.stop="collapsible ? emit('toggle') : undefined"
@@ -77,9 +98,21 @@ const TREE_ELBOW =
       </div>
     </component>
     <div
-      v-if="collapsible || sortOptions.length"
+      v-if="collapsible || sortOptions.length || filterable"
       class="absolute end-2 top-1/2 flex -translate-y-1/2 items-center gap-1"
     >
+      <button
+        v-if="filterable"
+        type="button"
+        class="flex size-6 flex-shrink-0 items-center justify-center rounded-md text-n-slate-10 hover:bg-n-alpha-2 focus-visible:bg-n-alpha-2 focus-visible:outline-none"
+        :class="{ 'bg-n-alpha-2 text-n-slate-12': filterActive }"
+        :title="filterLabel"
+        :aria-label="filterLabel"
+        :aria-pressed="filterActive"
+        @click.stop="emit('toggle-filter')"
+      >
+        <span class="i-lucide-list-filter size-3 flex-shrink-0" />
+      </button>
       <SidebarSortMenu
         v-if="sortOptions.length"
         :active-sort="activeSort"
