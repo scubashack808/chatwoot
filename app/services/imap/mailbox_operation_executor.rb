@@ -48,13 +48,7 @@ class Imap::MailboxOperationExecutor
 
   def resolve_targets(session)
     listing = session.command { |imap| imap.list('', '*') } || []
-    discovery = Imap::FolderDiscoveryService.result_for(folders: listing, config: channel.reload.mailbox_sync)
-    targets = %w[archive trash spam].index_with { |role| discovery.for_role(role).selected }
-    all_mail = discovery.folders.select do |folder|
-      folder[:attributes].include?('all') && folder[:attributes].exclude?(Imap::FolderDiscoveryService::NOSELECT)
-    end
-    targets['all'] = all_mail.first[:name] if all_mail.one?
-    targets
+    Imap::MailboxTargets.new(listing: listing, config: channel.reload.mailbox_sync).to_h
   end
 
   def process_item(item, command)

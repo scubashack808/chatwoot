@@ -25,6 +25,17 @@ class Imap::ConversationMailboxState
     }
   end
 
+  # Whether a mailbox action could address this conversation at all.
+  #
+  # #state deliberately reports 'inbox' for a conversation whose incoming mail predates identity
+  # capture, because that is where the reader should be told the mail sits. That is the right
+  # answer for display and the wrong one for offering an action: with no tracked identity there is
+  # nothing on the server to move, and the request would be accepted and then fail on
+  # identity_missing. Callers deciding whether to publish mailbox state ask this, not #state.
+  def actionable?
+    tracked_identities.any?
+  end
+
   private
 
   attr_reader :conversation, :incoming_messages, :latest_operation
