@@ -45,11 +45,15 @@ class Imap::ConversationMailboxState
 
   # Whether a mailbox action could address this conversation at all.
   #
-  # #state deliberately reports 'inbox' for a conversation whose incoming mail predates identity
-  # capture, because that is where the reader should be told the mail sits. That is the right
-  # answer for display and the wrong one for offering an action: with no tracked identity there is
-  # nothing on the server to move, and the request would be accepted and then fail on
-  # identity_missing. Callers deciding whether to publish mailbox state ask this, not #state.
+  # #state is the wrong thing to ask, because every value it can return for a conversation with no
+  # tracked identity still reads as actionable to the dashboard. Mail that predates identity
+  # capture reports 'mixed', since untracked_count is positive while roles is empty; mail that sits
+  # alongside tracked inbox mail reports 'inbox'. Both are right for telling a reader where the
+  # conversation is, and both make getMailboxActions offer Archive, Spam and Trash, because
+  # mailboxStateIncludesRole treats a positive untracked_count as inbox membership.
+  #
+  # There is nothing on the server to move, so the request would be accepted and then fail on
+  # identity_missing. Callers deciding whether to publish ask this, not #state.
   def actionable?
     tracked_identities.any?
   end
