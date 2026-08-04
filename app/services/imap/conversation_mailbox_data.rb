@@ -17,6 +17,10 @@ class Imap::ConversationMailboxData
   # only refuse.
   def to_h
     return {} if readable_conversations.empty?
+    # Nothing on this page can mutate a provider, so the message and operation reads would be
+    # thrown away. This is the ordinary case for an account whose inboxes have not been activated,
+    # and it keeps the gate from costing anything at all there.
+    return {} if mutable_inbox_ids.empty?
 
     messages = incoming_messages.group_by(&:conversation_id)
     operations = latest_operations.index_by(&:conversation_id)
@@ -69,8 +73,7 @@ class Imap::ConversationMailboxData
     @mutable_inbox_ids ||= Inbox.where(id: readable_conversations.map(&:inbox_id).uniq)
                                 .includes(:channel)
                                 .select { |inbox| provider_mutation_allowed?(inbox) }
-                                .map(&:id)
-                                .to_set
+                                .to_set(&:id)
   end
 
   def provider_mutation_allowed?(inbox)

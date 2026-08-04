@@ -5,12 +5,10 @@ RSpec.describe Imap::ConversationMailboxData do
   let(:channel) { create(:channel_email, :imap_email, account: account) }
   let(:inbox) { channel.inbox }
 
-  # Publication now requires the inbox to be at mode active. Written past validation on purpose:
-  # entering active legitimately contacts the mail server, and these examples are about what is
-  # published, not about how an inbox gets activated. Channel::Email's own spec covers that.
-  def activate!(target = channel)
-    target.update_column(:mailbox_sync_config,
-                         { 'mode' => 'active', 'sent_mode' => 'provider_managed', 'folder_overrides' => {} })
+  # No folder overrides, so Channel::Email's server verification does not fire and these examples
+  # never touch a mail server. They are about what is published, not about how an inbox is set up.
+  def set_mode!(mode, target = channel)
+    target.update!(mailbox_sync_config: { 'mode' => mode, 'sent_mode' => 'provider_managed', 'folder_overrides' => {} })
     target.reload
   end
 
@@ -23,7 +21,7 @@ RSpec.describe Imap::ConversationMailboxData do
     message
   end
 
-  before { activate! }
+  before { set_mode!('active') }
 
   it 'bulk derives state and the latest operation for each conversation' do
     conversations = create_list(:conversation, 2, account: account, inbox: inbox)
@@ -54,8 +52,7 @@ RSpec.describe Imap::ConversationMailboxData do
   # a nil value would still count as data and still draw the menu.
   describe 'the gate' do
     it 'publishes nothing while the inbox is below mode active' do
-      channel.update_column(:mailbox_sync_config,
-                            { 'mode' => 'observe', 'sent_mode' => 'provider_managed', 'folder_overrides' => {} })
+      set_mode!('observe')
       conversation = create(:conversation, account: account, inbox: channel.reload.inbox)
       tracked_message(conversation)
 
@@ -63,8 +60,7 @@ RSpec.describe Imap::ConversationMailboxData do
     end
 
     it 'publishes nothing for an inbox that is off' do
-      channel.update_column(:mailbox_sync_config,
-                            { 'mode' => 'off', 'sent_mode' => 'provider_managed', 'folder_overrides' => {} })
+      set_mode!('off')
       conversation = create(:conversation, account: account, inbox: channel.reload.inbox)
       tracked_message(conversation)
 
