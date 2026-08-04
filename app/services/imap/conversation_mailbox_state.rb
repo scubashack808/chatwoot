@@ -4,6 +4,24 @@ class Imap::ConversationMailboxState
   MAILBOX_ROLES = %w[inbox archive trash spam].freeze
   PROVIDER_ABSENT_STATE = 'missing'.freeze
 
+  # The one place that decides whether mailbox state may be published for a conversation, so the
+  # three publication paths cannot drift apart: the conversation list payload, the mailbox
+  # operations controller, and the realtime operation event.
+  #
+  # Returns the state, or nil when publishing it would offer an action that cannot succeed. Callers
+  # must OMIT the key on nil rather than send null, because the dashboard tests for it with
+  # hasOwnProperty and a null still counts as data.
+  #
+  # Imap::ConversationMailboxData deliberately does not call this. It answers the same question for
+  # a whole page with two queries instead of two per conversation.
+  def self.publishable(conversation:)
+    channel = conversation.inbox.channel
+    return nil unless channel.respond_to?(:mailbox_sync) && channel.mailbox_sync.provider_mutation_allowed?
+
+    state = new(conversation: conversation)
+    state.actionable? ? state : nil
+  end
+
   def initialize(
     conversation:,
     incoming_messages: conversation.messages.incoming.order(:id),

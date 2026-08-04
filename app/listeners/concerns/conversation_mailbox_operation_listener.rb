@@ -5,15 +5,14 @@ module ConversationMailboxOperationListener
     return if account.nil? || inbox.nil?
 
     tokens = user_tokens(account, inbox.members)
-    broadcast(
-      account,
-      tokens,
-      Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED,
-      {
-        conversation_id: event.data[:conversation_id],
-        operation: event.data[:operation],
-        mailbox_state: event.data[:mailbox_state]
-      }
-    )
+    payload = {
+      conversation_id: event.data[:conversation_id],
+      operation: event.data[:operation]
+    }
+    # Carried through only when the notifier published it. Passing the key unconditionally would
+    # broadcast an explicit null, which the dashboard counts as mailbox data.
+    payload[:mailbox_state] = event.data[:mailbox_state] if event.data.key?(:mailbox_state)
+
+    broadcast(account, tokens, Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, payload)
   end
 end

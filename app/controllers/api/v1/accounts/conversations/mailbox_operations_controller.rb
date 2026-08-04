@@ -58,21 +58,9 @@ class Api::V1::Accounts::Conversations::MailboxOperationsController < Api::V1::A
   # gate removes. The key is omitted rather than set to null because the dashboard tests for its
   # presence with hasOwnProperty.
   def with_mailbox_state(payload)
-    state = publishable_mailbox_state
+    state = Imap::ConversationMailboxState.publishable(conversation: @conversation)
     return payload if state.nil?
 
-    payload.merge(mailbox_state: state)
-  end
-
-  def publishable_mailbox_state
-    return nil unless provider_mutation_allowed?
-
-    state = Imap::ConversationMailboxState.new(conversation: @conversation)
-    state.actionable? ? state.to_h : nil
-  end
-
-  def provider_mutation_allowed?
-    channel = @conversation.inbox.channel
-    channel.respond_to?(:mailbox_sync) && channel.mailbox_sync.provider_mutation_allowed?
+    payload.merge(mailbox_state: state.to_h)
   end
 end
