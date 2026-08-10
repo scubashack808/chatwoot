@@ -26,23 +26,28 @@ class Imap::ConversationMailboxData
     operations = latest_operations.index_by(&:conversation_id)
 
     readable_conversations.each_with_object({}) do |conversation, payload|
-      next unless mutable_inbox_ids.include?(conversation.inbox_id)
-
-      operation = operations[conversation.id]
-      state = Imap::ConversationMailboxState.new(
-        conversation: conversation,
-        incoming_messages: messages.fetch(conversation.id, []),
-        latest_operation: operation
-      )
-      next unless state.actionable?
-
-      payload[conversation.id] = { mailbox_state: state.to_h, mailbox_operation: operation&.summary }
+      data = conversation_payload(conversation, messages, operations)
+      payload[conversation.id] = data if data
     end
   end
 
   private
 
   attr_reader :conversations, :user, :account_user
+
+  def conversation_payload(conversation, messages, operations)
+    return unless mutable_inbox_ids.include?(conversation.inbox_id)
+
+    operation = operations[conversation.id]
+    state = Imap::ConversationMailboxState.new(
+      conversation: conversation,
+      incoming_messages: messages.fetch(conversation.id, []),
+      latest_operation: operation
+    )
+    return unless state.actionable?
+
+    { mailbox_state: state.to_h, mailbox_operation: operation&.summary }
+  end
 
   def conversation_records
     @conversation_records ||= conversations.to_a
