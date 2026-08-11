@@ -5,6 +5,7 @@ import { useAccount } from 'dashboard/composables/useAccount';
 import { useConfig } from 'dashboard/composables/useConfig';
 import { useKbd } from 'dashboard/composables/utils/useKbd';
 import { useMapGetter } from 'dashboard/composables/store';
+import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useStore } from 'vuex';
 import { useI18n } from 'vue-i18n';
 import { useSidebarKeyboardShortcuts } from './useSidebarKeyboardShortcuts';
@@ -28,6 +29,7 @@ import {
   resolveSidebarSort,
   sortSidebarItems,
 } from 'dashboard/helper/sidebarSort';
+import { filterSidebarInboxes } from 'dashboard/helper/sidebarInboxVisibility';
 
 const props = defineProps({
   isMobileSidebarOpen: {
@@ -45,6 +47,7 @@ const emit = defineEmits([
 
 const { accountScopedRoute, isOnChatwootCloud } = useAccount();
 const { isEnterprise } = useConfig();
+const { uiSettings } = useUISettings();
 const store = useStore();
 
 // Calls run on the enterprise-only API (cloud runs enterprise); hide the entry
@@ -310,8 +313,12 @@ const sortedTeams = computed(() =>
   })
 );
 
+const visibleInboxes = computed(() =>
+  filterSidebarInboxes(inboxes.value, uiSettings.value, accountId.value)
+);
+
 const sortedInboxes = computed(() =>
-  sortSidebarItems(inboxes.value, {
+  sortSidebarItems(visibleInboxes.value, {
     sortBy: getSortForSection(SIDEBAR_SORT_SECTIONS.CHANNELS),
     labelKey: inbox => inbox.name,
     unreadCountKey: inbox => getInboxUnreadCount.value(inbox.id),
