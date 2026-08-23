@@ -6,6 +6,6 @@ export const filterSidebarInboxes = (inboxes, uiSettings, accountId) => {
 
   if (!Array.isArray(inboxIds)) return inboxes;
 
-  const visibleInboxIds = new Set(inboxIds.map(Number));
-  return inboxes.filter(inbox => visibleInboxIds.has(Number(inbox.id)));
+  const visibleInboxIds = new Set(inboxIds.map(String));
+  return inboxes.filter(inbox => visibleInboxIds.has(String(inbox.id)));
 };

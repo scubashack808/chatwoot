@@ -62,4 +62,12 @@ describe('#filterSidebarInboxes', () => {
       { id: 10, name: 'Scuba Shack' },
     ]);
   });
+
+  it('does not coerce malformed values into inbox ids', () => {
+    const uiSettings = {
+      sidebar_inbox_ids_by_account: { 1: [true, ' 2 ', '0x2'] },
+    };
+
+    expect(filterSidebarInboxes(inboxes, uiSettings, 1)).toEqual([]);
+  });
 });
