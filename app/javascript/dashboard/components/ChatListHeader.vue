@@ -16,6 +16,7 @@ const props = defineProps({
   isOnExpandedLayout: { type: Boolean, required: true },
   conversationStats: { type: Object, required: true },
   isListLoading: { type: Boolean, required: true },
+  allowAdvancedFilters: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -138,7 +139,7 @@ const toggleConversationLayout = () => {
           @click="emit('deleteFolders')"
         />
       </template>
-      <div v-else class="relative">
+      <div v-else-if="allowAdvancedFilters" class="relative">
         <NextButton
           id="toggleConversationFilterButton"
           v-tooltip.right="$t('FILTER.TOOLTIP_LABEL')"

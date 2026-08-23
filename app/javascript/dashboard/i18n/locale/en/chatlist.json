@@ -11,10 +11,26 @@
     "TAB_HEADING": "Conversations",
     "MENTION_HEADING": "Mentions",
     "UNATTENDED_HEADING": "Unattended",
+    "REPLIED": "Replied",
+    "TIME_BUCKETS": {
+      "TODAY": "Today",
+      "YESTERDAY": "Yesterday",
+      "THIS_WEEK": "This Week",
+      "THIS_MONTH": "This Month",
+      "OLDER": "Older"
+    },
     "SEARCH": {
       "INPUT": "Search for People, Chats, Saved Replies .."
     },
     "FILTER_ALL": "All",
+    "MAILBOX_ROLES": {
+      "LABEL": "Mailbox views",
+      "INBOX": "Inbox",
+      "SENT": "Sent",
+      "ARCHIVE": "Archive",
+      "SPAM": "Spam",
+      "TRASH": "Trash"
+    },
     "ASSIGNEE_TYPE_TABS": {
       "me": "Mine",
       "unassigned": "Unassigned",

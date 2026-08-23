@@ -10,6 +10,12 @@ import ReplyToMessage from './ReplyToMessage.vue';
 import AttachmentPreview from 'dashboard/components/widgets/AttachmentsPreview.vue';
 import ReplyTopPanel from 'dashboard/components/widgets/WootWriter/ReplyTopPanel.vue';
 import ReplyEmailHead from './ReplyEmailHead.vue';
+import {
+  channelOwnedAddresses,
+  defaultFromAddress,
+  sanitizeRecipients,
+  replyAllCcAddresses,
+} from './helpers/emailRecipientHelper';
 import ReplyBottomPanel from 'dashboard/components/widgets/WootWriter/ReplyBottomPanel.vue';
 import CopilotReplyBottomPanel from 'dashboard/components/widgets/WootWriter/CopilotReplyBottomPanel.vue';
 import ArticleSearchPopover from 'dashboard/routes/dashboard/helpcenter/components/ArticleSearch/SearchPopover.vue';
@@ -132,6 +138,7 @@ export default {
       bccEmails: '',
       ccEmails: '',
       toEmails: '',
+      selectedFromEmail: '',
       doAutoSaveDraft: () => {},
       showWhatsAppTemplatesModal: false,
       showContentTemplatesModal: false,
@@ -252,6 +259,29 @@ export default {
     },
     inbox() {
       return this.$store.getters['inboxes/getInbox'](this.inboxId);
+    },
+    // Every address this inbox owns, so a reply can never be addressed back to ourselves.
+    ownAddresses() {
+      return channelOwnedAddresses(this.inbox);
+    },
+    // The addresses an agent may send as. forward_to_email is deliberately absent: it routes
+    // mail in, it is not a sending identity.
+    fromEmailOptions() {
+      if (!this.isAnEmailChannel) return [];
+      return [this.inbox?.email, ...(this.inbox?.aliases || [])].filter(
+        Boolean
+      );
+    },
+    // What the server will send from if the composer says nothing.
+    defaultFromEmail() {
+      return (
+        defaultFromAddress(
+          this.currentChat?.messages || [],
+          this.fromEmailOptions
+        ) ||
+        this.inbox?.email ||
+        ''
+      );
     },
     messagePlaceHolder() {
       if (this.isEditorDisabled) {
@@ -1249,6 +1279,18 @@ export default {
       if (this.toEmails && !this.isOnPrivateNote) {
         messagePayload.toEmails = this.toEmails;
       }
+
+      if (
+        this.isAnEmailChannel &&
+        !this.isOnPrivateNote &&
+        this.selectedFromEmail &&
+        this.selectedFromEmail !== this.defaultFromEmail
+      ) {
+        messagePayload.contentAttributes = {
+          ...(messagePayload.contentAttributes || {}),
+          from_email: this.selectedFromEmail,
+        };
+      }
       return messagePayload;
     },
     setCcEmails(value) {
@@ -1260,16 +1302,33 @@ export default {
       const { email: inboxEmail, forward_to_email: forwardToEmail } =
         this.inbox;
 
-      const { cc, bcc, to } = getRecipients(
-        this.lastEmail,
-        conversationContact,
-        inboxEmail,
-        forwardToEmail
+      const { cc, bcc, to } = sanitizeRecipients(
+        getRecipients(
+          this.lastEmail,
+          conversationContact,
+          inboxEmail,
+          forwardToEmail
+        ),
+        this.ownAddresses
       );
 
       this.toEmails = to.join(', ');
       this.ccEmails = cc.join(', ');
       this.bccEmails = bcc.join(', ');
+      this.setDefaultFromEmail();
+    },
+    applyReplyAll() {
+      this.ccEmails = replyAllCcAddresses({
+        lastEmail: this.lastEmail,
+        currentTo: this.toEmails,
+        currentCc: this.ccEmails,
+        owned: this.ownAddresses,
+      }).join(', ');
+    },
+    setDefaultFromEmail() {
+      this.selectedFromEmail = this.fromEmailOptions.length
+        ? this.defaultFromEmail
+        : '';
     },
     fetchAndSetReplyTo() {
       const replyStorageKey = LOCAL_STORAGE_KEYS.MESSAGE_REPLY_TO;
@@ -1393,6 +1452,9 @@ export default {
           v-model:cc-emails="ccEmails"
           v-model:bcc-emails="bccEmails"
           v-model:to-emails="toEmails"
+          v-model:from-email="selectedFromEmail"
+          :from-email-options="fromEmailOptions"
+          @reply-all="applyReplyAll"
         />
         <AudioRecorder
           v-if="showAudioRecorderEditor"

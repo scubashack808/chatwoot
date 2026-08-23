@@ -1,6 +1,9 @@
 <script setup>
 import { computed, useTemplateRef } from 'vue';
-import { getLastMessage } from 'dashboard/helper/conversationHelper';
+import {
+  getLastMessage,
+  isConversationReplied,
+} from 'dashboard/helper/conversationHelper';
 import CardAvatar from './CardAvatar.vue';
 import CardContent from './CardContent.vue';
 import CardLabels from './CardLabelsV5.vue';
@@ -12,6 +15,7 @@ import SLACardLabel from 'dashboard/components-next/Conversation/Sla/SLACardLabe
 import CardStatusIcon from './CardStatusIcon.vue';
 import Checkbox from 'dashboard/components-next/checkbox/Checkbox.vue';
 import Icon from 'dashboard/components-next/icon/Icon.vue';
+import MailboxOperationStatus from 'dashboard/components/widgets/conversation/MailboxOperationStatus.vue';
 
 const props = defineProps({
   chat: { type: Object, required: true },
@@ -23,6 +27,14 @@ const props = defineProps({
   showAssignee: { type: Boolean, default: false },
   showInboxName: { type: Boolean, default: false },
   isInboxView: { type: Boolean, default: false },
+  displayTimestamp: {
+    type: [String, Date, Number],
+    default: '',
+  },
+  // The conversation list opts into these; every other consumer keeps the
+  // presentation it had before.
+  showRepliedMarker: { type: Boolean, default: false },
+  showCalendarTimestamp: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -33,6 +45,12 @@ const emit = defineEmits([
 ]);
 
 const lastMessageInChat = computed(() => getLastMessage(props.chat));
+const hasReplied = computed(
+  () => props.showRepliedMarker && isConversationReplied(props.chat)
+);
+const hasWideMetaColumn = computed(
+  () => props.showRepliedMarker || props.showCalendarTimestamp
+);
 const showLabelsSection = computed(() => props.chat.labels?.length > 0);
 
 const voiceCallData = computed(() => {
@@ -169,6 +187,11 @@ const selectedModel = computed({
 
     <!-- RIGHT SECTION -->
     <div class="flex items-center justify-end gap-1.5 flex-shrink-0">
+      <MailboxOperationStatus
+        :mailbox-state="chat.mailbox_state"
+        :mailbox-operation="chat.mailbox_operation"
+        class="flex-shrink-0"
+      />
       <div v-if="showLabelsSection" class="min-w-0 w-full">
         <CardLabels
           :labels="chat.labels"
@@ -181,12 +204,30 @@ const selectedModel = computed({
         <SLACardLabel ref="slaCardLabel" :chat="chat" />
       </div>
 
-      <div class="flex-shrink-0 w-[4.375rem] text-end">
+      <div
+        class="flex-shrink-0 text-end"
+        :class="
+          hasWideMetaColumn
+            ? 'w-28 flex items-center justify-end gap-0.5'
+            : 'w-[4.375rem]'
+        "
+      >
+        <Icon
+          v-if="hasReplied"
+          v-tooltip.top="$t('CHAT_LIST.REPLIED')"
+          data-testid="replied-marker"
+          :aria-label="$t('CHAT_LIST.REPLIED')"
+          icon="i-lucide-check"
+          class="flex-shrink-0 size-3 text-n-teal-11"
+        />
         <TimeAgo
           :conversation-id="chat.id"
           :last-activity-timestamp="chat.timestamp"
           :created-at-timestamp="chat.created_at"
+          :display-timestamp="displayTimestamp"
+          :show-calendar-timestamp="showCalendarTimestamp"
           class="font-440 !text-xs text-n-slate-11"
+          :class="{ '!ml-0': showRepliedMarker }"
         />
       </div>
     </div>

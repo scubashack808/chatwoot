@@ -149,11 +149,64 @@ class Message < ApplicationRecord
       created_at: created_at.to_i,
       message_type: message_type_before_type_cast,
       conversation_id: conversation&.display_id,
-      conversation: conversation.present? ? conversation_push_event_data : nil
+      conversation: conversation.present? ? conversation_push_event_data : nil,
+      external_source_ids: publishable_external_source_ids
     )
     data[:echo_id] = echo_id if echo_id.present?
     data[:attachments] = attachments.map(&:push_event_data) if attachments.present?
     merge_sender_attributes(data)
+  end
+
+  # IMAP identity is internal synchronisation state, not something an agent, contact, webhook,
+  # bot or CRM processor should ever receive. This is the single chokepoint: every realtime
+  # broadcast, webhook payload, agent-bot payload and conversation partial ultimately builds on
+  # push_event_data, so stripping the namespace here covers all of them at once. Other
+  # integrations' source ids, such as slack and intercom, are deliberately left untouched.
+  def publishable_external_source_ids
+    return external_source_ids if external_source_ids.blank?
+
+    external_source_ids.except(Imap::MessageIdentity::NAMESPACE)
+  end
+
+  def imap_identity
+    Imap::MessageIdentity.parse(external_source_ids&.dig(Imap::MessageIdentity::NAMESPACE))
+  end
+
+  # Merges only the imap namespace, under a row lock, without firing the ordinary update
+  # callbacks. update_columns is deliberate: dispatch_update_event would broadcast this internal
+  # state to contacts and fan it out to automations, bots, webhooks and CRM processors.
+  def write_imap_identity!(identity)
+    with_lock do
+      merged = (external_source_ids || {}).merge(Imap::MessageIdentity::NAMESPACE => identity.to_h)
+      # rubocop:disable Rails/SkipsModelValidations
+      update_columns(external_source_ids: merged)
+      # rubocop:enable Rails/SkipsModelValidations
+    end
+    self
+  end
+
+  # Sent-synchronisation state for an outgoing message. This is deliberately not the same fact as
+  # message.status: SMTP already said whether delivery succeeded, and a Sent-sync failure must
+  # never be re-reported as a delivery failure.
+  def imap_sent_sync
+    Imap::SentSyncState.parse(external_source_ids&.dig(Imap::MessageIdentity::NAMESPACE, Imap::SentSyncState::KEY))
+  end
+
+  # Writes the Sent-sync state, and the identity alongside it once the server copy has been
+  # located, in one row lock and one callback-free update. Same reasoning as write_imap_identity!
+  # above: dispatch_update_event would push internal synchronisation state to contacts, webhooks,
+  # bots and CRM processors.
+  def write_imap_sent_sync!(state, identity: nil)
+    with_lock do
+      namespace = identity ? identity.to_h : (external_source_ids || {})[Imap::MessageIdentity::NAMESPACE] || {}
+      merged = (external_source_ids || {}).merge(
+        Imap::MessageIdentity::NAMESPACE => namespace.merge(Imap::SentSyncState::KEY => state.to_h)
+      )
+      # rubocop:disable Rails/SkipsModelValidations
+      update_columns(external_source_ids: merged)
+      # rubocop:enable Rails/SkipsModelValidations
+    end
+    self
   end
 
   def conversation_push_event_data

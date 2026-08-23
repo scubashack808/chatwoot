@@ -74,6 +74,84 @@ describe('#mutations', () => {
     });
   });
 
+  describe('#UPDATE_CONVERSATION_MAILBOX', () => {
+    it('applies the server payload to the matching conversation', () => {
+      const state = {
+        allConversations: [
+          {
+            id: 42,
+            mailbox_state: { state: 'inbox' },
+            mailbox_operation: { id: 90, status: 'running' },
+          },
+        ],
+      };
+      const mailboxState = { state: 'archive', roles: ['archive'] };
+      const mailboxOperation = { id: 90, status: 'succeeded' };
+
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+        conversationId: 42,
+        mailboxState,
+        mailboxOperation,
+      });
+
+      expect(state.allConversations[0]).toMatchObject({
+        mailbox_state: mailboxState,
+        mailbox_operation: mailboxOperation,
+      });
+    });
+
+    it('does not regress a terminal operation when events arrive out of order', () => {
+      const terminalOperation = { id: 90, status: 'succeeded' };
+      const state = {
+        allConversations: [
+          {
+            id: 42,
+            mailbox_state: { state: 'archive' },
+            mailbox_operation: terminalOperation,
+          },
+        ],
+      };
+
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+        conversationId: 42,
+        mailboxState: { state: 'inbox' },
+        mailboxOperation: { id: 90, status: 'running' },
+      });
+
+      expect(state.allConversations[0]).toMatchObject({
+        mailbox_state: { state: 'archive' },
+        mailbox_operation: terminalOperation,
+      });
+    });
+
+    it('does not let a stale create response replace a newer worker event', () => {
+      const runningOperation = {
+        id: 90,
+        status: 'running',
+        attempt_count: 1,
+      };
+      const state = {
+        allConversations: [
+          {
+            id: 42,
+            mailbox_state: { state: 'inbox' },
+            mailbox_operation: runningOperation,
+          },
+        ],
+      };
+
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+        conversationId: 42,
+        mailboxState: { state: 'inbox' },
+        mailboxOperation: { id: 90, status: 'pending', attempt_count: 0 },
+      });
+
+      expect(state.allConversations[0].mailbox_operation).toBe(
+        runningOperation
+      );
+    });
+  });
+
   describe('#CHANGE_CHAT_SORT_FILTER', () => {
     it('update conversation sort filter', () => {
       const state = { chatSortFilter: 'latest' };

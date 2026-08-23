@@ -10,6 +10,8 @@ import SettingsToggleSection from 'dashboard/components-next/Settings/SettingsTo
 import SettingsAccordion from 'dashboard/components-next/Settings/SettingsAccordion.vue';
 import ImapSettings from '../ImapSettings.vue';
 import SmtpSettings from '../SmtpSettings.vue';
+import MailboxSyncSettings from '../MailboxSyncSettings.vue';
+import EmailAliasSettings from '../EmailAliasSettings.vue';
 import { useVuelidate } from '@vuelidate/core';
 import { required } from '@vuelidate/validators';
 import NextButton from 'dashboard/components-next/button/Button.vue';
@@ -24,6 +26,8 @@ export default {
     SettingsAccordion,
     ImapSettings,
     SmtpSettings,
+    MailboxSyncSettings,
+    EmailAliasSettings,
     NextButton,
     TextArea,
     WhatsappBusinessManagementToken,
@@ -389,8 +393,10 @@ export default {
         </div>
       </SettingsFieldSection>
     </div>
+    <EmailAliasSettings :inbox="inbox" />
     <ImapSettings :inbox="inbox" />
     <SmtpSettings v-if="inbox.imap_enabled" :inbox="inbox" />
+    <MailboxSyncSettings v-if="inbox.imap_enabled" :inbox="inbox" />
   </div>
   <div v-else-if="isAWhatsAppChannel && !isATwilioChannel">
     <div v-if="inbox.provider_config">

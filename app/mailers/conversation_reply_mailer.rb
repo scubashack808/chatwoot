@@ -123,12 +123,22 @@ class ConversationReplyMailer < ApplicationMailer
     subject = @conversation.additional_attributes['mail_subject']
     return "[##{@conversation.display_id}] #{I18n.t('conversations.reply.email_subject')}" if subject.nil?
 
-    chat_count = @conversation.messages.chat.count
     if chat_count > 1
       "Re: #{subject}"
     else
       subject
     end
+  end
+
+  # Counted as of the message being rendered, for the same reason recipients are read from it: a
+  # re-render of an earlier message must not gain a Re: prefix from replies that came after it.
+  # At delivery time the message being sent is the newest, so this counts the whole conversation
+  # and the subject is exactly what it has always been.
+  def chat_count
+    messages = @conversation.messages.chat
+    return messages.count if @message.nil?
+
+    messages.where(messages: { id: ..@message.id }).count
   end
 
   def reply_email
@@ -144,7 +154,7 @@ class ConversationReplyMailer < ApplicationMailer
   end
 
   def channel_email_with_name
-    sender_name(@channel.email)
+    sender_name(@channel.outbound_address_for(@conversation, message: current_message))
   end
 
   def inbox_from_email_address
@@ -178,6 +188,12 @@ class ConversationReplyMailer < ApplicationMailer
     build_references_header(@conversation, in_reply_to_email)
   end
 
+  # Recipients come from the message being rendered, not from whatever is newest in the
+  # conversation. At delivery time those are the same thing, because the message being sent IS the
+  # newest outgoing message. They stop being the same thing when an already delivered message is
+  # re-rendered later, which is what Sent synchronisation does when it archives a copy into the
+  # mail server's Sent folder. Reading the newest message there would address the archived copy to
+  # the wrong recipients and attach a different reply's Bcc list to it.
   def cc_bcc_emails
     content_attributes = current_message&.content_attributes
 

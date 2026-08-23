@@ -55,9 +55,33 @@ json.timestamp conversation.last_activity_at.to_i
 json.first_reply_created_at conversation.first_reply_created_at.to_i
 json.unread_count conversation.unread_incoming_messages.count
 json.last_non_activity_message conversation.messages.where(account_id: conversation.account_id).non_activity_messages.first.try(:push_event_data)
+# A list card marks a conversation replied when the newest public incoming message has a later
+# successful agent reply. Only these two anchors are needed to decide that, and filtering on
+# message_type keeps activity and template messages out of the answer on both sides.
+public_messages = conversation.messages.where(account_id: conversation.account_id, private: false)
+newest_first = { created_at: :desc, id: :desc }
+incoming_anchor = public_messages.incoming.reorder(newest_first).first
+reply_anchor = public_messages.outgoing.where.not(status: :failed).reorder(newest_first).first
+json.last_public_incoming_message incoming_anchor && { id: incoming_anchor.id, created_at: incoming_anchor.created_at.to_i }
+json.last_agent_reply_message reply_anchor && { id: reply_anchor.id, created_at: reply_anchor.created_at.to_i }
 json.last_activity_at conversation.last_activity_at.to_i
 json.priority conversation.priority
 json.waiting_since conversation.waiting_since.to_i.to_i
 sla_applicable = conversation.account.feature_enabled?('sla') && (!conversation.respond_to?(:sla_applicable?) || conversation.sla_applicable?)
 json.sla_policy_id sla_applicable ? conversation.sla_policy_id : nil
+
+if Current.account.feature_enabled?('email_mailbox_actions')
+  conversations = @conversations || [conversation]
+  mailbox_data = @conversation_mailbox_data ||= Imap::ConversationMailboxData.new(
+    conversations: conversations,
+    user: Current.user,
+    account_user: Current.account_user
+  ).to_h
+  conversation_mailbox_data = mailbox_data[conversation.id]
+  if conversation_mailbox_data
+    json.mailbox_state conversation_mailbox_data[:mailbox_state]
+    json.mailbox_operation conversation_mailbox_data[:mailbox_operation]
+  end
+end
+
 json.partial! 'enterprise/api/v1/conversations/partials/conversation', conversation: conversation if ChatwootApp.enterprise?

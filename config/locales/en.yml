@@ -114,6 +114,7 @@ en:
       multi_account_invitation_not_allowed: Users associated with another account cannot be added while SAML is enabled
     conversations:
       resolved: Conversation is resolved and does not accept new messages
+      email_hard_delete: Email conversations cannot be permanently deleted in Chatwoot. Move them to Trash so they remain restorable.
       unread_counts:
         feature_not_enabled: Conversation unread counts feature not enabled for this account
     data_import:

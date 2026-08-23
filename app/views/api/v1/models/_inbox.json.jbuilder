@@ -79,6 +79,7 @@ end
 if resource.email?
   ## Email Channel Attributes
   json.email resource.channel.try(:email)
+  json.aliases resource.channel.try(:aliases) || []
   json.forwarding_enabled ENV.fetch('MAILER_INBOUND_EMAIL_DOMAIN', '').present?
   json.forward_to_email resource.channel.try(:forward_to_email) if ENV.fetch('MAILER_INBOUND_EMAIL_DOMAIN', '').present?
   if Current.account_user&.administrator? && defined?(with_branded_email_layout) && with_branded_email_layout.present? &&
@@ -95,6 +96,7 @@ if resource.email?
     json.imap_enabled resource.channel.try(:imap_enabled)
     json.imap_enable_ssl resource.channel.try(:imap_enable_ssl)
     json.imap_authentication resource.channel.try(:imap_authentication)
+    json.mailbox_sync_config resource.channel.try(:mailbox_sync)&.to_h
 
     if resource.channel.try(:microsoft?) || resource.channel.try(:google?) || resource.channel.try(:legacy_google?)
       json.reauthorization_required resource.channel.try(:provider_config).empty? || resource.channel.try(:reauthorization_required?)

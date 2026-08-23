@@ -9,17 +9,13 @@ RSpec.describe Conversations::DeleteService do
   context 'when deleting an email conversation' do
     let(:inbox) { create(:channel_email, :imap_email, account: account).inbox }
     let(:conversation) { create(:conversation, account: account, inbox: inbox) }
-    let!(:incoming_message) { create(:message, account: account, inbox: inbox, conversation: conversation, source_id: 'incoming@example.com') }
-    let(:deleted_message_tracker) { instance_double(Imap::DeletedMessageTracker, record: true) }
 
-    before do
-      allow(Imap::DeletedMessageTracker).to receive(:new).with(inbox: inbox).and_return(deleted_message_tracker)
-    end
+    it 'refuses local hard deletion and directs the caller to Trash' do
+      expect(Imap::DeletedMessageTracker).not_to receive(:new)
 
-    it 'records incoming message source ids and enqueues the deletion job' do
-      expect { service.perform }.to have_enqueued_job(DeleteObjectJob).with(conversation, user, ip)
-
-      expect(deleted_message_tracker).to have_received(:record).with([incoming_message.source_id])
+      expect { service.perform }
+        .to raise_error(CustomExceptions::EmailConversationHardDelete, /Trash/)
+      expect(DeleteObjectJob).not_to have_been_enqueued
     end
   end
 

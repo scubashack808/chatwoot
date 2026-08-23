@@ -58,6 +58,8 @@ class ActionCableConnector extends BaseActionCableConnector {
       'conversation.updated': this.onConversationUpdated,
       'conversation.unread_count_changed':
         this.onConversationUnreadCountChanged,
+      'conversation.mailbox_operation_updated':
+        this.onConversationMailboxOperationUpdated,
       'account.cache_invalidated': this.onCacheInvalidate,
       'account.enrichment_completed': this.onEnrichmentCompleted,
       'copilot.message.created': this.onCopilotMessageCreated,
@@ -149,6 +151,17 @@ class ActionCableConnector extends BaseActionCableConnector {
   onConversationUpdated = data => {
     this.app.$store.dispatch('updateConversation', data);
     this.fetchConversationStats();
+  };
+
+  onConversationMailboxOperationUpdated = data => {
+    const {
+      conversation_id: conversationId,
+      operation: mailboxOperation,
+      mailbox_state: mailboxState,
+    } = data;
+    const payload = { conversationId, mailboxOperation, mailboxState };
+    this.app.$store.dispatch('applyMailboxOperationUpdate', payload);
+    emitter.emit(BUS_EVENTS.MAILBOX_OPERATION_UPDATED, payload);
   };
 
   onConversationUnreadCountChanged = () => {

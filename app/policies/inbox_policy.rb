@@ -50,6 +50,10 @@ class InboxPolicy < ApplicationPolicy
     @account_user.administrator?
   end
 
+  def mailbox_folders?
+    @account_user.administrator?
+  end
+
   def destroy?
     @account_user.administrator?
   end

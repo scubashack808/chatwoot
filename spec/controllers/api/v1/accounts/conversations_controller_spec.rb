@@ -35,6 +35,61 @@ RSpec.describe 'Conversations API', type: :request do
         expect(body[:data][:payload].first[:messages].first[:id]).to eq(message.id)
       end
 
+      # The list card marks a conversation replied when the newest public incoming message has a
+      # later successful agent reply, so the payload ships those two anchors and nothing else.
+      def list_payload
+        get "/api/v1/accounts/#{account.id}/conversations",
+            headers: agent.create_new_auth_token,
+            as: :json
+        response.parsed_body.dig('data', 'payload', 0)
+      end
+
+      it 'returns the reply anchors a list card needs, ignoring private, activity and template messages' do
+        incoming = create(:message, conversation: conversation, account: account, message_type: :incoming,
+                                    created_at: 5.minutes.ago)
+        reply = create(:message, conversation: conversation, account: account, message_type: :outgoing,
+                                 created_at: 4.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :incoming, private: true,
+                         created_at: 3.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :activity,
+                         created_at: 2.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :template,
+                         content_type: :input_csat, created_at: 1.minute.ago)
+
+        payload = list_payload
+
+        expect(response).to have_http_status(:success)
+        expect(payload['last_public_incoming_message']).to eq('id' => incoming.id, 'created_at' => incoming.created_at.to_i)
+        expect(payload['last_agent_reply_message']).to eq('id' => reply.id, 'created_at' => reply.created_at.to_i)
+      end
+
+      it 'does not treat a send that failed as a reply' do
+        reply = create(:message, conversation: conversation, account: account, message_type: :outgoing,
+                                 created_at: 3.minutes.ago)
+        create(:message, conversation: conversation, account: account, message_type: :outgoing, status: :failed,
+                         created_at: 1.minute.ago)
+
+        expect(list_payload['last_agent_reply_message']).to eq('id' => reply.id, 'created_at' => reply.created_at.to_i)
+      end
+
+      it 'breaks an exact-second tie between two replies on message id' do
+        moment = 2.minutes.ago.change(usec: 0)
+        create(:message, conversation: conversation, account: account, message_type: :outgoing, created_at: moment)
+        newest_reply = create(:message, conversation: conversation, account: account, message_type: :outgoing,
+                                        created_at: moment)
+
+        expect(list_payload['last_agent_reply_message']).to eq('id' => newest_reply.id, 'created_at' => moment.to_i)
+      end
+
+      it 'reports no reply anchor when the conversation has only incoming messages' do
+        create(:message, conversation: conversation, account: account, message_type: :incoming, created_at: 1.minute.ago)
+
+        payload = list_payload
+
+        expect(payload['last_agent_reply_message']).to be_nil
+        expect(payload['last_public_incoming_message']).not_to be_nil
+      end
+
       it 'returns conversations with empty messages array for conversations with out messages' do
         get "/api/v1/accounts/#{account.id}/conversations",
             headers: agent.create_new_auth_token,
@@ -44,6 +99,248 @@ RSpec.describe 'Conversations API', type: :request do
         body = JSON.parse(response.body, symbolize_names: true)
         expect(body[:data][:meta][:all_count]).to eq(1)
         expect(body[:data][:payload].first[:messages]).to eq([])
+      end
+
+      context 'when mailbox actions are enabled' do
+        let(:channel) { create(:channel_email, :imap_email, account: account) }
+        let(:conversation) { create(:conversation, account: account, inbox: channel.inbox) }
+        let!(:message) do
+          create(:message, account: account, inbox: channel.inbox, conversation: conversation, message_type: :incoming)
+        end
+        let!(:operation) do
+          create(
+            :email_mailbox_operation,
+            account: account,
+            inbox: channel.inbox,
+            conversation: conversation,
+            user: agent,
+            action: :archive,
+            status: :partially_succeeded,
+            items: [{ 'message_id' => message.id }, { 'message_id' => message.id + 1 }],
+            results: [{ 'message_id' => message.id, 'status' => 'succeeded' }]
+          )
+        end
+
+        before do
+          account.enable_features!(:email_mailbox_actions)
+          # The account flag alone is not enough any more. Mailbox state is published only for an
+          # inbox that may actually mutate the provider, so that turning the flag on cannot put
+          # Archive, Spam and Trash in front of an agent on an inbox where every click refuses.
+          channel.update!(mailbox_sync_config: { 'mode' => 'active', 'sent_mode' => 'provider_managed',
+                                                 'folder_overrides' => {} })
+          message.write_imap_identity!(
+            Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 8, roles: ['archive'])
+          )
+        end
+
+        it 'includes derived mailbox state and the latest operation in list payloads' do
+          operation
+
+          get "/api/v1/accounts/#{account.id}/conversations",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          expect(response).to have_http_status(:ok)
+          payload = response.parsed_body.dig('data', 'payload').sole
+          expect(payload['mailbox_state']).to include(
+            'state' => 'archive',
+            'roles' => ['archive'],
+            'tracked_count' => 1,
+            'untracked_count' => 0
+          )
+          expect(payload['mailbox_operation']).to include(
+            'id' => operation.id,
+            'action' => 'archive',
+            'status' => 'partially_succeeded',
+            'total' => 2,
+            'succeeded' => 1
+          )
+        end
+
+        it 'publishes no mailbox state when the flag is on but the inbox is not active' do
+          channel.update!(mailbox_sync_config: { 'mode' => 'observe', 'sent_mode' => 'provider_managed',
+                                                 'folder_overrides' => {} })
+          operation
+
+          get "/api/v1/accounts/#{account.id}/conversations",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          expect(response).to have_http_status(:ok)
+          payload = response.parsed_body.dig('data', 'payload').sole
+          # Absent, not null. The dashboard tests for the key with hasOwnProperty, so a null would
+          # still count as mailbox data and still draw the action menu.
+          expect(payload).not_to have_key('mailbox_state')
+          expect(payload).not_to have_key('mailbox_operation')
+        end
+
+        it 'publishes no mailbox state when the conversation has no tracked identity' do
+          # The shape of every message Chatwoot imported before it recorded UIDs. There is nothing
+          # on the server to address, so an accepted operation would fail on identity_missing.
+          message.update!(external_source_ids: {})
+
+          get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          expect(response).to have_http_status(:ok)
+          expect(response.parsed_body).not_to have_key('mailbox_state')
+        end
+
+        it 'includes derived mailbox state and the latest operation in show payloads' do
+          operation
+
+          get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          expect(response).to have_http_status(:ok)
+          expect(response.parsed_body['mailbox_state']).to include(
+            'state' => 'archive',
+            'roles' => ['archive'],
+            'tracked_count' => 1
+          )
+          expect(response.parsed_body['mailbox_operation']).to include(
+            'id' => operation.id,
+            'status' => 'partially_succeeded'
+          )
+        end
+      end
+
+      it 'preserves the upstream list and show payload shape when mailbox actions are disabled' do
+        account.disable_features!(:email_mailbox_actions)
+        create(:message, account: account, inbox: conversation.inbox, conversation: conversation, message_type: :incoming)
+
+        get "/api/v1/accounts/#{account.id}/conversations",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include('"mailbox_state"')
+        expect(response.body).not_to include('"mailbox_operation"')
+
+        get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include('"mailbox_state"')
+        expect(response.body).not_to include('"mailbox_operation"')
+      end
+
+      it 'does not expose mailbox state when the agent can see the conversation only through a team' do
+        account.enable_features!(:email_mailbox_actions)
+        InboxMember.find_by!(inbox: conversation.inbox, user: agent).destroy!
+        team = create(:team, account: account)
+        create(:team_member, team: team, user: agent)
+        conversation.update!(team: team)
+        message = create(
+          :message,
+          account: account,
+          inbox: conversation.inbox,
+          conversation: conversation,
+          message_type: :incoming
+        )
+        message.write_imap_identity!(
+          Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 8, roles: ['archive'])
+        )
+        create(
+          :email_mailbox_operation,
+          account: account,
+          inbox: conversation.inbox,
+          conversation: conversation,
+          action: :archive
+        )
+
+        get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}",
+            headers: agent.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include('"mailbox_state"')
+        expect(response.body).not_to include('"mailbox_operation"')
+      end
+
+      it 'adds two mailbox queries regardless of the number of conversations in the list payload' do
+        query_counts = [1, 5].map do |conversation_count|
+          test_account = create(:account)
+          test_account.enable_features!(:email_mailbox_actions)
+          test_channel = create(:channel_email, :imap_email, account: test_account)
+          test_channel.update!(mailbox_sync_config: { 'mode' => 'active', 'sent_mode' => 'provider_managed',
+                                                      'folder_overrides' => {} })
+          test_agent = create(:user, account: test_account, role: :agent)
+          create(:inbox_member, inbox: test_channel.inbox, user: test_agent)
+
+          Array.new(conversation_count) do |index|
+            test_conversation = create(:conversation, account: test_account, inbox: test_channel.inbox)
+            test_message = create(
+              :message,
+              account: test_account,
+              inbox: test_channel.inbox,
+              conversation: test_conversation,
+              message_type: :incoming
+            )
+            test_message.write_imap_identity!(
+              Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: index + 1, roles: ['archive'])
+            )
+            create(
+              :email_mailbox_operation,
+              account: test_account,
+              inbox: test_channel.inbox,
+              conversation: test_conversation,
+              action: :archive
+            )
+          end
+
+          queries = []
+          subscriber = lambda do |_name, _started, _finished, _unique_id, payload|
+            queries << payload[:sql] unless payload[:cached] || payload[:name] == 'SCHEMA'
+          end
+          ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record') do
+            get "/api/v1/accounts/#{test_account.id}/conversations",
+                headers: test_agent.create_new_auth_token,
+                as: :json
+          end
+
+          expect(response.parsed_body.dig('data', 'payload').length).to eq(conversation_count)
+          queries.count do |sql|
+            sql.include?('SELECT "messages"."id", "messages"."conversation_id", "messages"."external_source_ids"') ||
+              sql.include?('SELECT DISTINCT ON (conversation_id) email_mailbox_operations.*')
+          end
+        end
+
+        expect(query_counts).to eq([2, 2])
+      end
+
+      it 'runs no mailbox queries at all when no inbox on the page may mutate the provider' do
+        test_account = create(:account)
+        test_account.enable_features!(:email_mailbox_actions)
+        test_channel = create(:channel_email, :imap_email, account: test_account)
+        test_agent = create(:user, account: test_account, role: :agent)
+        create(:inbox_member, inbox: test_channel.inbox, user: test_agent)
+        test_conversation = create(:conversation, account: test_account, inbox: test_channel.inbox)
+        test_message = create(:message, account: test_account, inbox: test_channel.inbox,
+                                        conversation: test_conversation, message_type: :incoming)
+        test_message.write_imap_identity!(
+          Imap::MessageIdentity.build(mailbox: 'Archive', uidvalidity: 42, uid: 1, roles: ['archive'])
+        )
+
+        queries = []
+        subscriber = lambda do |_name, _started, _finished, _unique_id, payload|
+          queries << payload[:sql] unless payload[:cached] || payload[:name] == 'SCHEMA'
+        end
+        ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record') do
+          get "/api/v1/accounts/#{test_account.id}/conversations",
+              headers: test_agent.create_new_auth_token,
+              as: :json
+        end
+
+        mailbox_reads = queries.count do |sql|
+          sql.include?('SELECT "messages"."id", "messages"."conversation_id", "messages"."external_source_ids"') ||
+            sql.include?('SELECT DISTINCT ON (conversation_id) email_mailbox_operations.*')
+        end
+        expect(mailbox_reads).to eq(0)
+        expect(response.parsed_body.dig('data', 'payload').sole).not_to have_key('mailbox_state')
       end
 
       it 'returns unattended conversations' do
@@ -1432,6 +1729,23 @@ RSpec.describe 'Conversations API', type: :request do
         end.to have_enqueued_job(DeleteObjectJob).with(other_conversation, administrator, anything)
 
         expect(response).to have_http_status(:ok)
+      end
+
+      it 'refuses every email conversation hard-delete even while mailbox mutations are dark' do
+        email_channel = create(:channel_email, :imap_email, account: account)
+        email_conversation = create(:conversation, account: account, inbox: email_channel.inbox)
+        account.disable_features!(:email_mailbox_actions)
+        email_channel.update!(mailbox_sync_config: { 'mode' => 'off' })
+
+        expect do
+          delete "/api/v1/accounts/#{account.id}/conversations/#{email_conversation.display_id}",
+                 headers: administrator.create_new_auth_token,
+                 as: :json
+        end.not_to have_enqueued_job(DeleteObjectJob)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body['message']).to match(/Trash/)
+        expect(Conversation).to exist(email_conversation.id)
       end
     end
   end

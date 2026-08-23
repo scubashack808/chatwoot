@@ -1,6 +1,10 @@
 require 'net/imap'
 
-class Inboxes::FetchImapEmailsJob < MutexApplicationJob
+# The per-inbox mutex now lives in Imap::BaseFetchEmailService, which holds the mail-specific
+# owner-token Imap::Lease around the connection it opens. This job no longer takes the generic
+# Redis::LockManager lock, whose ownerless unlock could delete a newer worker's lock once the
+# original holder overran the TTL.
+class Inboxes::FetchImapEmailsJob < ApplicationJob
   queue_as :scheduled_jobs
 
   def perform(channel, interval = 1)
@@ -8,14 +12,18 @@ class Inboxes::FetchImapEmailsJob < MutexApplicationJob
 
     return log_skipped_fetch(channel) unless should_fetch_email?(channel)
 
-    fetch_mails_with_lock(channel, interval)
+    process_email_for_channel(channel, interval)
+  rescue Imap::Lease::LeaseNotAcquiredError
+    # Contention is not a failure. Another worker already holds this mailbox, so the cycle defers
+    # rather than opening a second connection as a fallback.
+    Rails.logger.info "[IMAP] Lease busy for email channel - #{channel.inbox.id}, deferring to the next cycle."
+  rescue Imap::Lease::LeaseLostError => e
+    Rails.logger.warn "[IMAP] Lease lost mid-cycle for email channel - #{channel.inbox.id} : #{e.message}"
   rescue *ExceptionList::IMAP_EXCEPTIONS => e
     Rails.logger.error "Authorization error for email channel - #{channel.inbox.id} : #{e.message}"
   rescue IOError, OpenSSL::SSL::SSLError, Net::IMAP::NoResponseError, Net::IMAP::BadResponseError, Net::IMAP::InvalidResponseError,
          Net::IMAP::ResponseParseError, Net::IMAP::ResponseReadError, Net::IMAP::ResponseTooLargeError => e
     Rails.logger.error "Error for email channel - #{channel.inbox.id} : #{e.message}"
-  rescue LockAcquisitionError
-    Rails.logger.error "Lock failed for #{channel.inbox.id}"
   rescue StandardError => e
     handle_unexpected_error(e, channel)
   end
@@ -31,39 +39,13 @@ class Inboxes::FetchImapEmailsJob < MutexApplicationJob
     ChatwootExceptionTracker.new(error, account: channel.account).capture_exception
   end
 
-  def fetch_mails_with_lock(channel, interval)
-    inbox_id = channel.inbox.id
-    key = format(::Redis::Alfred::EMAIL_MESSAGE_MUTEX, inbox_id: inbox_id)
-    success = false
-    started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-    Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Attempting lock for inbox #{inbox_id}"
-    with_lock(key, 5.minutes) do
-      Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Lock acquired for inbox #{inbox_id}"
-      success = process_email_for_channel(channel, interval)
-    end
-
-    duration = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at).round(1)
-    if success
-      Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Job completed for inbox #{inbox_id} in #{duration}s"
-    else
-      Rails.logger.error "[IMAP::FETCH_EMAIL_SERVICE] Job completed with authorization error for inbox #{inbox_id} in #{duration}s"
-    end
-  end
-
   def log_skipped_fetch(channel)
     Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Skipping fetch for #{channel.inbox.id} : " \
                       "imap_enabled: #{channel.imap_enabled?}, reauthorization_required: #{channel.reauthorization_required?}"
   end
 
   def process_email_for_channel(channel, interval)
-    inbound_emails = if channel.microsoft?
-                       Imap::MicrosoftFetchEmailService.new(channel: channel, interval: interval).perform
-                     elsif channel.google?
-                       Imap::GoogleFetchEmailService.new(channel: channel, interval: interval).perform
-                     else
-                       Imap::FetchEmailService.new(channel: channel, interval: interval).perform
-                     end
+    inbound_emails = Imap::BaseFetchEmailService.for(channel, interval: interval).perform
 
     Rails.logger.info "[IMAP::FETCH_EMAIL_SERVICE] Fetched #{inbound_emails.length} new emails for inbox #{channel.inbox.id}"
 

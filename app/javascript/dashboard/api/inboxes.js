@@ -82,6 +82,12 @@ class Inboxes extends CacheEnabledApiClient {
       inbound_calls_enabled: enabled,
     });
   }
+
+  // Reads the mail server's folder list live. Results are never stored as authority: the server
+  // is re-read whenever an override is saved or used.
+  discoverMailboxFolders(inboxId) {
+    return axios.get(`${this.url}/${inboxId}/mailbox_folders`);
+  }
 }
 
 export default new Inboxes();

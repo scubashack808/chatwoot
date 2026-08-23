@@ -1,4 +1,5 @@
 <script>
+import parsePhoneNumber from 'libphonenumber-js';
 import { useAlert } from 'dashboard/composables';
 import EmojiOrIcon from 'shared/components/EmojiOrIcon.vue';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
@@ -47,6 +48,24 @@ export default {
       isEditing: false,
       editValue: '',
     };
+  },
+  computed: {
+    displayValue() {
+      if (!this.value || !this.href.startsWith('tel:')) {
+        return this.value;
+      }
+      try {
+        const phone = parsePhoneNumber(this.value);
+        if (!phone?.isPossible()) {
+          return this.value;
+        }
+        return phone.country === 'US'
+          ? phone.formatNational()
+          : phone.formatInternational();
+      } catch {
+        return this.value;
+      }
+    },
   },
   methods: {
     async onCopy(e) {
@@ -110,11 +129,11 @@ export default {
         class="flex-shrink-0 ltr:ml-1 rtl:mr-1"
       />
       <span
-        v-if="value"
+        v-if="displayValue"
         class="overflow-hidden text-sm whitespace-nowrap text-ellipsis"
-        :title="value"
+        :title="displayValue"
       >
-        {{ value }}
+        {{ displayValue }}
       </span>
       <span v-else class="text-sm text-n-slate-11">
         {{ $t('CONTACT_PANEL.NOT_AVAILABLE') }}

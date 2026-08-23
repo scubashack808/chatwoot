@@ -893,6 +893,10 @@
       "FORWARD_EMAIL_TITLE": "Forward to Email",
       "FORWARD_EMAIL_SUB_TEXT": "Start forwarding your emails to the following email address.",
       "FORWARD_EMAIL_NOT_CONFIGURED": "Forwarding emails to your inbox is currently disabled on this installation. To use this feature, it must be enabled by your administrator. Please get in touch with them to proceed.",
+      "EMAIL_ALIASES_TITLE": "Aliases",
+      "EMAIL_ALIASES_SUB_TEXT": "Additional addresses that route into this inbox. Inbound mail to any alias is delivered here, and replies default to the address the customer wrote to. Each alias must be unique across all inboxes.",
+      "EMAIL_ALIASES_PLACEHOLDER": "Add an alias and press Enter",
+      "EMAIL_ALIASES_SAVE": "Save aliases",
       "ALLOW_MESSAGES_AFTER_RESOLVED": "Allow messages after conversation resolved",
       "ALLOW_MESSAGES_AFTER_RESOLVED_SUB_TEXT": "Allow the end-users to send messages even after the conversation is resolved.",
       "WHATSAPP_SECTION_SUBHEADER": "This API Key is used for the integration with the WhatsApp APIs.",
@@ -1222,6 +1226,55 @@
       },
       "ENABLE_SSL": "Enable SSL",
       "AUTH_MECHANISM": "Authentication"
+    },
+    "MAILBOX_SYNC": {
+      "TITLE": "Mailbox synchronization",
+      "NOTE_TEXT": "Control how much this inbox is allowed to do on the mail server, and which exact server folder is used for each role.",
+      "UPDATE": "Update mailbox settings",
+      "EDIT": {
+        "SUCCESS_MESSAGE": "Mailbox settings updated successfully",
+        "ERROR_MESSAGE": "Unable to update mailbox settings"
+      },
+      "MODE": {
+        "LABEL": "Mode",
+        "HELP_TEXT": "Off does nothing. Observe reads and reconciles but never changes mail on the server. Active additionally allows a person to move mail, and only when the account-level switch is also on.",
+        "OPTIONS": {
+          "OFF": "Off",
+          "OBSERVE": "Observe only",
+          "ACTIVE": "Active"
+        }
+      },
+      "SENT_MODE": {
+        "LABEL": "Sent handling",
+        "HELP_TEXT": "Provider managed suits servers that already save sent mail themselves, such as Gmail. Append uploads a copy to the Sent folder. Disabled leaves Sent alone.",
+        "OPTIONS": {
+          "PROVIDER_MANAGED": "Provider managed",
+          "APPEND": "Append a copy",
+          "DISABLED": "Disabled"
+        }
+      },
+      "FOLDERS": {
+        "DISCOVER": "Read folders from server",
+        "NOT_DISCOVERED_YET": "Read the folder list from the mail server to see what is available for each role.",
+        "DISCOVERY_ERROR": "Could not read folders from the mail server.",
+        "NO_OVERRIDE": "No override",
+        "USING": "Using {folder}",
+        "AMBIGUOUS_HELP": "More than one folder claims this role ({folders}). Choose one, or this action stays unavailable.",
+        "UNAVAILABLE_HELP": "No folder on the server claims this role. Choose one, or this action stays unavailable.",
+        "ROLES": {
+          "ARCHIVE": "Archive",
+          "TRASH": "Trash",
+          "SPAM": "Spam",
+          "SENT": "Sent"
+        },
+        "STATUS": {
+          "DISCOVERED": "Found",
+          "AMBIGUOUS": "Ambiguous",
+          "UNAVAILABLE": "Not available",
+          "OVERRIDDEN": "Chosen by you",
+          "INVALID_OVERRIDE": "Chosen folder missing"
+        }
+      }
     },
     "MICROSOFT": {
       "TITLE": "Microsoft",

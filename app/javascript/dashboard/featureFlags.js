@@ -54,6 +54,7 @@ export const FEATURE_FLAGS = {
   CONVERSATION_REQUIRED_ATTRIBUTES: 'conversation_required_attributes',
   CONVERSATION_UNREAD_COUNTS: 'conversation_unread_counts',
   UNREAD_COUNT_FOR_FILTERS: 'unread_count_for_filters',
+  EMAIL_MAILBOX_ACTIONS: 'email_mailbox_actions',
 };
 
 export const PREMIUM_FEATURES = [

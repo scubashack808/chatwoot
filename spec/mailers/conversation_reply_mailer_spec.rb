@@ -892,5 +892,114 @@ RSpec.describe ConversationReplyMailer do
         expect(transcript.decoded).to include(message.content)
       end
     end
+
+    # F2. email_reply is now also used to RE-render an already delivered message, when Sent
+    # synchronization archives a copy into the mail server's Sent folder. Recipients and the
+    # Re: prefix were read from `@conversation.messages.outgoing.last`, which at delivery time IS
+    # the message being sent, but at re-render time is a newer, different message. The archived
+    # copy then misstated its own To, and carried another reply's Bcc list.
+    context 'when re-rendering a specific earlier message' do
+      let(:conversation) { create(:conversation, assignee: agent, inbox: email_channel.inbox, account: account).reload }
+      let!(:older_message) do
+        create(:message, conversation: conversation, account: account, message_type: 'outgoing', content: 'first reply',
+                         content_attributes: { to_emails: ['first@example.com'], cc_emails: ['cc-first@example.com'],
+                                               bcc_emails: ['bcc-first@example.com'] })
+      end
+      let!(:newer_message) do
+        create(:message, conversation: conversation, account: account, message_type: 'outgoing', content: 'second reply',
+                         content_attributes: { to_emails: ['second@example.com'], cc_emails: ['cc-second@example.com'],
+                                               bcc_emails: ['bcc-second@example.com'] })
+      end
+
+      it 'addresses the copy to the recipients of THAT message, not the newest one' do
+        mail = described_class.email_reply(older_message).message
+
+        expect(mail.to).to eq ['first@example.com']
+        expect(mail.cc).to eq ['cc-first@example.com']
+        expect(mail.bcc).to eq ['bcc-first@example.com']
+      end
+
+      it 'leaves the newest message rendering exactly as it always did' do
+        mail = described_class.email_reply(newer_message).message
+
+        expect(mail.to).to eq ['second@example.com']
+        expect(mail.cc).to eq ['cc-second@example.com']
+        expect(mail.bcc).to eq ['bcc-second@example.com']
+      end
+
+      # Delivery time is always the newest-message case, so this is the assertion that the fix
+      # cannot have changed what customers actually receive.
+      it 'renders the newest message identically to the conversation-derived values' do
+        mail = described_class.email_reply(newer_message).message
+        latest = conversation.messages.outgoing.last
+
+        expect(latest.id).to eq newer_message.id
+        expect(mail.to).to eq Array(latest.content_attributes[:to_emails])
+        expect(mail.subject).to eq described_class.email_reply(latest).message.subject
+      end
+
+      # N2. Pinned deliberately, because this IS a delivery-behaviour change and it should be
+      # recorded as intent rather than discovered later as an accident.
+      #
+      # `messages.outgoing` excludes template messages, so under the old conversation-derived
+      # lookup a CSAT survey resolved its recipients to the last genuine agent reply, inheriting
+      # that reply's To, Cc AND Bcc. Reading the message being rendered instead means a survey is
+      # addressed to the contact and to nobody else. That is the intended behaviour: a satisfaction
+      # survey carrying an unrelated reply's Bcc list was itself a disclosure, not a feature.
+      context 'when rendering a template message such as a CSAT survey' do
+        let(:survey_contact) { create(:contact, account: account, email: 'buyer@example.com') }
+        let(:survey_conversation) do
+          create(:conversation, assignee: agent, inbox: email_channel.inbox, account: account, contact: survey_contact).reload
+        end
+        let!(:agent_reply) do
+          create(:message, conversation: survey_conversation, account: account, message_type: 'outgoing', content: 'agent reply',
+                           content_attributes: { to_emails: ['someone-else@example.com'], cc_emails: ['cc@example.com'],
+                                                 bcc_emails: ['bcc@example.com'] })
+        end
+        let!(:survey) do
+          create(:message, conversation: survey_conversation, account: account, message_type: 'template',
+                           content_type: 'input_csat', content: 'How would you rate our support?', sender: agent)
+        end
+
+        it 'addresses the survey to the contact only, inheriting no Cc or Bcc from an earlier reply' do
+          with_modified_env 'FRONTEND_URL' => 'https://app.chatwoot.com' do
+            mail = described_class.email_reply(survey).message
+
+            expect(mail.to).to eq ['buyer@example.com']
+            expect(mail.cc).to be_nil
+            expect(mail.bcc).to be_nil
+          end
+        end
+
+        it 'still addresses an ordinary agent reply from that reply itself' do
+          with_modified_env 'FRONTEND_URL' => 'https://app.chatwoot.com' do
+            mail = described_class.email_reply(agent_reply).message
+
+            expect(mail.to).to eq ['someone-else@example.com']
+            expect(mail.cc).to eq ['cc@example.com']
+            expect(mail.bcc).to eq ['bcc@example.com']
+          end
+        end
+      end
+
+      context 'with a subject on the conversation' do
+        before do
+          conversation.update!(additional_attributes: { 'mail_subject' => 'Dive booking' })
+        end
+
+        it 'computes the Re: prefix as of the message being rendered' do
+          first_chat = conversation.messages.chat.first
+          mail = described_class.email_reply(first_chat).message
+
+          expect(mail.subject).to eq 'Dive booking'
+        end
+
+        it 'still prefixes Re: for a later message in the same conversation' do
+          mail = described_class.email_reply(newer_message).message
+
+          expect(mail.subject).to eq 'Re: Dive booking'
+        end
+      end
+    end
   end
 end

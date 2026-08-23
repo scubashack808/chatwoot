@@ -81,6 +81,7 @@ class ConversationFinder
     set_assignee_type
 
     find_all_conversations
+    @conversations = Imap::MailboxRoleFilter.new(conversations: @conversations, role: params[:mailbox_role].to_s, account: current_account).perform
     filter_by_status unless params[:q]
     filter_by_team
     filter_by_labels

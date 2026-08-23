@@ -558,6 +558,164 @@ describe('#deleteMessage', () => {
       expect(commit.mock.calls).toEqual([]);
       expect(dispatch.mock.calls).toEqual([]);
     });
+
+    it('preserves the hard-delete 422 response for the Trash recovery UI', async () => {
+      const response = {
+        status: 422,
+        data: {
+          message:
+            'Email conversations cannot be permanently deleted in Chatwoot. Move them to Trash so they remain restorable.',
+        },
+      };
+      axios.delete.mockRejectedValue({
+        message: 'Request failed with status code 422',
+        response,
+      });
+
+      await expect(
+        actions.deleteConversation({ commit, dispatch }, 1)
+      ).rejects.toMatchObject({ response });
+    });
+  });
+
+  describe('#createMailboxOperation', () => {
+    it('stores the server-derived pending operation without guessing placement', async () => {
+      const mailboxState = {
+        state: 'inbox',
+        roles: ['inbox'],
+        tracked_count: 1,
+      };
+      const operation = {
+        id: 91,
+        action: 'archive',
+        status: 'pending',
+      };
+      axios.post.mockResolvedValue({
+        data: { operation, mailbox_state: mailboxState },
+      });
+
+      await actions.createMailboxOperation(
+        { commit, dispatch, state: { selectedChatId: null } },
+        {
+          conversationId: 1,
+          action: 'archive',
+          idempotencyKey: 'archive-1-request',
+        }
+      );
+
+      expect(axios.post).toHaveBeenCalledWith(
+        '/api/v1/conversations/1/mailbox_operations',
+        {
+          mailbox_operation: {
+            action: 'archive',
+            idempotency_key: 'archive-1-request',
+          },
+        }
+      );
+      expect(commit).toHaveBeenCalledWith(types.UPDATE_CONVERSATION_MAILBOX, {
+        conversationId: 1,
+        mailboxOperation: operation,
+        mailboxState,
+      });
+    });
+  });
+
+  describe('#refetchMailboxOperation', () => {
+    it('uses the conversation-scoped index to recover a missed event', async () => {
+      const mailboxState = {
+        state: 'archive',
+        roles: ['archive'],
+        tracked_count: 1,
+      };
+      const latestOperation = {
+        id: 91,
+        action: 'archive',
+        status: 'succeeded',
+      };
+      axios.get.mockResolvedValue({
+        data: {
+          operations: [latestOperation],
+          mailbox_state: mailboxState,
+        },
+      });
+
+      await actions.refetchMailboxOperation(
+        {
+          commit,
+          dispatch,
+          state: {
+            selectedChatId: 1,
+            allConversations: [{ id: 1, mailbox_state: mailboxState }],
+          },
+        },
+        1
+      );
+
+      expect(axios.get).toHaveBeenCalledWith(
+        '/api/v1/conversations/1/mailbox_operations'
+      );
+      expect(commit).toHaveBeenCalledWith(types.UPDATE_CONVERSATION_MAILBOX, {
+        conversationId: 1,
+        mailboxOperation: latestOperation,
+        mailboxState,
+      });
+    });
+
+    it('does not fetch when mailbox keys are absent', async () => {
+      await actions.refetchMailboxOperation(
+        {
+          commit,
+          dispatch,
+          state: {
+            selectedChatId: 1,
+            allConversations: [{ id: 1 }],
+          },
+        },
+        1
+      );
+
+      expect(axios.get).not.toHaveBeenCalled();
+      expect(commit).not.toHaveBeenCalled();
+    });
+
+    it('does not fetch a mailbox operation for an unselected list row', async () => {
+      await actions.refetchMailboxOperation(
+        {
+          commit,
+          dispatch,
+          state: {
+            selectedChatId: 2,
+            allConversations: [{ id: 1, mailbox_state: { state: 'inbox' } }],
+          },
+        },
+        1
+      );
+
+      expect(axios.get).not.toHaveBeenCalled();
+      expect(commit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('#scheduleMailboxOperationRefetch', () => {
+    it('polls only the selected conversation', () => {
+      vi.useFakeTimers();
+
+      const state = { selectedChatId: 1 };
+      actions.scheduleMailboxOperationRefetch({ dispatch, state }, 1);
+      actions.scheduleMailboxOperationRefetch({ dispatch, state }, 2);
+      vi.advanceTimersByTime(2000);
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith('refetchMailboxOperation', 1);
+
+      dispatch.mockClear();
+      actions.scheduleMailboxOperationRefetch({ dispatch, state }, 1);
+      state.selectedChatId = 2;
+      vi.advanceTimersByTime(2000);
+
+      expect(dispatch).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
   });
 
   describe('#updateCustomAttributes', () => {

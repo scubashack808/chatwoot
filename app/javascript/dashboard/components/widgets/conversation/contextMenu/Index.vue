@@ -14,6 +14,7 @@ import wootConstants from 'dashboard/constants/globals';
 import AgentLoadingPlaceholder from './agentLoadingPlaceholder.vue';
 import NextInput from 'dashboard/components-next/input/Input.vue';
 import Icon from 'dashboard/components-next/icon/Icon.vue';
+import { getMailboxActions } from 'dashboard/helper/mailboxOperations';
 
 const MENU = {
   MARK_AS_READ: 'mark-as-read',
@@ -27,6 +28,10 @@ const MENU = {
   DELETE: 'delete',
   OPEN_NEW_TAB: 'open-new-tab',
   COPY_LINK: 'copy-link',
+  ARCHIVE: 'archive',
+  SPAM: 'spam',
+  TRASH: 'trash',
+  RESTORE: 'restore',
 };
 
 export default {
@@ -70,6 +75,18 @@ export default {
       type: Array,
       default: () => [],
     },
+    mailboxAvailable: {
+      type: Boolean,
+      default: false,
+    },
+    mailboxState: {
+      type: Object,
+      default: null,
+    },
+    mailboxOperation: {
+      type: Object,
+      default: null,
+    },
   },
   emits: [
     'updateConversation',
@@ -81,6 +98,7 @@ export default {
     'assignLabel',
     'removeLabel',
     'deleteConversation',
+    'mailboxAction',
     'close',
   ],
   setup() {
@@ -181,6 +199,28 @@ export default {
         icon: 'copy',
         label: this.$t('CONVERSATION.CARD_CONTEXT_MENU.COPY_LINK'),
       },
+      mailboxActionOptions: {
+        archive: {
+          key: MENU.ARCHIVE,
+          icon: 'archive',
+          label: this.$t('CONVERSATION.MAILBOX.ACTIONS.ARCHIVE'),
+        },
+        spam: {
+          key: MENU.SPAM,
+          icon: 'warning',
+          label: this.$t('CONVERSATION.MAILBOX.ACTIONS.SPAM'),
+        },
+        trash: {
+          key: MENU.TRASH,
+          icon: 'delete',
+          label: this.$t('CONVERSATION.MAILBOX.ACTIONS.TRASH'),
+        },
+        restore: {
+          key: MENU.RESTORE,
+          icon: 'arrow-redo',
+          label: this.$t('CONVERSATION.MAILBOX.ACTIONS.RESTORE'),
+        },
+      },
     };
   },
   computed: {
@@ -229,6 +269,10 @@ export default {
       // Assigned labels first, keeping each group's existing order.
       const isAssigned = label => this.conversationLabels.includes(label.title);
       return [...labels].sort((a, b) => isAssigned(b) - isAssigned(a));
+    },
+    mailboxActions() {
+      if (!this.mailboxAvailable) return [];
+      return getMailboxActions(this.mailboxState, this.mailboxOperation);
     },
   },
   mounted() {
@@ -435,6 +479,16 @@ export default {
         :option="copyLinkOption"
         variant="icon"
         @click.stop="copyConversationLink"
+      />
+    </template>
+    <template v-if="mailboxActions.length">
+      <hr class="m-1 rounded border-b border-n-weak dark:border-n-weak" />
+      <MenuItem
+        v-for="action in mailboxActions"
+        :key="action"
+        :option="mailboxActionOptions[action]"
+        variant="icon"
+        @click.stop="$emit('mailboxAction', action)"
       />
     </template>
     <template v-if="isAdmin && isAllowed([MENU.DELETE])">
