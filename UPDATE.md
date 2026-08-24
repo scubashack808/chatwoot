@@ -1,8 +1,23 @@
-# Chatwoot v4.17.0 local candidate
+# Chatwoot v4.17.0 + sidebar-curation local candidate
 
-Run ID: `chatwoot-v4.17.0-20260823`
+Base update run ID: `chatwoot-v4.17.0-20260823`
 
-Status: composed; candidate-bound verification pending
+Status: sidebar source gates pass on the exact combined v4.17/live-private candidate; inherited update image/replica verification and GitHub delivery remain pending
+
+## Active sidebar overlay
+
+- Active branch: `codex/sidebar-curation-v417`
+- Active worktree: `/Users/kevinleib/CursorProjects/chatwoot/worktrees/sidebar-curation-v1`
+- Exact combined base candidate: `ca76232ad40414302fea5c5433ee5c90fa3ad52d`
+- Exact combined base tree: `78d0c9feb83d7e5a36280c14fb7207dfeebe4b1c`
+- Original reviewed sidebar commits: `c370484c83e8956517ef6efd926d37695f085e9e` and `ba8d493b847711d4a221a2a316a93d956bb4ca85`
+- Replayed v4.17-based sidebar commits: `f0d1da2af9` and `2a990dcbdb`
+- GitHub remains the required maintained-source and PR route. No remote v4.17 integration target exists yet, so no sidebar branch or PR has been published from this candidate.
+- Sidebar verification runtime: Node `v24.18.0`, pnpm `10.2.0`, and the frozen v4.17 lockfile in an isolated in-worktree dependency tree.
+- Sidebar source proof: focused 7/7 tests; complete frontend 429/429 files and 4,372/4,372 tests; full ESLint with 0 errors and 423 existing warnings; production Vite build with 5,071 modules transformed in 18.24 seconds; `git diff --check` clean.
+- The first focused attempt exposed an external-node_modules/Vite path-boundary defect before collection. Reinstalling the same frozen dependencies inside the worktree removed that harness failure; the unchanged focused suite then passed, followed by the complete suite.
+
+The inherited sections below describe the exact `ca76232ad4` base candidate. This overlay supersedes only their active branch/worktree and prior sidebar-exclusion statements; it does not upgrade any pending base-update gate to passed.
 
 ## Frozen identities
 
@@ -35,12 +50,13 @@ The terminal outcome is an approval-ready local candidate and morning receipt. I
 | Phone-display recovery `1d73da868` | Inherited through `c36e17ff9` | It is an accepted live delta and direct ancestor of the mailbox-gate stack. |
 | Mailbox publication-gate stack through `c36e17ff9` | Inherited through exact live source | This exact stack is deployed, green, and required for the current mailbox contract. |
 | Row 12 suggestion work | Exclude | It was not accepted and is absent from the exact live source. |
-| Sidebar-curation, email-state-baseline, dirty RC scratch, and all other local branches/worktrees | Exclude | They are unrelated or separately owned work. |
+| Sidebar-curation commits `c370484c83` and `ba8d493b84` | Include above the combined candidate | Kevin requested the reviewed sidebar change on the newest Chatwoot/private line; both commits replay cleanly as `f0d1da2af9` and `2a990dcbdb`. |
+| Email-state-baseline, dirty RC scratch, and all other local branches/worktrees | Exclude | They are unrelated or separately owned work. |
 | Private image-publication workflow files already in the live source | Carry as source only | They are part of the maintained source, but no remote ref will move and no workflow or publication will be triggered tonight. |
 
 ## Composition topology
 
-The candidate starts at exact official `v4.17.0` and merges exact live `c36e17ff9` locally. This retains a deliberate two-parent ancestry bridge and makes the candidate a descendant of both the official target and the deployed private source. The merge remains uncommitted until every textual conflict is resolved and every one of the 38 upstream/private changed-path overlaps is reviewed semantically, including clean automerges.
+The base candidate starts at exact official `v4.17.0` and merges exact live `c36e17ff9` locally. This retains a deliberate two-parent ancestry bridge and makes the candidate a descendant of both the official target and the deployed private source. The sidebar candidate then replays the two reviewed sidebar commits above that exact combined base. Both apply cleanly; the v4.17 Captain and WhatsApp-template additions in the same Sidebar component remain intact.
 
 Composition produced nine textual conflicts. All are resolved, no unmerged paths or conflict markers remain, and the staged tree passes `git diff --check`. The custom candidate workflow and its documentation now target the prospective `integration/v4.17` delivery line instead of the prior `integration/v4.16` line. This is only a local source adaptation; no remote branch exists or moved in this run.
 
@@ -92,12 +108,19 @@ The feature-bit collision was a clean-merge production hazard: accepting the off
 | Target and authority freeze | pass | Exact refs and boundary above |
 | Source composition | pass | Nine textual conflicts resolved; no unmerged paths or markers; staged diff check clean |
 | Overlap review | pass | All 38 changed-path intersections reviewed semantically; feature-bit collision repaired |
-| Focused checks | pending | Candidate-bound |
-| Full source gates | pending | Complete backend/frontend/lint/security |
+| Sidebar replay | pass | Both reviewed commits replayed cleanly above exact combined base `ca76232ad4`; same-file v4.17 additions preserved |
+| Sidebar focused checks | pass | 7/7 tests under Node `v24.18.0`; changed-file ESLint exit 0 |
+| Complete frontend suite | pass | 429/429 files and 4,372/4,372 tests |
+| Full frontend ESLint | pass | 0 errors; 423 existing warnings |
+| Production Vite build | pass | 5,071 modules transformed; built in 18.24 seconds |
+| Inherited base focused checks | pending | Owned by the v4.17 update lane; sidebar checks above do not substitute for its mailbox/contact/RingCentral proof |
+| Remaining full source gates | pending | Complete backend and security comparison; frontend and ESLint now pass on the combined sidebar branch |
 | Exact local image | pending | Must remain unpublished |
 | Synthetic replica | pending | Must be egress-blocked and production-isolated |
 | Rendered UI | pending | Browser Harness against replica only |
-| Final refresh and terminal receipt | pending | One bounded refresh after evidence |
+| GitHub delivery | pending | Prospective `integration/v4.17` target is not published; no sidebar remote ref or PR created |
+| Final source refresh | pass | Official latest remains `v4.17.0` / `b34f5b71a`; upstream `master` and carried private `c36e17ff9` are unchanged; no `integration/v4.17` target exists on the GitHub fork |
+| Terminal receipt | pending | Report exact candidate and remaining GitHub/base-update gates to Kevin |
 
 ## Stop conditions
 
