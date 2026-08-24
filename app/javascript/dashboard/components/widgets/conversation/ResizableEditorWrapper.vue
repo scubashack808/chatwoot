@@ -15,9 +15,9 @@ import { BUS_EVENTS } from 'shared/constants/busEvents';
 const props = defineProps({
   containerHeight: { type: Number, default: 0 },
   defaultHeight: { type: Number, default: 120 },
-  minHeight: { type: Number, default: 80 },
 });
 
+const MIN_HEIGHT = 80;
 const MIN_MESSAGES_HEIGHT = 200;
 const EXPAND_RATIO = 0.5;
 const RESET_DELAY_MS = 120;
@@ -38,7 +38,7 @@ const isContainerReady = computed(() => props.containerHeight > 0);
 const sizeBounds = computed(() => {
   const h = props.containerHeight;
   const s = surroundingHeight.value;
-  const min = props.minHeight;
+  const min = Math.min(MIN_HEIGHT, props.defaultHeight);
   const availableMax = Math.max(min, h - MIN_MESSAGES_HEIGHT - s);
   const max = isContainerReady.value
     ? availableMax
@@ -118,7 +118,7 @@ const resetEditorHeight = () => {
   editorHeight.value = sizeBounds.value.default;
 };
 
-watch(() => [props.defaultHeight, props.minHeight], resetEditorHeight);
+watch(() => props.defaultHeight, resetEditorHeight);
 
 const toggleEditorExpand = () => {
   measureSurroundingHeight();

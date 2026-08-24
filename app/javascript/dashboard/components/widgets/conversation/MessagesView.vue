@@ -559,7 +559,6 @@ export default {
         ref="resizableEditorWrapperRef"
         :container-height="Math.max(0, containerHeight - topBannerHeight)"
         :default-height="replyEditorHeight"
-        :min-height="replyEditorHeight"
       >
         <ReplyBox @toggle-editor-size="toggleReplyEditorSize" />
       </ResizableEditorWrapper>

@@ -21,9 +21,9 @@ describe('ResizableEditorWrapper', () => {
     expect(getStyleValue(wrapper, '--editor-min-allowed')).toBe('80px');
   });
 
-  it('uses caller-supplied default and minimum heights', () => {
+  it('derives a lower minimum from a caller-supplied default', () => {
     const wrapper = mountWrapper({
-      props: { defaultHeight: 64, minHeight: 64 },
+      props: { defaultHeight: 64 },
     });
 
     expect(getStyleValue(wrapper, '--editor-height')).toBe('64px');
@@ -33,15 +33,15 @@ describe('ResizableEditorWrapper', () => {
   it('resets when a caller changes the height contract', async () => {
     const wrapper = mountWrapper();
 
-    await wrapper.setProps({ defaultHeight: 72, minHeight: 72 });
+    await wrapper.setProps({ defaultHeight: 72 });
 
     expect(getStyleValue(wrapper, '--editor-height')).toBe('72px');
     expect(getStyleValue(wrapper, '--editor-min-allowed')).toBe('72px');
   });
 
-  it('clamps manual resizing to the caller-supplied minimum', async () => {
+  it('clamps manual resizing to the minimum derived from the default', async () => {
     const wrapper = mountWrapper({
-      props: { defaultHeight: 80, minHeight: 64 },
+      props: { defaultHeight: 64 },
     });
 
     await wrapper
@@ -63,7 +63,7 @@ describe('ResizableEditorWrapper', () => {
       template: '<button @click="requestEditorHeight(240)"></button>',
     });
     const wrapper = mountWrapper({
-      props: { defaultHeight: 80, minHeight: 64 },
+      props: { defaultHeight: 64 },
       slots: { default: HeightRequester },
     });
 
@@ -72,6 +72,6 @@ describe('ResizableEditorWrapper', () => {
 
     wrapper.vm.resetEditorHeight();
     await nextTick();
-    expect(getStyleValue(wrapper, '--editor-height')).toBe('80px');
+    expect(getStyleValue(wrapper, '--editor-height')).toBe('64px');
   });
 });
