@@ -100,6 +100,17 @@ describe('mailboxOperations', () => {
   });
 
   describe('mailboxStateIncludesRole', () => {
+    it('reports membership when there is no mailbox state at all, so a gated conversation is not treated as having left the view', () => {
+      // The API publishes mailbox state only for a conversation an action could address. ChatList
+      // asks this to decide whether to redirect an agent out of the conversation they have open, so
+      // answering false on missing information would eject them from it.
+      expect(mailboxStateIncludesRole(undefined, 'inbox')).toBe(true);
+      expect(mailboxStateIncludesRole(null, 'inbox')).toBe(true);
+      expect(mailboxStateIncludesRole(undefined, 'archive')).toBe(true);
+      expect(mailboxStateIncludesRole(null, 'trash')).toBe(true);
+      expect(mailboxStateIncludesRole(undefined, 'spam')).toBe(true);
+    });
+
     it('uses the server-derived roles to determine view membership', () => {
       const mailboxState = {
         state: 'mixed',

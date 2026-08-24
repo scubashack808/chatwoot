@@ -4,6 +4,24 @@ class Imap::ConversationMailboxState
   MAILBOX_ROLES = %w[inbox archive trash spam].freeze
   PROVIDER_ABSENT_STATE = 'missing'.freeze
 
+  # The one place that decides whether mailbox state may be published for a conversation, so the
+  # three publication paths cannot drift apart: the conversation list payload, the mailbox
+  # operations controller, and the realtime operation event.
+  #
+  # Returns the state, or nil when publishing it would offer an action that cannot succeed. Callers
+  # must OMIT the key on nil rather than send null, because the dashboard tests for it with
+  # hasOwnProperty and a null still counts as data.
+  #
+  # Imap::ConversationMailboxData deliberately does not call this. It answers the same question for
+  # a whole page with two queries instead of two per conversation.
+  def self.publishable(conversation:)
+    channel = conversation.inbox.channel
+    return nil unless channel.respond_to?(:mailbox_sync) && channel.mailbox_sync.provider_mutation_allowed?
+
+    state = new(conversation: conversation)
+    state.actionable? ? state : nil
+  end
+
   def initialize(
     conversation:,
     incoming_messages: conversation.messages.incoming.order(:id),
@@ -23,6 +41,21 @@ class Imap::ConversationMailboxState
       missing_count: missing_count,
       conflict_count: conflict_count
     }
+  end
+
+  # Whether a mailbox action could address this conversation at all.
+  #
+  # #state is the wrong thing to ask, because every value it can return for a conversation with no
+  # tracked identity still reads as actionable to the dashboard. Mail that predates identity
+  # capture reports 'mixed', since untracked_count is positive while roles is empty; mail that sits
+  # alongside tracked inbox mail reports 'inbox'. Both are right for telling a reader where the
+  # conversation is, and both make getMailboxActions offer Archive, Spam and Trash, because
+  # mailboxStateIncludesRole treats a positive untracked_count as inbox membership.
+  #
+  # There is nothing on the server to move, so the request would be accepted and then fail on
+  # identity_missing. Callers deciding whether to publish ask this, not #state.
+  def actionable?
+    tracked_identities.any?
   end
 
   private

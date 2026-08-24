@@ -5,10 +5,7 @@ class Api::V1::Accounts::Conversations::MailboxOperationsController < Api::V1::A
   def index
     operations = EmailMailboxOperation.where(conversation_id: @conversation.id).order(created_at: :desc, id: :desc)
 
-    render json: {
-      operations: operations.map(&:summary),
-      mailbox_state: Imap::ConversationMailboxState.new(conversation: @conversation).to_h
-    }
+    render json: with_mailbox_state(operations: operations.map(&:summary))
   end
 
   def show
@@ -53,9 +50,17 @@ class Api::V1::Accounts::Conversations::MailboxOperationsController < Api::V1::A
   end
 
   def render_operation(operation, status: :ok)
-    render json: {
-      operation: operation.summary,
-      mailbox_state: Imap::ConversationMailboxState.new(conversation: @conversation).to_h
-    }, status: status
+    render json: with_mailbox_state(operation: operation.summary), status: status
+  end
+
+  # These two responses build mailbox state directly rather than through
+  # Imap::ConversationMailboxData, so they need the same gate or they reintroduce exactly what that
+  # gate removes. The key is omitted rather than set to null because the dashboard tests for its
+  # presence with hasOwnProperty.
+  def with_mailbox_state(payload)
+    state = Imap::ConversationMailboxState.publishable(conversation: @conversation)
+    return payload if state.nil?
+
+    payload.merge(mailbox_state: state.to_h)
   end
 end

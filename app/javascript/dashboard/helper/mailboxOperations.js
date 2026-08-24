@@ -27,6 +27,15 @@ export const isMailboxOperationTerminal = operation =>
   TERMINAL_OPERATION_STATUSES.includes(operation?.status);
 
 export const mailboxStateIncludesRole = (mailboxState, mailboxRole) => {
+  // No mailbox state at all is not the same as "this conversation left the view". The API now
+  // publishes state only for a conversation a mailbox action could actually address, so a
+  // conversation can legitimately arrive here with none. ChatList uses this answer to decide
+  // whether to redirect an agent out of the conversation they have open, and answering false on
+  // missing information would throw them out of it. Absent knowledge, claim nothing changed.
+  if (mailboxState === null || mailboxState === undefined) {
+    return true;
+  }
+
   const roles = mailboxState?.roles || [];
   // Sent has no mailbox_state fact behind it. Imap::ConversationMailboxState derives roles from
   // INCOMING messages, and its vocabulary is inbox/archive/trash/spam, so roles never contains
