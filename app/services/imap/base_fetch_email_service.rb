@@ -161,6 +161,10 @@ class Imap::BaseFetchEmailService
       return
     end
 
+    append_message_id_entries(batch_message_ids, message_ids_with_uid)
+  end
+
+  def append_message_id_entries(batch_message_ids, message_ids_with_uid)
     batch_message_ids.each do |data|
       entry = build_message_id_entry(data)
       next if entry.nil?

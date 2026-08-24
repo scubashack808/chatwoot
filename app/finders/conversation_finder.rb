@@ -205,9 +205,7 @@ class ConversationFinder
     ]
   end
 
-  def current_page
-    params[:page] || 1
-  end
+  def current_page = params[:page] || 1
 
   def conversations_base_query
     @conversations.includes(

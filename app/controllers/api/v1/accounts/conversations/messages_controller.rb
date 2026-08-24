@@ -69,17 +69,21 @@ class Api::V1::Accounts::Conversations::MessagesController < Api::V1::Accounts::
       next false unless message.failed?
 
       Messages::StatusUpdateService.new(message, 'sent').perform
-      previous_source_id = message.source_id
-      # Clear prior failure state while preserving the agent-selected From address. Retrying from a
-      # different owned alias would be customer-visible and would contradict the original send.
-      retry_attributes = { content_attributes: message.content_attributes.to_h.with_indifferent_access.slice(:from_email) }
-      retry_attributes[:source_id] = nil unless @conversation.inbox.api? || @conversation.inbox.web_widget?
-      message.update!(retry_attributes)
-      if retry_attributes.key?(:source_id) && previous_source_id.present?
-        Rails.logger.info "Cleared older source ID #{previous_source_id} for message #{message.id}"
-      end
+      reset_message_for_retry
       true
     end
+  end
+
+  def reset_message_for_retry
+    previous_source_id = message.source_id
+    # Clear prior failure state while preserving the agent-selected From address. Retrying from a
+    # different owned alias would be customer-visible and would contradict the original send.
+    retry_attributes = { content_attributes: message.content_attributes.to_h.with_indifferent_access.slice(:from_email) }
+    retry_attributes[:source_id] = nil unless @conversation.inbox.api? || @conversation.inbox.web_widget?
+    message.update!(retry_attributes)
+    return unless retry_attributes.key?(:source_id) && previous_source_id.present?
+
+    Rails.logger.info "Cleared older source ID #{previous_source_id} for message #{message.id}"
   end
 
   def permitted_params

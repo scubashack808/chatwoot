@@ -16,9 +16,9 @@ class Inboxes::FetchImapEmailsJob < ApplicationJob
   rescue Imap::Lease::LeaseNotAcquiredError
     # Contention is not a failure. Another worker already holds this mailbox, so the cycle defers
     # rather than opening a second connection as a fallback.
-    Rails.logger.info "[IMAP] Lease busy for email channel - #{channel.inbox.id}, deferring to the next cycle."
+    log_lease_busy(channel)
   rescue Imap::Lease::LeaseLostError => e
-    Rails.logger.warn "[IMAP] Lease lost mid-cycle for email channel - #{channel.inbox.id} : #{e.message}"
+    log_lease_lost(channel, e)
   rescue *ExceptionList::IMAP_EXCEPTIONS => e
     Rails.logger.error "Authorization error for email channel - #{channel.inbox.id} : #{e.message}"
   rescue IOError, OpenSSL::SSL::SSLError, Net::IMAP::NoResponseError, Net::IMAP::BadResponseError, Net::IMAP::InvalidResponseError,
@@ -32,6 +32,14 @@ class Inboxes::FetchImapEmailsJob < ApplicationJob
 
   def should_fetch_email?(channel)
     channel.imap_enabled? && !channel.reauthorization_required?
+  end
+
+  def log_lease_busy(channel)
+    Rails.logger.info "[IMAP] Lease busy for email channel - #{channel.inbox.id}, deferring to the next cycle."
+  end
+
+  def log_lease_lost(channel, error)
+    Rails.logger.warn "[IMAP] Lease lost mid-cycle for email channel - #{channel.inbox.id} : #{error.message}"
   end
 
   def handle_unexpected_error(error, channel)
