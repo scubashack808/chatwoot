@@ -6,6 +6,7 @@ import {
   onMounted,
   onBeforeUnmount,
   useTemplateRef,
+  watch,
 } from 'vue';
 import { useEventListener } from '@vueuse/core';
 import { emitter } from 'shared/helpers/mitt';
@@ -13,9 +14,9 @@ import { BUS_EVENTS } from 'shared/constants/busEvents';
 
 const props = defineProps({
   containerHeight: { type: Number, default: 0 },
+  defaultHeight: { type: Number, default: 120 },
 });
 
-const DEFAULT_HEIGHT = 120;
 const MIN_HEIGHT = 80;
 const MIN_MESSAGES_HEIGHT = 200;
 const EXPAND_RATIO = 0.5;
@@ -23,7 +24,7 @@ const RESET_DELAY_MS = 120;
 
 const wrapperRef = useTemplateRef('wrapperRef');
 const surroundingHeight = ref(0);
-const editorHeight = ref(DEFAULT_HEIGHT);
+const editorHeight = ref(props.defaultHeight);
 const isResizing = ref(false);
 const startY = ref(0);
 const startHeight = ref(0);
@@ -37,13 +38,17 @@ const isContainerReady = computed(() => props.containerHeight > 0);
 const sizeBounds = computed(() => {
   const h = props.containerHeight;
   const s = surroundingHeight.value;
-  const max = Math.max(MIN_HEIGHT, h - MIN_MESSAGES_HEIGHT - s);
-  const expanded = clamp(Math.floor(h * EXPAND_RATIO - s / 2), MIN_HEIGHT, max);
+  const min = Math.min(MIN_HEIGHT, props.defaultHeight);
+  const availableMax = Math.max(min, h - MIN_MESSAGES_HEIGHT - s);
+  const max = isContainerReady.value
+    ? availableMax
+    : Math.max(min, props.defaultHeight);
+  const expanded = clamp(Math.floor(h * EXPAND_RATIO - s / 2), min, max);
   return {
-    min: MIN_HEIGHT,
-    max: isContainerReady.value ? max : DEFAULT_HEIGHT,
+    min,
+    max,
     expanded,
-    default: clamp(DEFAULT_HEIGHT, MIN_HEIGHT, max),
+    default: clamp(props.defaultHeight, min, max),
   };
 });
 
@@ -112,6 +117,8 @@ const resetEditorHeight = () => {
   requestedHeight.value = 0;
   editorHeight.value = sizeBounds.value.default;
 };
+
+watch(() => props.defaultHeight, resetEditorHeight);
 
 const toggleEditorExpand = () => {
   measureSurroundingHeight();

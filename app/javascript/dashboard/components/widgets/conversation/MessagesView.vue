@@ -40,6 +40,8 @@ import wootConstants, {
 import { LOCAL_STORAGE_KEYS } from 'dashboard/constants/localStorage';
 import { INBOX_TYPES } from 'dashboard/helper/inbox';
 
+const COMPACT_EMAIL_REPLY_EDITOR_HEIGHT = 80;
+
 export default {
   components: {
     MessageList,
@@ -115,6 +117,11 @@ export default {
     },
     inbox() {
       return this.$store.getters['inboxes/getInbox'](this.inboxId);
+    },
+    replyEditorHeight() {
+      return this.isAnEmailChannel
+        ? COMPACT_EMAIL_REPLY_EDITOR_HEIGHT
+        : undefined;
     },
     typingUsersList() {
       const userList = this.$store.getters[
@@ -551,6 +558,7 @@ export default {
       <ResizableEditorWrapper
         ref="resizableEditorWrapperRef"
         :container-height="Math.max(0, containerHeight - topBannerHeight)"
+        :default-height="replyEditorHeight"
       >
         <ReplyBox @toggle-editor-size="toggleReplyEditorSize" />
       </ResizableEditorWrapper>
