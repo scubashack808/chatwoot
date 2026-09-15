@@ -3,9 +3,11 @@ name: Frontend Lint & Test
 on:
   push:
     branches:
+      - main
       - develop
   pull_request:
     branches:
+      - main
       - develop
 
 permissions:

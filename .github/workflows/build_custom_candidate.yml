@@ -3,10 +3,12 @@ name: Build custom Chatwoot candidate
 on:
   pull_request:
     branches:
+      - main
       - develop
       - integration/v4.17
   push:
     branches:
+      - main
       - develop
       - integration/v4.17
 
@@ -125,7 +127,7 @@ jobs:
     if: >-
       github.repository != 'chatwoot/chatwoot'
       && github.event_name == 'push'
-      && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/integration/v4.17')
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/integration/v4.17')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
