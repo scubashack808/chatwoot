@@ -13,6 +13,7 @@ import ReplyEmailHead from './ReplyEmailHead.vue';
 import {
   channelOwnedAddresses,
   defaultFromAddress,
+  recipientSignature,
   sanitizeRecipients,
   replyAllCcAddresses,
 } from './helpers/emailRecipientHelper';
@@ -556,9 +557,15 @@ export default {
     // This watcher handles two main cases:
     // 1. When switching conversations and messages are fetched/updated, ensures CC/BCC fields are set from the latest OUTGOING/INCOMING email (not activity/private messages).
     // 2. Fixes and issue where CC/BCC fields could be reset/lost after assignment/activity actions or message mutations that did not represent a true email context change.
+    // ADD_MESSAGE replaces a message in place with a new object, so this also fires for
+    // transport-only updates: the source_id written back once a reply is sent, a delivery
+    // status change. Re-deriving there would throw away addresses the agent has typed but
+    // not yet sent, so only re-derive when the email's own recipients actually changed.
     lastEmail: {
-      handler(lastEmail) {
+      handler(lastEmail, previousEmail) {
         if (!lastEmail) return;
+        if (recipientSignature(lastEmail) === recipientSignature(previousEmail))
+          return;
         this.setCCAndToEmailsFromLastChat();
       },
       deep: true,

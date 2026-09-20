@@ -51,6 +51,15 @@ const buildStore = ({
       selectChat: (s, c) => {
         s.chat = c;
       },
+      // Mirrors ADD_MESSAGE: an existing message is replaced in place by a new
+      // object, anything else is appended.
+      addMessage: (s, message) => {
+        const messages = [...(s.chat.messages || [])];
+        const index = messages.findIndex(({ id }) => id === message.id);
+        if (index === -1) messages.push(message);
+        else messages[index] = message;
+        s.chat = { ...s.chat, messages };
+      },
       setReplyEditorMode: (s, mode) => {
         s.replyEditorMode = mode;
       },
@@ -69,7 +78,11 @@ const buildStore = ({
       getCurrentAccountId: () => 1,
       getMessageSignature: () => '',
       getUISettings: () => ({}),
-      getLastEmailInSelectedChat: () => null,
+      // Mirrors the real getter, so the composer's email watchers are exercised.
+      getLastEmailInSelectedChat: s =>
+        [...(s.chat.messages || [])]
+          .reverse()
+          .find(m => !m.private && [0, 1].includes(m.message_type)) || null,
       'globalConfig/get': () => ({}),
       'globalConfig/isMetaMessageSendingDisabled': () =>
         isMetaMessageSendingDisabled,
@@ -429,6 +442,134 @@ describe('ReplyBox', () => {
       expect(store.getters['draftMessages/getReplyEditorMode']).toBe(
         REPLY_EDITOR_MODES.NOTE
       );
+    });
+  });
+
+  // A reply that has been sent gets its source_id written back onto the same
+  // message. That update must not disturb the next reply the agent is writing.
+  describe('email recipients across message updates', () => {
+    const EMAIL_INBOX = {
+      channel_type: 'Channel::Email',
+      email: 'care@example.com',
+      aliases: ['reservations@example.com'],
+    };
+
+    const inboundFrom = (id, from) => ({
+      id,
+      message_type: 0,
+      private: false,
+      content_attributes: { email: { from: [from], cc: [], bcc: [] } },
+    });
+
+    const CUSTOMER_EMAIL = inboundFrom(100, 'customer@example.com');
+
+    const EDITS = {
+      toEmails: 'alternate@example.com',
+      ccEmails: 'crew@example.com',
+      bccEmails: 'records@example.com',
+      selectedFromEmail: 'reservations@example.com',
+    };
+
+    const emailHead = wrapper =>
+      wrapper.findComponent({ name: 'ReplyEmailHead' }).props();
+
+    const mountComposer = async () => {
+      const { wrapper, store } = mountWith({
+        inbox: EMAIL_INBOX,
+        chat: {
+          meta: { sender: { id: 2, email: 'customer@example.com' } },
+          messages: [CUSTOMER_EMAIL],
+        },
+      });
+      await nextTick();
+      return { wrapper, store };
+    };
+
+    const withEdits = async () => {
+      const { wrapper, store } = await mountComposer();
+      await wrapper.setData(EDITS);
+      return { wrapper, store };
+    };
+
+    it('starts from the last email and the inbox primary address', async () => {
+      const { wrapper } = await mountComposer();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: 'customer@example.com',
+        ccEmails: '',
+        bccEmails: '',
+        fromEmail: 'care@example.com',
+      });
+    });
+
+    it('shows what the agent typed', async () => {
+      const { wrapper } = await withEdits();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    it('keeps the unsent recipients when a send writes back the source_id', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('addMessage', {
+        ...CUSTOMER_EMAIL,
+        source_id: '<sent-100@example.test>',
+      });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    it('keeps the unsent recipients when the delivery status changes', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('addMessage', { ...CUSTOMER_EMAIL, status: 'delivered' });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    it('still follows a genuinely new email into the conversation', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('addMessage', inboundFrom(101, 'another@example.com'));
+      await nextTick();
+
+      expect(emailHead(wrapper).toEmails).toBe('another@example.com');
+    });
+
+    it('still initialises from scratch on a different conversation', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('selectChat', {
+        ...REPLIABLE,
+        id: 2,
+        meta: { sender: { id: 3, email: 'second@example.com' } },
+        messages: [inboundFrom(200, 'second@example.com')],
+      });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: 'second@example.com',
+        ccEmails: '',
+        bccEmails: '',
+        fromEmail: 'care@example.com',
+      });
     });
   });
 });
