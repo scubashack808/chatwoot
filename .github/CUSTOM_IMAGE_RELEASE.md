@@ -55,8 +55,8 @@ that contacts the VPS, changes Compose, migrates, restarts, or changes traffic.
 
 The workflow does not supply repository governance. Before using this as the
 merge path, keep default workflow-token permissions read-only, protect
-`main`, `develop`, and `integration/v4.17` against direct pushes, and require the
-candidate build plus application tests before merge.
+`main`, `develop`, and `integration/v4.17` against direct pushes, and require
+the candidate build plus application tests before merge.
 
 The old fork workflow that overwrites
 `ghcr.io/a-t-m-reef/chatwoot:eh` is not carried forward. Upstream Docker Hub
