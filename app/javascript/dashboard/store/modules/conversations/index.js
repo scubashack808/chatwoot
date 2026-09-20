@@ -26,6 +26,14 @@ const state = {
   copilotAssistant: {},
 };
 
+// Stamps writes that invalidate a pending read. A deferred read captures the
+// stamp when it is requested and only applies if nothing has changed it since.
+let unreadWriteSequence = 0;
+export const nextUnreadWriteSequence = () => {
+  unreadWriteSequence += 1;
+  return unreadWriteSequence;
+};
+
 const getConversationById = _state => conversationId => {
   return _state.allConversations.find(c => c.id === conversationId);
 };
@@ -259,6 +267,7 @@ export const mutations = {
       chat.timestamp = message.created_at;
       const { conversation: { unread_count: unreadCount = 0 } = {} } = message;
       chat.unread_count = unreadCount;
+      chat.unreadWriteSequence = nextUnreadWriteSequence();
       if (selectedChatId === conversationId) {
         emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE);
       }
@@ -314,12 +323,27 @@ export const mutations = {
 
   [types.UPDATE_MESSAGE_UNREAD_COUNT](
     _state,
-    { id, lastSeen, unreadCount = 0 }
+    { id, lastSeen, unreadCount = 0, expectedSequence }
   ) {
     const [chat] = _state.allConversations.filter(c => c.id === id);
-    if (chat) {
-      chat.agent_last_seen_at = lastSeen;
-      chat.unread_count = unreadCount;
+    if (!chat) return;
+
+    // A deferred read passes the sequence it captured when it was requested.
+    // If an unread write has landed since, this payload is stale: drop it.
+    if (
+      expectedSequence !== undefined &&
+      (chat.unreadWriteSequence ?? 0) !== expectedSequence
+    ) {
+      return;
+    }
+
+    chat.agent_last_seen_at = lastSeen;
+    chat.unread_count = unreadCount;
+
+    // Only unconditional writes invalidate pending reads. A guarded read that
+    // applies must not cancel another read that captured the same baseline.
+    if (expectedSequence === undefined) {
+      chat.unreadWriteSequence = nextUnreadWriteSequence();
     }
   },
   [types.CHANGE_CHAT_STATUS_FILTER](_state, data) {

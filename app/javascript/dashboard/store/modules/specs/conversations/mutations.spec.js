@@ -1,6 +1,8 @@
-import { describe } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import types from '../../../mutation-types';
 import { mutations } from '../../conversations';
+import readActions from '../../conversations/actions/messageReadActions';
+import ConversationApi from '../../../../api/inbox/conversation';
 
 vi.mock('shared/helpers/mitt', () => ({
   emitter: {
@@ -28,7 +30,12 @@ describe('#mutations', () => {
       const lastSeen = new Date().getTime() / 1000;
       mutations[types.UPDATE_MESSAGE_UNREAD_COUNT](state, { id: 1, lastSeen });
       expect(state.allConversations).toEqual([
-        { id: 1, agent_last_seen_at: lastSeen, unread_count: 0 },
+        {
+          id: 1,
+          agent_last_seen_at: lastSeen,
+          unread_count: 0,
+          unreadWriteSequence: expect.any(Number),
+        },
       ]);
     });
 
@@ -216,6 +223,7 @@ describe('#mutations', () => {
             },
           ],
           unread_count: 0,
+          unreadWriteSequence: expect.any(Number),
           timestamp: 1602256198,
         },
       ]);
@@ -244,6 +252,7 @@ describe('#mutations', () => {
             },
           ],
           unread_count: 0,
+          unreadWriteSequence: expect.any(Number),
           timestamp: 1602256198,
         },
       ]);
@@ -1227,6 +1236,156 @@ describe('#mutations', () => {
       });
 
       expect(state.syncConversationsMessages[1]).toBe(100);
+    });
+  });
+});
+
+describe('deferred read ordering', () => {
+  let state;
+  let context;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    state = {
+      selectedChatId: 1,
+      allConversations: [
+        {
+          id: 1,
+          agent_last_seen_at: 100,
+          unread_count: 1,
+          messages: [],
+        },
+      ],
+    };
+    context = {
+      state,
+      commit: (type, payload) => mutations[type](state, payload),
+    };
+    vi.spyOn(ConversationApi, 'markMessageRead').mockResolvedValue({
+      data: { id: 1, agent_last_seen_at: 200 },
+    });
+    vi.spyOn(ConversationApi, 'markMessagesUnread').mockResolvedValue({
+      data: { id: 1, agent_last_seen_at: 99, unread_count: 1 },
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('clears unread after the scheduled delay for an ordinary read', async () => {
+    await readActions.markMessagesRead(context, { id: 1 });
+    expect(ConversationApi.markMessageRead).toHaveBeenCalledWith({ id: 1 });
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(state.allConversations[0].unread_count).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 0,
+      agent_last_seen_at: 200,
+    });
+  });
+
+  it('stays unread when marked unread after the old timer has run', async () => {
+    await readActions.markMessagesRead(context, { id: 1 });
+    await vi.advanceTimersByTimeAsync(4000);
+    await readActions.markMessagesUnread(context, { id: 1 });
+    mutations[types.CLEAR_CURRENT_CHAT_WINDOW](state);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 1,
+      agent_last_seen_at: 99,
+    });
+  });
+
+  it('keeps a later explicit unread when an earlier read timer fires', async () => {
+    await readActions.markMessagesRead(context, { id: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    await readActions.markMessagesUnread(context, { id: 1 });
+    expect(ConversationApi.markMessagesUnread).toHaveBeenCalledWith({ id: 1 });
+    mutations[types.CLEAR_CURRENT_CHAT_WINDOW](state);
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 1,
+      agent_last_seen_at: 99,
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 1,
+      agent_last_seen_at: 99,
+    });
+  });
+
+  it('keeps a newer incoming message in an inactive chat unread', async () => {
+    await readActions.markMessagesRead(context, { id: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    mutations[types.CLEAR_CURRENT_CHAT_WINDOW](state);
+    mutations[types.ADD_MESSAGE](state, {
+      id: 10,
+      conversation_id: 1,
+      message_type: 0,
+      status: 'sent',
+      created_at: 201,
+      content: 'New synthetic message',
+      conversation: { unread_count: 1 },
+    });
+    expect(state.allConversations[0].messages).toHaveLength(1);
+    expect(state.allConversations[0].unread_count).toBe(1);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(state.allConversations[0].unread_count).toBe(1);
+  });
+
+  it('lets overlapping ordinary reads both apply', async () => {
+    ConversationApi.markMessageRead
+      .mockResolvedValueOnce({
+        data: { id: 1, agent_last_seen_at: 200 },
+      })
+      .mockResolvedValueOnce({
+        data: { id: 1, agent_last_seen_at: 300 },
+      });
+
+    await readActions.markMessagesRead(context, { id: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    await readActions.markMessagesRead(context, { id: 1 });
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 0,
+      agent_last_seen_at: 200,
+    });
+    // The first read applying must not invalidate the second one.
+    expect(state.allConversations[0].unreadWriteSequence).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 0,
+      agent_last_seen_at: 300,
+    });
+  });
+
+  it('drops a read whose unread state changed while the request was in flight', async () => {
+    let resolveRead;
+    ConversationApi.markMessageRead.mockReturnValue(
+      new Promise(resolve => {
+        resolveRead = resolve;
+      })
+    );
+
+    const pendingRead = readActions.markMessagesRead(context, { id: 1 });
+    await readActions.markMessagesUnread(context, { id: 1 });
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 1,
+      agent_last_seen_at: 99,
+    });
+
+    resolveRead({ data: { id: 1, agent_last_seen_at: 200 } });
+    await pendingRead;
+    await vi.advanceTimersByTimeAsync(4000);
+
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 1,
+      agent_last_seen_at: 99,
     });
   });
 });

@@ -297,19 +297,24 @@ describe('#actions', () => {
 
     it('sends correct mutations if api is successful', async () => {
       const lastSeen = new Date().getTime() / 1000;
+      const state = { allConversations: [{ id: 1 }] };
       axios.post.mockResolvedValue({
         data: { id: 1, agent_last_seen_at: lastSeen },
       });
-      await actions.markMessagesRead({ commit }, { id: 1 });
+      await actions.markMessagesRead({ commit, state }, { id: 1 });
       vi.runAllTimers();
       expect(commit).toHaveBeenCalledTimes(1);
       expect(commit.mock.calls).toEqual([
-        [types.UPDATE_MESSAGE_UNREAD_COUNT, { id: 1, lastSeen }],
+        [
+          types.UPDATE_MESSAGE_UNREAD_COUNT,
+          { id: 1, lastSeen, expectedSequence: 0 },
+        ],
       ]);
     });
     it('sends correct mutations if api is unsuccessful', async () => {
+      const state = { allConversations: [{ id: 1 }] };
       axios.post.mockRejectedValue({ message: 'Incorrect header' });
-      await actions.markMessagesRead({ commit }, { id: 1 });
+      await actions.markMessagesRead({ commit, state }, { id: 1 });
       expect(commit.mock.calls).toEqual([]);
     });
   });
