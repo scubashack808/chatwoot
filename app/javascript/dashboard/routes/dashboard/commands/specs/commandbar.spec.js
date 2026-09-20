@@ -346,5 +346,16 @@ describe('commandbar', () => {
 
       expect(dispatch).not.toHaveBeenCalled();
     });
+
+    it('clears the context menu conversation on a later close after a custom snooze', async () => {
+      await mountCommandBar();
+      await emitSelected({ id: 'until_custom_time' });
+      await emitClosed();
+      dispatch.mockClear();
+
+      await emitClosed();
+
+      expect(dispatch).toHaveBeenCalledWith('setContextMenuChatId', null);
+    });
   });
 });

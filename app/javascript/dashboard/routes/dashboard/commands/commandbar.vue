@@ -161,6 +161,7 @@ const buildDynamicSnoozeActions = (search, parentId) => {
 const resetSnoozeState = () => {
   currentCommandRoot.value = null;
   dynamicSnoozeActions.value = [];
+  selectedSnoozeType.value = null;
 };
 
 const patchNinjaKeysOpenClose = el => {

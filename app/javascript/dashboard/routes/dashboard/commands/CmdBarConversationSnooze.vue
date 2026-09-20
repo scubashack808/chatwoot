@@ -20,7 +20,7 @@ const contextMenuChatId = computed(() => getters.getContextMenuChatId.value);
 
 const toggleStatus = async (status, snoozedUntil) => {
   await store.dispatch('toggleStatus', {
-    conversationId: selectedChat.value?.id || contextMenuChatId.value,
+    conversationId: contextMenuChatId.value || selectedChat.value?.id,
     status,
     snoozedUntil,
   });
