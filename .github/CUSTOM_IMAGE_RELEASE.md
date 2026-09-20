@@ -5,12 +5,11 @@ them.
 
 ## What runs
 
-- A pull request targeting `integration/v4.17` or `develop` builds and scans an
-  `amd64` image locally. The job has no package write permission.
-- A merge or other push to either named branch builds and pushes a uniquely
-  tagged candidate.
-- No manual-dispatch path exists. This lets the integration branch exercise the
-  workflow before the final cutover to the default branch.
+- A pull request targeting `main`, `develop`, or `integration/v4.17` builds and
+  scans an `amd64` image locally. The job has no package write permission.
+- A merge or other push to `main`, `develop`, or `integration/v4.17` builds and
+  pushes a uniquely tagged candidate.
+- No manual-dispatch path exists.
 
 Each published candidate records:
 
@@ -56,7 +55,7 @@ that contacts the VPS, changes Compose, migrates, restarts, or changes traffic.
 
 The workflow does not supply repository governance. Before using this as the
 merge path, keep default workflow-token permissions read-only, protect
-`integration/v4.17` and `develop` against direct pushes, and require the
+`main`, `develop`, and `integration/v4.17` against direct pushes, and require the
 candidate build plus application tests before merge.
 
 The old fork workflow that overwrites
