@@ -180,8 +180,11 @@ const patchNinjaKeysOpenClose = el => {
   };
 
   el.close = (...args) => {
+    // close() dispatches `closed` synchronously, and onClosed reads
+    // selectedSnoozeType, so the reset has to follow it.
+    const result = originalClose(...args);
     resetSnoozeState();
-    return originalClose(...args);
+    return result;
   };
 };
 
