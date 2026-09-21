@@ -8,6 +8,10 @@ import { BUS_EVENTS } from '../../../../shared/constants/busEvents';
 import { emitter } from 'shared/helpers/mitt';
 import { CONTENT_TYPES } from 'dashboard/components-next/message/constants.js';
 import { isMailboxOperationTerminal } from 'dashboard/helper/mailboxOperations';
+import {
+  getUnreadWriteSequence,
+  recordUnreadWrite,
+} from './unreadWriteSequence';
 
 const state = {
   allConversations: [],
@@ -26,14 +30,6 @@ const state = {
   copilotAssistant: {},
 };
 
-// Stamps writes that invalidate a pending read. A deferred read captures the
-// stamp when it is requested and only applies if nothing has changed it since.
-let unreadWriteSequence = 0;
-export const nextUnreadWriteSequence = () => {
-  unreadWriteSequence += 1;
-  return unreadWriteSequence;
-};
-
 const getConversationById = _state => conversationId => {
   return _state.allConversations.find(c => c.id === conversationId);
 };
@@ -48,31 +44,21 @@ export const mutations = {
       );
       if (indexInCurrentList < 0) {
         newAllConversations.push(conversation);
-        return;
-      }
-      const existingConversation = newAllConversations[indexInCurrentList];
-      // The server payload carries no unread write stamp, so both replacement
-      // branches carry the local one over. Losing it here would make a read
-      // that is still in flight compare against a reset baseline.
-      const { unreadWriteSequence: existingSequence } = existingConversation;
-      if (conversation.id !== _state.selectedChatId) {
+      } else if (conversation.id !== _state.selectedChatId) {
         // If the conversation is already in the list, replace it
         // Added this to fix the issue of the conversation not being updated
         // When reconnecting to the websocket. If the selectedChatId is not the same as
         // the conversation.id in the store, replace the existing conversation with the new one
-        newAllConversations[indexInCurrentList] = {
-          ...conversation,
-          unreadWriteSequence: existingSequence,
-        };
+        newAllConversations[indexInCurrentList] = conversation;
       } else {
         // If the conversation is already in the list and selectedChatId is the same,
         // replace all data except the messages array, attachments, dataFetched, allMessagesLoaded
+        const existingConversation = newAllConversations[indexInCurrentList];
         newAllConversations[indexInCurrentList] = {
           ...conversation,
           allMessagesLoaded: existingConversation.allMessagesLoaded,
           messages: existingConversation.messages,
           dataFetched: existingConversation.dataFetched,
-          unreadWriteSequence: existingSequence,
         };
       }
     });
@@ -277,7 +263,7 @@ export const mutations = {
       chat.timestamp = message.created_at;
       const { conversation: { unread_count: unreadCount = 0 } = {} } = message;
       chat.unread_count = unreadCount;
-      chat.unreadWriteSequence = nextUnreadWriteSequence();
+      recordUnreadWrite(conversationId);
       if (selectedChatId === conversationId) {
         emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE);
       }
@@ -342,7 +328,7 @@ export const mutations = {
     // If an unread write has landed since, this payload is stale: drop it.
     if (
       expectedSequence !== undefined &&
-      (chat.unreadWriteSequence ?? 0) !== expectedSequence
+      getUnreadWriteSequence(id) !== expectedSequence
     ) {
       return;
     }
@@ -353,7 +339,7 @@ export const mutations = {
     // Only unconditional writes invalidate pending reads. A guarded read that
     // applies must not cancel another read that captured the same baseline.
     if (expectedSequence === undefined) {
-      chat.unreadWriteSequence = nextUnreadWriteSequence();
+      recordUnreadWrite(id);
     }
   },
   [types.CHANGE_CHAT_STATUS_FILTER](_state, data) {

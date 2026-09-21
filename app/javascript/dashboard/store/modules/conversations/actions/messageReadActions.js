@@ -1,14 +1,14 @@
 import { throwErrorMessage } from 'dashboard/store/utils/api';
 import ConversationApi from '../../../../api/inbox/conversation';
 import mutationTypes from '../../../mutation-types';
+import { getUnreadWriteSequence } from '../unreadWriteSequence';
 
 export default {
-  markMessagesRead: async ({ commit, state }, data) => {
+  markMessagesRead: async ({ commit }, data) => {
     try {
       // Captured before the request so an unread write that lands while it is
       // in flight also invalidates the deferred commit below.
-      const chat = state.allConversations.find(c => c.id === data.id);
-      const expectedSequence = chat?.unreadWriteSequence ?? 0;
+      const expectedSequence = getUnreadWriteSequence(data.id);
       const {
         data: { id, agent_last_seen_at: lastSeen },
       } = await ConversationApi.markMessageRead(data);
