@@ -15,8 +15,17 @@
 # legitimately contain the same characters.
 class Messages::EmailRenderNormalizer
   COMMENT = /<!--.*?-->/m
-  STYLE_BLOCK = %r{<style\b[^>]*>.*?</style\s*>}mi
-  SCRIPT_BLOCK = %r{<script\b[^>]*>.*?</script\s*>}mi
+  # The body may not span another opening tag of the same kind. Without that guard an unclosed
+  # <style> makes every later offset scan to end of document looking for a close that never comes,
+  # which is quadratic on a run of them: 64 KB took 4.3s, 128 KB took 17.4s. Bounding it is what
+  # keeps this linear, and mail body size is not capped anywhere on the way in.
+  #
+  # The one behaviour this gives up: in "<style>a{}<style>b{}</style>" the first block's CSS is now
+  # left as a text node rather than stripped. A browser would keep parsing CSS to the close, so
+  # that markup loses its strip - accepted because it needs a malformed nested open tag to reach,
+  # and a genuinely unclosed <style> was never stripped by this class anyway.
+  STYLE_BLOCK = %r{<style\b[^>]*>(?:(?!<style\b|</style).)*</style\s*>}mi
+  SCRIPT_BLOCK = %r{<script\b[^>]*>(?:(?!<script\b|</script).)*</script\s*>}mi
   TAG = /<[^>]+>/m
   # Ordered: a <style> body must be recognised as a block before its opening tag matches as a tag.
   MARKUP_SEGMENT = Regexp.union(COMMENT, STYLE_BLOCK, SCRIPT_BLOCK, TAG)

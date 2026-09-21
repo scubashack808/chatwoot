@@ -250,6 +250,46 @@ RSpec.describe Messages::EmailRenderNormalizer do
       expect(body_of.call(attributes)).to eq('<table height="100%">')
     end
 
+    # A mail body is attacker-chosen and uncapped on the way in, and this runs on every read, so a
+    # body that never closes a <style> must not be able to make the scan superlinear. Before the
+    # segment regexes were bounded, 128KB of this shape took over 17 seconds.
+    context 'with a body that never closes a style or script tag' do
+      let(:elapsed) do
+        lambda do |attributes|
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          described_class.normalize(attributes)
+          Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+        end
+      end
+
+      # The bound is loose on purpose: this has to survive a loaded CI shard, and it is still two
+      # orders of magnitude below the quadratic behaviour it guards against.
+      it 'normalizes a large unclosed style run quickly' do
+        expect(elapsed.call(wrap.call('<style>' * 18_000))).to be < 2
+      end
+
+      it 'normalizes a large unclosed script run quickly' do
+        expect(elapsed.call(wrap.call('<script>' * 16_000))).to be < 2
+      end
+
+      it 'still strips declarations that follow the unclosed tag' do
+        result = described_class.normalize(wrap.call('<style><td style="height: 100%; color: red;">'))
+
+        expect(body_of.call(result)).to eq('<style><td style="color: red;">')
+      end
+
+      it 'leaves the unclosed tag itself in place' do
+        expect(body_of.call(described_class.normalize(wrap.call('<style>body{height:100%}<td height="100%">'))))
+          .to eq('<style>body{height:100%}<td>')
+      end
+    end
+
+    it 'strips both style blocks when a document has several' do
+      html = '<style>a{height:100%}</style><p>mid</p><style>b{min-height: 100%;}</style>'
+
+      expect(body_of.call(described_class.normalize(wrap.call(html)))).to eq('<style>a{}</style><p>mid</p><style>b{}</style>')
+    end
+
     it 'leaves reply, quoted and text_content untouched' do
       attributes = {
         email: {
