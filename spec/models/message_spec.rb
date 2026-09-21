@@ -152,6 +152,39 @@ RSpec.describe Message do
     it 'returns push event payload' do
       expect(push_event_data).to eq(expected_data)
     end
+
+    context 'when the message is an incoming email carrying full height declarations' do
+      let(:stored_body) do
+        '<div>Yes, 9am works for us.</div>' \
+          '<blockquote class="gmail_quote"><table height="100%" style="height: 100% !important; background: #f4f4f4">' \
+          '<tr><td><a href="https://fareharbor.com/embeds/book/xyz/">Manage your booking</a></td></tr></table></blockquote>'
+      end
+
+      let(:message) do
+        create(:message, content_type: :incoming_email,
+                         content_attributes: { email: { html_content: { full: stored_body, reply: 'Yes, 9am works for us.' } } })
+      end
+
+      let(:broadcast_body) { push_event_data[:content_attributes][:email][:html_content][:full] }
+
+      it 'broadcasts the body without the full height declarations' do
+        expect(broadcast_body).not_to include('height="100%"')
+        expect(broadcast_body).not_to include('height: 100% !important')
+      end
+
+      it 'broadcasts the reply and the quoted history intact' do
+        expect(broadcast_body).to include('Yes, 9am works for us.')
+        expect(broadcast_body).to include('class="gmail_quote"')
+        expect(broadcast_body).to include('href="https://fareharbor.com/embeds/book/xyz/"')
+        expect(broadcast_body).to include('background: #f4f4f4')
+      end
+
+      it 'leaves the stored row unchanged' do
+        push_event_data
+
+        expect(message.reload.content_attributes['email']['html_content']['full']).to eq(stored_body)
+      end
+    end
   end
 
   describe 'message create event' do

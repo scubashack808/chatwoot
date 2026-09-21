@@ -144,12 +144,16 @@ class Message < ApplicationRecord
     @token ||= inbox.channel.try(:page_access_token)
   end
 
+  # content_attributes is normalised on the way out rather than on the way in: the raw mail stays
+  # byte-identical on the row, and messages already stored are covered too. The REST partial
+  # normalises the same way, so an initial fetch and a realtime broadcast of one message agree.
   def push_event_data
     data = attributes.symbolize_keys.merge(
       created_at: created_at.to_i,
       message_type: message_type_before_type_cast,
       conversation_id: conversation&.display_id,
       conversation: conversation.present? ? conversation_push_event_data : nil,
+      content_attributes: Messages::EmailRenderNormalizer.normalize(content_attributes),
       external_source_ids: publishable_external_source_ids
     )
     data[:echo_id] = echo_id if echo_id.present?

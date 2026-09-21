@@ -208,6 +208,49 @@ RSpec.describe 'Conversation Messages API', type: :request do
         expect(response).to conform_schema(200)
         expect(JSON.parse(response.body, symbolize_names: true)[:meta][:contact][:id]).to eq(conversation.contact_id)
       end
+
+      context 'when an incoming email carries full height declarations' do
+        let(:stored_body) do
+          '<div>Yes, 9am works for us.</div>' \
+            '<blockquote class="gmail_quote"><table height="100%" style="height: 100% !important; background: #f4f4f4">' \
+            '<tr><td><img src="https://cdn.example.com/logo.png"></td>' \
+            '<td><a href="https://fareharbor.com/embeds/book/xyz/">Manage your booking</a></td></tr></table></blockquote>'
+        end
+
+        let!(:email_message) do
+          create(:message, account: account, conversation: conversation, content_type: :incoming_email,
+                           content_attributes: { email: { html_content: { full: stored_body, reply: 'Yes, 9am works for us.' } } })
+        end
+
+        let(:served_body) do
+          get "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/messages",
+              headers: agent.create_new_auth_token,
+              as: :json
+
+          JSON.parse(response.body, symbolize_names: true)[:payload]
+              .find { |message| message[:id] == email_message.id }
+              .dig(:content_attributes, :email, :html_content, :full)
+        end
+
+        it 'serves the body without the full height declarations' do
+          expect(served_body).not_to include('height="100%"')
+          expect(served_body).not_to include('height: 100% !important')
+        end
+
+        it 'serves the reply and the quoted history intact' do
+          expect(served_body).to include('Yes, 9am works for us.')
+          expect(served_body).to include('class="gmail_quote"')
+          expect(served_body).to include('src="https://cdn.example.com/logo.png"')
+          expect(served_body).to include('href="https://fareharbor.com/embeds/book/xyz/"')
+          expect(served_body).to include('background: #f4f4f4')
+        end
+
+        it 'leaves the stored row unchanged' do
+          served_body
+
+          expect(email_message.reload.content_attributes['email']['html_content']['full']).to eq(stored_body)
+        end
+      end
     end
   end
 
