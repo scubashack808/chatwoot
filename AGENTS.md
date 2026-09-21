@@ -19,6 +19,34 @@
 - **rbenv setup**: Before running any `bundle` or `rspec` commands, init rbenv in your shell (`eval "$(rbenv init -)"`) so the correct Ruby/Bundler versions are used
 - Always prefer `bundle exec` for Ruby CLI tasks (rspec, rake, rubocop, etc.)
 
+## Running Backend Tests Without a Local Ruby (Factory agents)
+
+Factory sessions have no Ruby, bundler or Docker, so `bundle exec rspec` cannot
+run there. Use the maintained VPS route instead — it runs your **actual working
+tree**, including uncommitted changes:
+
+```bash
+bin/vps-rspec spec/models/account_spec.rb          # run specs on the VPS
+bin/vps-rspec spec/models/account_spec.rb:42       # single example
+bin/vps-rspec --preflight                          # check readiness, run nothing
+bin/vps-rspec --dry-run spec/models/account_spec.rb # show what would be submitted
+```
+
+- Tracked changes and new files under `app/`, `lib/`, `spec/`, `config/`, `db/`
+  and `enterprise/` are submitted automatically. For a new support file outside
+  those roots, add `--include-untracked PATH`.
+- Your index, branch and working tree are never modified.
+- The exit code is the real RSpec result. A log full of passing lines still
+  fails the command if the run failed. Exit `2` means the snapshot was refused,
+  `3` means transport trouble, `75` means the route is busy.
+- Receipts and logs stay in the run directory printed at the end of each run.
+- If the image no longer matches `.ruby-version` or the lockfiles, the run
+  refuses **before** testing and names the mismatch; follow the refresh
+  procedure in `ops/vps-tests/README.md`. Never edit a lockfile to match an old
+  image, and never install Ruby into the Factory session or run tests on a Mac.
+
+Full contract, isolation model and maintenance: `ops/vps-tests/README.md`.
+
 ## Code Style
 
 - **Ruby**: Follow RuboCop rules (150 character max line length)

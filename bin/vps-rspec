@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+// Maintained entry point for running Chatwoot backend specs on the VPS route.
+// Documented in AGENTS.md; contract lives in ops/vps-tests/README.md.
+
+import { main } from '../ops/vps-tests/client/cli.mjs';
+
+main(process.argv.slice(2))
+  .then(code => {
+    process.exitCode = code;
+  })
+  .catch(error => {
+    process.stderr.write(`vps-rspec: ${error?.stack ?? error}\n`);
+    process.exitCode = 1;
+  });
