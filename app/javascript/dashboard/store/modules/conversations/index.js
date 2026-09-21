@@ -8,6 +8,10 @@ import { BUS_EVENTS } from '../../../../shared/constants/busEvents';
 import { emitter } from 'shared/helpers/mitt';
 import { CONTENT_TYPES } from 'dashboard/components-next/message/constants.js';
 import { isMailboxOperationTerminal } from 'dashboard/helper/mailboxOperations';
+import {
+  getUnreadWriteSequence,
+  recordUnreadWrite,
+} from './unreadWriteSequence';
 
 const state = {
   allConversations: [],
@@ -259,6 +263,7 @@ export const mutations = {
       chat.timestamp = message.created_at;
       const { conversation: { unread_count: unreadCount = 0 } = {} } = message;
       chat.unread_count = unreadCount;
+      recordUnreadWrite(conversationId);
       if (selectedChatId === conversationId) {
         emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE);
       }
@@ -314,12 +319,27 @@ export const mutations = {
 
   [types.UPDATE_MESSAGE_UNREAD_COUNT](
     _state,
-    { id, lastSeen, unreadCount = 0 }
+    { id, lastSeen, unreadCount = 0, expectedSequence }
   ) {
     const [chat] = _state.allConversations.filter(c => c.id === id);
-    if (chat) {
-      chat.agent_last_seen_at = lastSeen;
-      chat.unread_count = unreadCount;
+    if (!chat) return;
+
+    // A deferred read passes the sequence it captured when it was requested.
+    // If an unread write has landed since, this payload is stale: drop it.
+    if (
+      expectedSequence !== undefined &&
+      getUnreadWriteSequence(id) !== expectedSequence
+    ) {
+      return;
+    }
+
+    chat.agent_last_seen_at = lastSeen;
+    chat.unread_count = unreadCount;
+
+    // Only unconditional writes invalidate pending reads. A guarded read that
+    // applies must not cancel another read that captured the same baseline.
+    if (expectedSequence === undefined) {
+      recordUnreadWrite(id);
     }
   },
   [types.CHANGE_CHAT_STATUS_FILTER](_state, data) {

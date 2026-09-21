@@ -304,7 +304,10 @@ describe('#actions', () => {
       vi.runAllTimers();
       expect(commit).toHaveBeenCalledTimes(1);
       expect(commit.mock.calls).toEqual([
-        [types.UPDATE_MESSAGE_UNREAD_COUNT, { id: 1, lastSeen }],
+        [
+          types.UPDATE_MESSAGE_UNREAD_COUNT,
+          { id: 1, lastSeen, expectedSequence: 0 },
+        ],
       ]);
     });
     it('sends correct mutations if api is unsuccessful', async () => {
