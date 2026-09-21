@@ -1,11 +1,18 @@
 import { CONVERSATION_PRIORITY_ORDER } from 'shared/constants/messages';
 
-export const findPendingMessageIndex = (chat, message) => {
-  const { echo_id: tempMessageId } = message;
-  return chat.messages.findIndex(
-    m => m.id === message.id || m.id === tempMessageId
-  );
-};
+// Whether a message already held in the conversation is the same message as one
+// arriving for it. Sending gives a single message two identities in turn: the
+// pending object carries a client uuid as both id and echo_id, the server response
+// carries the real id and echoes echo_id back, and later websocket frames carry the
+// real id alone, since echo_id is only ever set on the object that created it and
+// is never persisted. No single field identifies a message across all three, so
+// this relation is what "the same message" means. Directional: the held message
+// first, the arriving one second.
+export const isSameMessage = (held, arriving) =>
+  held.id === arriving.id || held.id === arriving.echo_id;
+
+export const findPendingMessageIndex = (chat, message) =>
+  chat.messages.findIndex(m => isSameMessage(m, message));
 
 export const filterByStatus = (chatStatus, filterStatus) =>
   filterStatus === 'all' ? true : chatStatus === filterStatus;

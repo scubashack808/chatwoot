@@ -2,6 +2,7 @@ import { shallowMount } from '@vue/test-utils';
 import { REPLY_EDITOR_MODES } from 'dashboard/components/widgets/WootWriter/constants';
 import { nextTick } from 'vue';
 import { createStore } from 'vuex';
+import { findPendingMessageIndex } from 'dashboard/store/modules/conversations/helpers';
 import ReplyBox from '../ReplyBox.vue';
 import WhatsappTemplates from '../WhatsappTemplates/Modal.vue';
 
@@ -52,10 +53,11 @@ const buildStore = ({
         s.chat = c;
       },
       // Mirrors ADD_MESSAGE: an existing message is replaced in place by a new
-      // object, anything else is appended.
+      // object, anything else is appended. It uses the store's own matching rule
+      // so the pending/echo_id round trip behaves here exactly as it does live.
       addMessage: (s, message) => {
         const messages = [...(s.chat.messages || [])];
-        const index = messages.findIndex(({ id }) => id === message.id);
+        const index = findPendingMessageIndex({ messages }, message);
         if (index === -1) messages.push(message);
         else messages[index] = message;
         s.chat = { ...s.chat, messages };
@@ -513,12 +515,74 @@ describe('ReplyBox', () => {
       });
     });
 
-    it('keeps the unsent recipients when a send writes back the source_id', async () => {
-      const { wrapper, store } = await withEdits();
+    // Sending commits twice: the pending message, whose id is a client uuid also
+    // copied to echo_id, then the server response carrying the real id and echoing
+    // echo_id back. findPendingMessageIndex matches the second onto the first, so
+    // one message changes id mid-flight. Sending also clears the composer, so what
+    // is at stake here is the reply the agent started writing next.
+    it('keeps the next reply recipients through the send round trip', async () => {
+      const { wrapper, store } = await mountComposer();
+      const echoId = 'e6f1c2d3-9a7b-4c5d-8e2f-1a3b5c7d9e0f';
 
       store.commit('addMessage', {
-        ...CUSTOMER_EMAIL,
-        source_id: '<sent-100@example.test>',
+        id: echoId,
+        echo_id: echoId,
+        message_type: 1,
+        private: false,
+        status: 'progress',
+        content_attributes: {},
+        toEmails: 'customer@example.com',
+      });
+      await nextTick();
+
+      await wrapper.setData(EDITS);
+
+      store.commit('addMessage', {
+        id: 4321,
+        echo_id: echoId,
+        message_type: 1,
+        private: false,
+        status: 'sent',
+        content_attributes: {
+          to_emails: ['customer@example.com'],
+          cc_emails: [],
+          bcc_emails: [],
+        },
+      });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    // The websocket frame that follows a send carries no echo_id, since echo_id is
+    // only ever set on the object that created it and is never persisted.
+    it('keeps the next reply recipients through the update that follows a send', async () => {
+      const { wrapper, store } = await mountComposer();
+      const sent = {
+        id: 4321,
+        message_type: 1,
+        private: false,
+        content_attributes: {
+          to_emails: ['customer@example.com'],
+          cc_emails: [],
+          bcc_emails: [],
+        },
+      };
+
+      store.commit('addMessage', { ...sent, status: 'sent' });
+      await nextTick();
+
+      await wrapper.setData(EDITS);
+
+      store.commit('addMessage', {
+        ...sent,
+        status: 'delivered',
+        source_id: '<sent-4321@example.test>',
       });
       await nextTick();
 

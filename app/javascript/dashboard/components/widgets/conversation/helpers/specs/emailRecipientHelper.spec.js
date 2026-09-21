@@ -5,7 +5,6 @@ import {
   rejectOwnedAddresses,
   sanitizeRecipients,
   defaultFromAddress,
-  recipientSignature,
   replyAllCcAddresses,
 } from '../emailRecipientHelper';
 
@@ -183,98 +182,6 @@ describe('emailRecipientHelper', () => {
         defaultFromAddress([inbound(['stranger@example.com'])], options)
       ).toBe('');
       expect(defaultFromAddress([], options)).toBe('');
-    });
-  });
-
-  // A delivery update must not look like a new email context to the composer.
-  describe('recipientSignature', () => {
-    const outgoing = {
-      id: 100,
-      message_type: 1,
-      status: 'sent',
-      content: 'Earlier email',
-      content_attributes: {
-        to_emails: ['customer@example.com'],
-        cc_emails: [],
-        bcc_emails: [],
-      },
-    };
-    const incoming = {
-      id: 100,
-      message_type: 0,
-      content_attributes: {
-        email: { from: ['customer@example.com'], cc: [], bcc: [] },
-      },
-    };
-
-    it('is unchanged when a send writes back the source_id', () => {
-      expect(
-        recipientSignature({
-          ...outgoing,
-          source_id: '<sent-100@example.test>',
-        })
-      ).toBe(recipientSignature(outgoing));
-    });
-
-    it('is unchanged when the delivery status moves on', () => {
-      expect(recipientSignature({ ...outgoing, status: 'delivered' })).toBe(
-        recipientSignature(outgoing)
-      );
-    });
-
-    it('is unchanged when unrelated fields change', () => {
-      expect(
-        recipientSignature({
-          ...outgoing,
-          content: 'Edited body',
-          created_at: 1789736400,
-        })
-      ).toBe(recipientSignature(outgoing));
-    });
-
-    it('changes when the email is a different message', () => {
-      expect(recipientSignature({ ...outgoing, id: 101 })).not.toBe(
-        recipientSignature(outgoing)
-      );
-    });
-
-    it('changes when the direction changes', () => {
-      expect(recipientSignature({ ...outgoing, message_type: 0 })).not.toBe(
-        recipientSignature(outgoing)
-      );
-    });
-
-    it('changes when an incoming email carries a different cc', () => {
-      expect(
-        recipientSignature({
-          ...incoming,
-          content_attributes: {
-            email: {
-              ...incoming.content_attributes.email,
-              cc: ['partner@example.com'],
-            },
-          },
-        })
-      ).not.toBe(recipientSignature(incoming));
-    });
-
-    it('changes when an outgoing email is addressed elsewhere', () => {
-      expect(
-        recipientSignature({
-          ...outgoing,
-          content_attributes: {
-            ...outgoing.content_attributes,
-            to_emails: ['someone-else@example.com'],
-          },
-        })
-      ).not.toBe(recipientSignature(outgoing));
-    });
-
-    it('survives a missing message and a message with no attributes', () => {
-      expect(recipientSignature(undefined)).toBeNull();
-      expect(recipientSignature({ id: 1, message_type: 1 })).toBe(
-        recipientSignature({ id: 1, message_type: 1, content_attributes: {} })
-      );
     });
   });
 

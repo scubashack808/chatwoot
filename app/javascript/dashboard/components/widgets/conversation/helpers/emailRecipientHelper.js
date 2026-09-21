@@ -76,27 +76,6 @@ export const defaultFromAddress = (messages = [], options = []) => {
   return match || '';
 };
 
-// The only fields of a message that recipient derivation reads, plus its identity. A transport
-// update to an email already in the conversation, the source_id written back after a send or a
-// delivery status change, leaves every one of them untouched. Comparing this tells the composer
-// that nothing worth re-deriving from has changed, so it keeps what the agent has typed.
-export const recipientSignature = message => {
-  if (!message) return null;
-  const attributes = message.content_attributes || {};
-  const envelope = attributes.email || {};
-
-  return JSON.stringify([
-    message.id,
-    message.message_type,
-    envelope.from || [],
-    envelope.cc || [],
-    envelope.bcc || [],
-    attributes.to_emails || [],
-    attributes.cc_emails || [],
-    attributes.bcc_emails || [],
-  ]);
-};
-
 // Reply all: everyone the last email reached, minus the people already in To, minus its sender
 // (who is in To), minus anything of ours. Whatever the agent already typed into Cc is kept.
 export const replyAllCcAddresses = ({
