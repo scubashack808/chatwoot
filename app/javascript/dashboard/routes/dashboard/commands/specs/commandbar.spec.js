@@ -100,8 +100,11 @@ class NinjaKeysStub extends HTMLElement {
     this.openedWith = options;
   }
 
+  // Real ninja-keys dispatches `closed` synchronously from inside close(),
+  // which is what makes the ordering of the close override observable.
   close() {
     this.visible = false;
+    this.dispatchEvent(new CustomEvent('closed', { bubbles: true }));
   }
 }
 
@@ -345,6 +348,28 @@ describe('commandbar', () => {
       await emitClosed();
 
       expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('keeps the context menu conversation when the bar closes itself after a custom snooze', async () => {
+      await mountCommandBar();
+      await emitSelected({ id: 'until_custom_time' });
+
+      // ninja-keys closes itself here; the `closed` event comes from close().
+      element.close();
+      await flushPromises();
+
+      expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('clears the context menu conversation on a later close after a custom snooze', async () => {
+      await mountCommandBar();
+      await emitSelected({ id: 'until_custom_time' });
+      await emitClosed();
+      dispatch.mockClear();
+
+      await emitClosed();
+
+      expect(dispatch).toHaveBeenCalledWith('setContextMenuChatId', null);
     });
   });
 });

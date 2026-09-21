@@ -161,6 +161,7 @@ const buildDynamicSnoozeActions = (search, parentId) => {
 const resetSnoozeState = () => {
   currentCommandRoot.value = null;
   dynamicSnoozeActions.value = [];
+  selectedSnoozeType.value = null;
 };
 
 const patchNinjaKeysOpenClose = el => {
@@ -179,8 +180,11 @@ const patchNinjaKeysOpenClose = el => {
   };
 
   el.close = (...args) => {
+    // close() dispatches `closed` synchronously, and onClosed reads
+    // selectedSnoozeType, so the reset has to follow it.
+    const result = originalClose(...args);
     resetSnoozeState();
-    return originalClose(...args);
+    return result;
   };
 };
 
