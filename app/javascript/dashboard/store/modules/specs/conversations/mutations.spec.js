@@ -1364,6 +1364,54 @@ describe('deferred read ordering', () => {
     });
   });
 
+  it('still applies a pending read when a list refresh replaces the conversation', async () => {
+    mutations[types.ADD_MESSAGE](state, {
+      id: 10,
+      conversation_id: 1,
+      message_type: 0,
+      status: 'sent',
+      created_at: 201,
+      content: 'New synthetic message',
+      conversation: { unread_count: 2 },
+    });
+    ConversationApi.markMessageRead.mockResolvedValue({
+      data: { id: 1, agent_last_seen_at: 300 },
+    });
+
+    await readActions.markMessagesRead(context, { id: 1 });
+    // A refresh lands mid-window: reconnect, pagination or a filter change.
+    mutations[types.SET_ALL_CONVERSATION](state, [
+      { id: 1, agent_last_seen_at: 201, unread_count: 2 },
+    ]);
+    await vi.advanceTimersByTimeAsync(4000);
+
+    expect(state.allConversations[0]).toMatchObject({
+      unread_count: 0,
+      agent_last_seen_at: 300,
+    });
+  });
+
+  it('still drops a stale read when a list refresh replaces the conversation', async () => {
+    await readActions.markMessagesRead(context, { id: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    mutations[types.CLEAR_CURRENT_CHAT_WINDOW](state);
+    mutations[types.ADD_MESSAGE](state, {
+      id: 10,
+      conversation_id: 1,
+      message_type: 0,
+      status: 'sent',
+      created_at: 201,
+      content: 'New synthetic message',
+      conversation: { unread_count: 1 },
+    });
+    mutations[types.SET_ALL_CONVERSATION](state, [
+      { id: 1, agent_last_seen_at: 100, unread_count: 1 },
+    ]);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(state.allConversations[0].unread_count).toBe(1);
+  });
+
   it('drops a read whose unread state changed while the request was in flight', async () => {
     let resolveRead;
     ConversationApi.markMessageRead.mockReturnValue(

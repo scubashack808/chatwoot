@@ -48,21 +48,31 @@ export const mutations = {
       );
       if (indexInCurrentList < 0) {
         newAllConversations.push(conversation);
-      } else if (conversation.id !== _state.selectedChatId) {
+        return;
+      }
+      const existingConversation = newAllConversations[indexInCurrentList];
+      // The server payload carries no unread write stamp, so both replacement
+      // branches carry the local one over. Losing it here would make a read
+      // that is still in flight compare against a reset baseline.
+      const { unreadWriteSequence: existingSequence } = existingConversation;
+      if (conversation.id !== _state.selectedChatId) {
         // If the conversation is already in the list, replace it
         // Added this to fix the issue of the conversation not being updated
         // When reconnecting to the websocket. If the selectedChatId is not the same as
         // the conversation.id in the store, replace the existing conversation with the new one
-        newAllConversations[indexInCurrentList] = conversation;
+        newAllConversations[indexInCurrentList] = {
+          ...conversation,
+          unreadWriteSequence: existingSequence,
+        };
       } else {
         // If the conversation is already in the list and selectedChatId is the same,
         // replace all data except the messages array, attachments, dataFetched, allMessagesLoaded
-        const existingConversation = newAllConversations[indexInCurrentList];
         newAllConversations[indexInCurrentList] = {
           ...conversation,
           allMessagesLoaded: existingConversation.allMessagesLoaded,
           messages: existingConversation.messages,
           dataFetched: existingConversation.dataFetched,
+          unreadWriteSequence: existingSequence,
         };
       }
     });
