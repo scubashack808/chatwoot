@@ -1,5 +1,6 @@
 import {
   findPendingMessageIndex,
+  isSameMessage,
   applyPageFilters,
   filterByInbox,
   filterByTeam,
@@ -53,6 +54,34 @@ describe('#findPendingMessageIndex', () => {
     };
     const message = { echo_id: 2 };
     expect(findPendingMessageIndex(chat, message)).toEqual(-1);
+  });
+});
+
+// One message wears three shapes on its way out: the pending object, the server
+// response that replaces it, and the websocket frames that follow.
+describe('#isSameMessage', () => {
+  const echoId = 'c0ffee00-1111-2222-3333-444455556666';
+  const pending = { id: echoId, echo_id: echoId };
+  const response = { id: 4321, echo_id: echoId };
+  const update = { id: 4321, source_id: '<sent-4321@example.test>' };
+
+  it('matches the server response back onto the message it was sent as', () => {
+    expect(isSameMessage(pending, response)).toBe(true);
+  });
+
+  it('matches a later update that no longer carries the echo_id', () => {
+    expect(isSameMessage(response, update)).toBe(true);
+  });
+
+  it('matches a persisted message against a plain transport update', () => {
+    expect(isSameMessage({ id: 100 }, { id: 100, status: 'delivered' })).toBe(
+      true
+    );
+  });
+
+  it('does not match a different message', () => {
+    expect(isSameMessage(response, { id: 4322 })).toBe(false);
+    expect(isSameMessage({ id: 100 }, { id: 101 })).toBe(false);
   });
 });
 

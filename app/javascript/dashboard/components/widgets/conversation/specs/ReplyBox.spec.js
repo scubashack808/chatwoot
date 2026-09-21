@@ -2,6 +2,7 @@ import { shallowMount } from '@vue/test-utils';
 import { REPLY_EDITOR_MODES } from 'dashboard/components/widgets/WootWriter/constants';
 import { nextTick } from 'vue';
 import { createStore } from 'vuex';
+import { findPendingMessageIndex } from 'dashboard/store/modules/conversations/helpers';
 import ReplyBox from '../ReplyBox.vue';
 import WhatsappTemplates from '../WhatsappTemplates/Modal.vue';
 
@@ -51,6 +52,16 @@ const buildStore = ({
       selectChat: (s, c) => {
         s.chat = c;
       },
+      // Mirrors ADD_MESSAGE: an existing message is replaced in place by a new
+      // object, anything else is appended. It uses the store's own matching rule
+      // so the pending/echo_id round trip behaves here exactly as it does live.
+      addMessage: (s, message) => {
+        const messages = [...(s.chat.messages || [])];
+        const index = findPendingMessageIndex({ messages }, message);
+        if (index === -1) messages.push(message);
+        else messages[index] = message;
+        s.chat = { ...s.chat, messages };
+      },
       setReplyEditorMode: (s, mode) => {
         s.replyEditorMode = mode;
       },
@@ -69,7 +80,11 @@ const buildStore = ({
       getCurrentAccountId: () => 1,
       getMessageSignature: () => '',
       getUISettings: () => ({}),
-      getLastEmailInSelectedChat: () => null,
+      // Mirrors the real getter, so the composer's email watchers are exercised.
+      getLastEmailInSelectedChat: s =>
+        [...(s.chat.messages || [])]
+          .reverse()
+          .find(m => !m.private && [0, 1].includes(m.message_type)) || null,
       'globalConfig/get': () => ({}),
       'globalConfig/isMetaMessageSendingDisabled': () =>
         isMetaMessageSendingDisabled,
@@ -429,6 +444,196 @@ describe('ReplyBox', () => {
       expect(store.getters['draftMessages/getReplyEditorMode']).toBe(
         REPLY_EDITOR_MODES.NOTE
       );
+    });
+  });
+
+  // A reply that has been sent gets its source_id written back onto the same
+  // message. That update must not disturb the next reply the agent is writing.
+  describe('email recipients across message updates', () => {
+    const EMAIL_INBOX = {
+      channel_type: 'Channel::Email',
+      email: 'care@example.com',
+      aliases: ['reservations@example.com'],
+    };
+
+    const inboundFrom = (id, from) => ({
+      id,
+      message_type: 0,
+      private: false,
+      content_attributes: { email: { from: [from], cc: [], bcc: [] } },
+    });
+
+    const CUSTOMER_EMAIL = inboundFrom(100, 'customer@example.com');
+
+    const EDITS = {
+      toEmails: 'alternate@example.com',
+      ccEmails: 'crew@example.com',
+      bccEmails: 'records@example.com',
+      selectedFromEmail: 'reservations@example.com',
+    };
+
+    const emailHead = wrapper =>
+      wrapper.findComponent({ name: 'ReplyEmailHead' }).props();
+
+    const mountComposer = async () => {
+      const { wrapper, store } = mountWith({
+        inbox: EMAIL_INBOX,
+        chat: {
+          meta: { sender: { id: 2, email: 'customer@example.com' } },
+          messages: [CUSTOMER_EMAIL],
+        },
+      });
+      await nextTick();
+      return { wrapper, store };
+    };
+
+    const withEdits = async () => {
+      const { wrapper, store } = await mountComposer();
+      await wrapper.setData(EDITS);
+      return { wrapper, store };
+    };
+
+    it('starts from the last email and the inbox primary address', async () => {
+      const { wrapper } = await mountComposer();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: 'customer@example.com',
+        ccEmails: '',
+        bccEmails: '',
+        fromEmail: 'care@example.com',
+      });
+    });
+
+    it('shows what the agent typed', async () => {
+      const { wrapper } = await withEdits();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    // Sending commits twice: the pending message, whose id is a client uuid also
+    // copied to echo_id, then the server response carrying the real id and echoing
+    // echo_id back. findPendingMessageIndex matches the second onto the first, so
+    // one message changes id mid-flight. Sending also clears the composer, so what
+    // is at stake here is the reply the agent started writing next.
+    it('keeps the next reply recipients through the send round trip', async () => {
+      const { wrapper, store } = await mountComposer();
+      const echoId = 'e6f1c2d3-9a7b-4c5d-8e2f-1a3b5c7d9e0f';
+
+      store.commit('addMessage', {
+        id: echoId,
+        echo_id: echoId,
+        message_type: 1,
+        private: false,
+        status: 'progress',
+        content_attributes: {},
+        toEmails: 'customer@example.com',
+      });
+      await nextTick();
+
+      await wrapper.setData(EDITS);
+
+      store.commit('addMessage', {
+        id: 4321,
+        echo_id: echoId,
+        message_type: 1,
+        private: false,
+        status: 'sent',
+        content_attributes: {
+          to_emails: ['customer@example.com'],
+          cc_emails: [],
+          bcc_emails: [],
+        },
+      });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    // The websocket frame that follows a send carries no echo_id, since echo_id is
+    // only ever set on the object that created it and is never persisted.
+    it('keeps the next reply recipients through the update that follows a send', async () => {
+      const { wrapper, store } = await mountComposer();
+      const sent = {
+        id: 4321,
+        message_type: 1,
+        private: false,
+        content_attributes: {
+          to_emails: ['customer@example.com'],
+          cc_emails: [],
+          bcc_emails: [],
+        },
+      };
+
+      store.commit('addMessage', { ...sent, status: 'sent' });
+      await nextTick();
+
+      await wrapper.setData(EDITS);
+
+      store.commit('addMessage', {
+        ...sent,
+        status: 'delivered',
+        source_id: '<sent-4321@example.test>',
+      });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    it('keeps the unsent recipients when the delivery status changes', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('addMessage', { ...CUSTOMER_EMAIL, status: 'delivered' });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: EDITS.toEmails,
+        ccEmails: EDITS.ccEmails,
+        bccEmails: EDITS.bccEmails,
+        fromEmail: EDITS.selectedFromEmail,
+      });
+    });
+
+    it('still follows a genuinely new email into the conversation', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('addMessage', inboundFrom(101, 'another@example.com'));
+      await nextTick();
+
+      expect(emailHead(wrapper).toEmails).toBe('another@example.com');
+    });
+
+    it('still initialises from scratch on a different conversation', async () => {
+      const { wrapper, store } = await withEdits();
+
+      store.commit('selectChat', {
+        ...REPLIABLE,
+        id: 2,
+        meta: { sender: { id: 3, email: 'second@example.com' } },
+        messages: [inboundFrom(200, 'second@example.com')],
+      });
+      await nextTick();
+
+      expect(emailHead(wrapper)).toMatchObject({
+        toEmails: 'second@example.com',
+        ccEmails: '',
+        bccEmails: '',
+        fromEmail: 'care@example.com',
+      });
     });
   });
 });

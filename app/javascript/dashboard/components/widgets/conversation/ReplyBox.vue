@@ -16,6 +16,7 @@ import {
   sanitizeRecipients,
   replyAllCcAddresses,
 } from './helpers/emailRecipientHelper';
+import { isSameMessage } from 'dashboard/store/modules/conversations/helpers';
 import ReplyBottomPanel from 'dashboard/components/widgets/WootWriter/ReplyBottomPanel.vue';
 import CopilotReplyBottomPanel from 'dashboard/components/widgets/WootWriter/CopilotReplyBottomPanel.vue';
 import ArticleSearchPopover from 'dashboard/routes/dashboard/helpcenter/components/ArticleSearch/SearchPopover.vue';
@@ -556,9 +557,16 @@ export default {
     // This watcher handles two main cases:
     // 1. When switching conversations and messages are fetched/updated, ensures CC/BCC fields are set from the latest OUTGOING/INCOMING email (not activity/private messages).
     // 2. Fixes and issue where CC/BCC fields could be reset/lost after assignment/activity actions or message mutations that did not represent a true email context change.
+    // ADD_MESSAGE replaces a message in place with a new object, so this also fires
+    // when the last email is merely updated: the server response landing on the
+    // message just sent, the source_id written back after delivery, a status change.
+    // None of those is a new email to reply to, and re-deriving would throw away the
+    // addresses the agent has typed for their next reply. Only follow a genuinely
+    // different message.
     lastEmail: {
-      handler(lastEmail) {
+      handler(lastEmail, previousEmail) {
         if (!lastEmail) return;
+        if (previousEmail && isSameMessage(previousEmail, lastEmail)) return;
         this.setCCAndToEmailsFromLastChat();
       },
       deep: true,
