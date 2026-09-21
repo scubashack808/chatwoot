@@ -550,6 +550,47 @@ describe('EmailQuoteExtractor', () => {
     });
   });
 
+  // The server strips height: 100% / height="100%" from the served body so the mobile app's
+  // auto-height WebView stops being asked to fill its viewport. The dashboard receives that same
+  // normalised body, and quote detection keys off classes and blockquotes rather than geometry,
+  // so collapsing must behave identically. This case exists to keep it that way.
+  describe('server-normalised body', () => {
+    const normalisedHtml = [
+      '<div dir="ltr">Yes, 9am works for us.</div>',
+      '<div class="gmail_quote">',
+      '<div dir="ltr" class="gmail_attr">On Tue, Aug 12, 2026 at 4:02 PM Extended Horizons wrote:</div>',
+      '<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px solid #ccc">',
+      '<table width="100%" style="background: #f4f4f4">',
+      '<tr><td>Guided Shore Dive on Wednesday, August 19 at 9:00am</td></tr>',
+      '</table></blockquote></div>',
+    ].join('');
+
+    it('still collapses the quote and keeps the fresh reply', () => {
+      const renderableHtml =
+        EmailQuoteExtractor.prepareForRender(normalisedHtml);
+      const renderedHtml = EmailQuoteExtractor.extractQuotes(
+        renderableHtml,
+        {}
+      );
+
+      expect(renderedHtml).toContain('Yes, 9am works for us.');
+      expect(renderedHtml).not.toContain(
+        'Guided Shore Dive on Wednesday, August 19 at 9:00am'
+      );
+      expect(EmailQuoteExtractor.hasQuotes(renderableHtml, {})).toBe(true);
+    });
+
+    it('keeps the quoted history reachable in the full body', () => {
+      const renderableHtml =
+        EmailQuoteExtractor.prepareForRender(normalisedHtml);
+
+      expect(renderableHtml).toContain(
+        'Guided Shore Dive on Wednesday, August 19 at 9:00am'
+      );
+      expect(renderableHtml).toContain('background: #f4f4f4');
+    });
+  });
+
   it('removes blockquote-based quotes from the email body', () => {
     const cleanedHtml = EmailQuoteExtractor.extractQuotes(SAMPLE_EMAIL_HTML);
 
