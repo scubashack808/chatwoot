@@ -1,0 +1,28 @@
+test_pasted_file_preview_is_detected_without_body_or_file_input (__main__.AttachmentDOMTests) ... ok
+test_draft_blocks_every_navigation_logout_and_input (__main__.BrowserTests) ... ok
+test_enabled_telemetry_prevents_browser_launch (__main__.BrowserTests) ... ok
+test_evidence_write_failure_still_releases_browser (__main__.BrowserTests) ... ok
+test_native_boolean_wait (__main__.BrowserTests) ... ok
+test_telemetry_disabled_and_caller_stable (__main__.BrowserTests) ... ok
+test_timeout_preserves_output_and_releases_same_caller (__main__.BrowserTests) ... ok
+test_all_ready_gates_pass (__main__.DoctorTests) ... ok
+test_external_urls_refused_before_network (__main__.DoctorTests) ... ok
+test_fixture_refusal_cannot_pass (__main__.DoctorTests) ... ok
+test_redirect_refused (__main__.DoctorTests) ... ok
+test_stopped_site_precedes_http_and_database (__main__.DoctorTests) ... ok
+test_wrong_candidate_precedes_services (__main__.DoctorTests) ... ok
+test_extra_persisted_content_fails (__main__.LifecycleTests) ... ok
+test_partial_first_start_cleaned (__main__.LifecycleTests) ... ok
+test_partial_restore_start_cleaned (__main__.LifecycleTests) ... ok
+test_preflight_refusal_leaves_services_untouched (__main__.LifecycleTests) ... ok
+test_restore_doctor_refusal_cleaned (__main__.LifecycleTests) ... ok
+test_success_restores_running_state_and_preserves_proof (__main__.LifecycleTests) ... ok
+test_ancestry (__main__.OwnershipTests) ... ok
+test_partial_startup_inspection_does_not_require_healthy_services (__main__.OwnershipTests) ... ok
+test_substituted_worker_rejected (__main__.OwnershipTests) ... ok
+test_unrelated_listener_rejected_even_with_same_directory (__main__.OwnershipTests) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 0.684s
+
+OK

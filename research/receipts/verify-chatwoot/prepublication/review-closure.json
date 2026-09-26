@@ -1,0 +1,24 @@
+{
+  "initial_review": {
+    "verdict": "blockers found; retained and corrected"
+  },
+  "recheck": {
+    "closed": [
+      "credential telemetry",
+      "timeout and evidence-write browser release",
+      "failed restoration cleanup",
+      "supervisor/listener/worker identity",
+      "exact persisted message proof"
+    ],
+    "remaining_at_that_review": "pasted-file attachment selector did not match real DOM",
+    "live_receipt_reviewed": "20260924T231416538558Z, unsuccessful; later successful pilots are separate"
+  },
+  "attachment_closure": {
+    "verdict": "closed",
+    "tests_passed": 23,
+    "scope": "corrected selector matches actual AttachmentsPreview container under .reply-box__top; pasted-file-only state is rejected before navigation/logout",
+    "blocking_findings": [],
+    "live_pilot_assessed_by_child": false
+  },
+  "final_scope": "All originally reported findings closed through the two bounded re-reviews; parent independently verified the final native pilot."
+}

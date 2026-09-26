@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "expected_sha": "0000000000000000000000000000000000000000",
+  "runtime": "~/Cursor/chatwoot-dummy",
+  "check": "candidate",
+  "error": "Candidate mismatch: expected 0000000000000000000000000000000000000000, found d76b96565762a2b491fa444e9870ee216d9f63ca"
+}

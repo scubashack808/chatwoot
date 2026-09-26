@@ -1,0 +1,12 @@
+{
+  "SKILL.md": "405a73e5c9fe3c47cf6a674848422c40ba6a9ae35769ed7f21931e7f30ce6166",
+  "features/email-reply.md": "1a635792fda94282c1169d664b9f03d3020d9bb3ad853084444d9eb7e589088e",
+  "features/login.md": "026f89890e8da6a068762c86e1075b92828ce0b0f5e79f56cfe1f39d7ca87f4b",
+  "features/draft-addressing.md": "76ff924fe03d900b7a75e0a9ed50b0b0af596f92ac37b91b65f91eb52a9eb2a4",
+  "features/README.md": "f5f7f3a52a50568011ae9af4d714a516369f1db3af9f2de0cda03f4355a6534e",
+  "features/unread.md": "fe2a01c7620a42ded86f1a7abf5ecd95c989330a56a9d69d14d9449b5d040e6d",
+  "features/snooze.md": "5c6a66b2fd0c629e3b0e1a612378ed24c3570e7cfcbf50de051499322174ef52",
+  "scripts/mail_flow.py": "15e6be2facf3400832db84074349f27cf9ba9b432db35f2d430986f2b43b75bf",
+  "scripts/verify.py": "b76693d0f99cfb8e15e98e91acd1abe5b13141e69a0bbe6aceb37ccf52f5d492",
+  "scripts/inspect_fixture.rb": "507aeab9ec90cf16d34b9bcdbe9bc28bb1760d504f99d35beb2ce31698e37dbb"
+}

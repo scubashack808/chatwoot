@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "expected_sha": "d76b96565762a2b491fa444e9870ee216d9f63ca",
+  "runtime": "~/Cursor/chatwoot-dummy",
+  "check": "owned-services",
+  "actual_sha": "d76b96565762a2b491fa444e9870ee216d9f63ca",
+  "error": "Dummy supervisor is down"
+}
