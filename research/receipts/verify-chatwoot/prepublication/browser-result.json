@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "marker": "Verify Chatwoot 20260924t232811720954z",
+  "url": "http://127.0.0.1:3001/app/accounts/1/conversations/3",
+  "mail_id": "7MvHqgwu8Fuo9dqLGcoOVq",
+  "wrong_password_rejected": true,
+  "ui_login": true
+}

@@ -1,0 +1,17 @@
+{
+  "ID": "7MvHqgwu8Fuo9dqLGcoOVq",
+  "From": {
+    "Name": "Dummy Agent from Dummy Email",
+    "Address": "support@chatwoot-dummy.test"
+  },
+  "To": [
+    {
+      "Name": "",
+      "Address": "customer@chatwoot-dummy.test"
+    }
+  ],
+  "Cc": [],
+  "Bcc": [],
+  "Subject": "Re: Dummy booking question",
+  "Text": "Verify Chatwoot 20260924t232811720954z"
+}

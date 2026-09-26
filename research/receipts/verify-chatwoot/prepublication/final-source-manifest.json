@@ -1,0 +1,46 @@
+{
+  "SKILL.md": {
+    "sha256": "405a73e5c9fe3c47cf6a674848422c40ba6a9ae35769ed7f21931e7f30ce6166",
+    "mode": "0o600"
+  },
+  "features/email-reply.md": {
+    "sha256": "1a635792fda94282c1169d664b9f03d3020d9bb3ad853084444d9eb7e589088e",
+    "mode": "0o600"
+  },
+  "features/login.md": {
+    "sha256": "026f89890e8da6a068762c86e1075b92828ce0b0f5e79f56cfe1f39d7ca87f4b",
+    "mode": "0o600"
+  },
+  "features/draft-addressing.md": {
+    "sha256": "76ff924fe03d900b7a75e0a9ed50b0b0af596f92ac37b91b65f91eb52a9eb2a4",
+    "mode": "0o600"
+  },
+  "features/README.md": {
+    "sha256": "f5f7f3a52a50568011ae9af4d714a516369f1db3af9f2de0cda03f4355a6534e",
+    "mode": "0o600"
+  },
+  "features/unread.md": {
+    "sha256": "fe2a01c7620a42ded86f1a7abf5ecd95c989330a56a9d69d14d9449b5d040e6d",
+    "mode": "0o600"
+  },
+  "features/snooze.md": {
+    "sha256": "5c6a66b2fd0c629e3b0e1a612378ed24c3570e7cfcbf50de051499322174ef52",
+    "mode": "0o600"
+  },
+  "tests/test_verify.py": {
+    "sha256": "e01854b6aa76b5e453254d9f9690f2d376a3fe5f4e6025c06b5e7d04e6774bfe",
+    "mode": "0o755"
+  },
+  "scripts/inspect_fixture.rb": {
+    "sha256": "507aeab9ec90cf16d34b9bcdbe9bc28bb1760d504f99d35beb2ce31698e37dbb",
+    "mode": "0o755"
+  },
+  "scripts/mail_flow.py": {
+    "sha256": "15e6be2facf3400832db84074349f27cf9ba9b432db35f2d430986f2b43b75bf",
+    "mode": "0o755"
+  },
+  "scripts/verify.py": {
+    "sha256": "b76693d0f99cfb8e15e98e91acd1abe5b13141e69a0bbe6aceb37ccf52f5d492",
+    "mode": "0o755"
+  }
+}

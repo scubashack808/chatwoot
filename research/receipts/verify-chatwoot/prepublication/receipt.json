@@ -1,0 +1,22 @@
+{
+  "run_id": "20260924T232811720954Z",
+  "marker": "Verify Chatwoot 20260924t232811720954z",
+  "ok": true,
+  "was_running": true,
+  "source_head": "d76b96565762a2b491fa444e9870ee216d9f63ca",
+  "candidate": "d76b96565762a2b491fa444e9870ee216d9f63ca",
+  "evidence": "~/Cursor/chatwoot-scubashack808/tmp/verify-chatwoot/20260924T232811720954Z",
+  "claim": "native synthetic login and outbound UI-reply pilot",
+  "limits": [
+    "seeded inbound, no IMAP round trip",
+    "no native phone or regression-suite claim",
+    "local provisioned runtime required; no arbitrary-agent isolation",
+    "synthetic sent message and captured email retained; no reset or deletion"
+  ],
+  "phase": "finished",
+  "stopped_after_run": true,
+  "shared_services_unchanged": true,
+  "restored_running": true,
+  "evidence_survived_cleanup": true,
+  "proof_artifacts_complete": true
+}

@@ -104,3 +104,19 @@ CLAUDE.local.md
 .pnpm-store/*
 local/
 Procfile.worktree
+
+# Repository-owned verification skill; keep all other editor/agent state private.
+!/.cursor/
+/.cursor/*
+!/.cursor/skills/
+/.cursor/skills/*
+!/.cursor/skills/verify-chatwoot/
+!/.cursor/skills/verify-chatwoot/**
+/.cursor/skills/verify-chatwoot/**/.env*
+/.cursor/skills/verify-chatwoot/**/*.log
+/.cursor/skills/verify-chatwoot/**/__pycache__/
+!/.claude/
+/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/verify-chatwoot

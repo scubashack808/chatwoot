@@ -1,0 +1,71 @@
+{
+  "historical_run": "20260924T232811720954Z",
+  "purpose": "retained prepublication context, not exact-PR-head proof",
+  "files": {
+    "receipt.json": {
+      "source_sha256": "c7f39d502eeb272df8bf0e9648a4e52d8cdf9c355eca2bb4272b0e39ce35bc2c",
+      "published_sha256": "f0cba0b78923a4d88094e080d8c5b363991b7aaac63ec82001d301a5dcb40037",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "doctor-stopped.json": {
+      "source_sha256": "1057b562d2e7a51776c8c426c7d8754b636073e8eef5f8f7e04669a56cee4eff",
+      "published_sha256": "45344f9b7d6599846f87b6f838998047af2a04f7fc8d7566a5d1a6df4f1fee3c",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "doctor-wrong-candidate.json": {
+      "source_sha256": "81fd59e5e2c78453c7ec24984aed888a0a5e05dd7e22957e9c0632c798de0915",
+      "published_sha256": "50ab1ff4fc8341a2f5c5307a786760f814089bbb5ed8fa1643559de3bcde735b",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "doctor-wrong-candidate-cli.json": {
+      "source_sha256": "9c36fe27c9aeff338715a156eac1b6b2c3401d56924db1427faddd21da00e069",
+      "published_sha256": "ae0523b44183d072956c17f4c75821f5f86ab3a864129530572d7ba881889bd8",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "browser-result.json": {
+      "source_sha256": "a404b890ace84f4c28c75ef7b2a29899f783080fc765ff5052e2524290b7361f",
+      "published_sha256": "f77a3a0af8e38d1302edb4811b51cde8c3abdfa24bffa480a09d92f49cba041d",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "browser-privacy.json": {
+      "source_sha256": "50bf7282acf52f64caecc2d9fb2cda4e13417e764940a1098beffdd7783ef903",
+      "published_sha256": "50bf7282acf52f64caecc2d9fb2cda4e13417e764940a1098beffdd7783ef903",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "persisted-message.json": {
+      "source_sha256": "59ccb78fec025aec2a8d4d8da145c83aa78d37e58c221aaebe9e9c3d16224070",
+      "published_sha256": "59ccb78fec025aec2a8d4d8da145c83aa78d37e58c221aaebe9e9c3d16224070",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "skill-hashes.json": {
+      "source_sha256": "3af59fa089d0871facdf332e14b18d0fda58e7593e07a39ec134f3f2b3a3e95c",
+      "published_sha256": "3af59fa089d0871facdf332e14b18d0fda58e7593e07a39ec134f3f2b3a3e95c",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "final-source-manifest.json": {
+      "source_sha256": "2fd477ec78147fe2c30df620eda4a64062e17d247d7897ca4ef17a63876dc0bd",
+      "published_sha256": "eec1c1f37840ea36e3ab8f127978dde27bf54e9b01cd3e526040b5668c835f7a",
+      "transformation": "home path replaced; browser/session identifiers omitted where present"
+    },
+    "captured-email.json": {
+      "source_sha256": "0b6754643cc5bcddfe24834a057acbd7fcc1fd65ebba17f3d224bfd6df03bf47",
+      "published_sha256": "fe9f1f35924805b9e13e17a1e5f4235d8cfce74132dfa028e37c725937dd6dc1",
+      "transformation": "only synthetic delivery identity, recipients, subject and text retained"
+    },
+    "focused-tests.txt": {
+      "source_sha256": "8b64cfa87ee44a1636621b83b30162523cd697406051f913bbc3648e26d48dcb",
+      "published_sha256": "8b64cfa87ee44a1636621b83b30162523cd697406051f913bbc3648e26d48dcb",
+      "transformation": "home path replaced if present"
+    },
+    "06-after-cleanup.png": {
+      "source_sha256": "19dc9e20455a2ea0cef253050ebfa9897b2c862c081a88dfbf5028924c8e0e1e",
+      "published_sha256": "19dc9e20455a2ea0cef253050ebfa9897b2c862c081a88dfbf5028924c8e0e1e",
+      "transformation": "unchanged viewport screenshot; visually inspected synthetic content only"
+    },
+    "review-closure.json": {
+      "source_sha256": "20c15a23a0e2b70b1be1278c6cff666903f721c4d37ceab2cdf5376472962c5d",
+      "published_sha256": "37e9591b40a51ca408faf23182d1c08553c568d59bbeee243abf3e55c3abaf74",
+      "transformation": "private agent run identifiers omitted"
+    }
+  }
+}
