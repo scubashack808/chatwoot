@@ -26,6 +26,7 @@ REQUEST_TIMEOUT = 10
 EDITOR = 'div.ProseMirror[contenteditable="true"]'
 LOGIN_EMAIL = 'input[name="email_address"]'
 LOGIN_PASSWORD = 'input[name="password"]'
+LOGIN_URL = SITE + '/app/login'
 DASHBOARD = f"{SITE}/app/accounts/{FIXTURE['account_id']}/dashboard" if FIXTURE else None
 CONVERSATION = f"{SITE}/app/accounts/{FIXTURE['account_id']}/conversations/{FIXTURE['display_id']}" if FIXTURE else None
 
@@ -91,7 +92,7 @@ def fill_login(selector, value):
 
 def reject_draft_state(state):
     if state['stored_drafts'] or state['editor_draft'] or state['attachments'] or state['unexpected_inputs']:
-        raise RuntimeError('Existing draft, addressing or attachment state found; no navigation/logout/input allowed')
+        raise RuntimeError('Existing draft, addressing or attachment state, or an uninspectable composer; no navigation/logout/input allowed')
 
 def guard_existing_drafts():
     # Actual AttachmentsPreview container mounted under ReplyBox. The DOM test
@@ -101,14 +102,29 @@ def guard_existing_drafts():
       const raw=localStorage.getItem('draftMessages');
       const drafts=raw?JSON.parse(raw):{};
       if(!drafts||typeof drafts!=='object'||Array.isArray(drafts))throw Error('Unrecognized draft storage');
-      const allowed=['','customer@chatwoot-dummy.test','support@chatwoot-dummy.test','agent@chatwoot-dummy.test'];
+      const customer='customer@chatwoot-dummy.test', sender='support@chatwoot-dummy.test';
+      const headers={TO:[customer],FROM:[sender],CC:['',customer],BCC:['']};
+      const headerLabel=e=>e.querySelector('.input-group-label')?.textContent.trim().toUpperCase();
+      const unreadableComposer=[...document.querySelectorAll('.reply-box')].some(box=>
+        ![...box.querySelectorAll('.input-group')].some(group=>headerLabel(group)==='CC'&&group.querySelector('input')?.checkVisibility()));
+      const unexpectedInput=e=>{
+        if(['checkbox','radio','file','hidden','submit','button'].includes(e.type))return false;
+        const group=e.closest('.reply-box .input-group');
+        if(group){
+          const expected=headers[headerLabel(group)];
+          return !expected||!expected.includes(e.value);
+        }
+        if(!e.checkVisibility())return false;
+        if(e.value==='')return false;
+        return !(location.href===LOGIN_URL_VALUE&&e.matches(LOGIN_EMAIL_SELECTOR)&&e.value==='agent@chatwoot-dummy.test');
+      };
       return {
         stored_drafts:Object.values(drafts).some(v=>v!=null&&(typeof v!=='string'||Boolean(v.trim()))),
         editor_draft:[...document.querySelectorAll('[contenteditable=true]')].some(e=>Boolean(e.innerText.trim())||Boolean(e.querySelector('img,video,audio'))),
         attachments:[...document.querySelectorAll('input[type=file]')].some(e=>e.files.length>0)||Boolean(document.querySelector(ATTACHMENT_SELECTOR)),
-        unexpected_inputs:[...document.querySelectorAll('input,select')].filter(e=>e.checkVisibility()&&!['checkbox','radio','file','hidden','submit','button'].includes(e.type)).some(e=>!allowed.includes(e.value))
+        unexpected_inputs:unreadableComposer||[...document.querySelectorAll('input,select')].some(unexpectedInput)
       };
-    })())'''.replace('ATTACHMENT_SELECTOR', json.dumps(attachment_preview))))
+    })())'''.replace('ATTACHMENT_SELECTOR', json.dumps(attachment_preview)).replace('LOGIN_EMAIL_SELECTOR', json.dumps(LOGIN_EMAIL)).replace('LOGIN_URL_VALUE', json.dumps(LOGIN_URL))))
     reject_draft_state(state)
     record('draft preflight passed', **state)
 
@@ -121,7 +137,7 @@ try:
         raise RuntimeError('Exactly discovered target is absent; rediscover instead of opening another tab')
     tab = matches[0]
     result['discovered_target'] = {key: tab.get(key) for key in ('targetId', 'title', 'url', 'profile', 'ownership')}
-    allowed = {SITE + '/app/login', DASHBOARD, CONVERSATION}
+    allowed = {LOGIN_URL, DASHBOARD, CONVERSATION}
     if CONFIG.get('mode') == 'preflight' and re.fullmatch(re.escape(SITE) + r'/app/accounts/[0-9]+/(dashboard|conversations/[0-9]+)', tab['url']):
         allowed.add(tab['url'])
     approved_tab = CONFIG.get('approved_tab', {})

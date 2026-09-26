@@ -26,7 +26,7 @@ This PR does **not** provision a fresh clone. The approved host, adjacent `~/Cur
 ## Replay on the admitted runtime
 
 1. Read `.cursor/skills/verify-chatwoot/SKILL.md` and its linked feature map. Read the installed browser rules and runtime contract before browser work.
-2. Run `python3 -B .cursor/skills/verify-chatwoot/tests/test_verify.py`. Expected: 23 focused tests, including a real-template DOM attachment check and refusal-before-navigation cases. The tests use mocks or a detached DOM, not real service mutations.
+2. Run `python3 -B .cursor/skills/verify-chatwoot/tests/test_verify.py`. Expected: 29 focused tests, including real-template DOM attachment/address checks and refusal-before-navigation/restart cases. The tests use mocks or a detached DOM, not real service mutations.
 3. Run `python3 -B .cursor/skills/verify-chatwoot/scripts/verify.py doctor`. Expected: `ok: true`, exact application candidate and synthetic fixture.
 4. Discover the authorized synthetic tab through the governed driver with process-scoped `BH_TELEMETRY=0`; use its observed target ID. Never select a fuzzy match or another caller’s tab.
 5. Run `python3 -B .cursor/skills/verify-chatwoot/scripts/verify.py pilot --target-id "$CHATWOOT_TARGET_ID" --restart-existing` only when a dummy-only restart is authorized and no other operator is using it. The pilot covers UI login/reply, local delivery, persistence, stopped-stack and wrong-candidate controls, cleanup and restoration. It retains one synthetic outgoing message and email.
@@ -41,6 +41,12 @@ Do not alter a draft, reset the fixture, disable a gate or replay an unknown Sen
 Public copies replace the local home path, remove browser target/profile ownership metadata and omit private configuration, personal documents, Plane payloads and raw browser logs. A manifest records source and published hashes. Sanitization does not turn old evidence into exact-commit evidence. The PR body records the **fresh checks on its exact head**, their actual results and any unmet terms; the retained historical bundle is supporting context.
 
 Prior independent review found telemetry, draft, timeout/release, partial-restoration, process-identity and substring-proof defects. The corrections were checked in separate reviews. The final attachment review ran all 23 tests and confirmed that a pasted-file-only preview is rejected before navigation/logout. That review did not assess the parent-run live pilot. A new independent review covers the published candidate and PR claim.
+
+## Publication-review correction
+
+After the first committed candidate (`4447af5bf19d8d67d6c9fa4b29855ed9dc96a368`) passed its happy-path checks, an independent PR review reproduced address-only draft loss: the former global value whitelist admitted a customer address in Bcc or the sender in Cc before reload. That finding violated the existing preservation claim. The acceptance claim was retained; the guard was corrected.
+
+The updated preflight classifies values by the real email-header labels, admits the fixture login email only in its login-page field, and refuses a composer whose addressing is hidden/uninspectable. Detached DOM tests use the pinned header template and English labels. Their actual detection results feed browser and lifecycle tests requiring zero navigation/input and zero service actions for both reported cases. Nested `.env*`, logs and Python caches remain ignored inside the skill source. Final-candidate checks and independent closure are recorded in the PR body; the earlier receipts keep their original outcomes.
 
 ## Explicitly outside acceptance
 

@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import subprocess
@@ -16,6 +17,76 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import verify
+
+FLOW_TREE = ast.parse((verify.SCRIPT_DIR / 'mail_flow.py').read_text())
+DRAFT_NODES = [node for node in FLOW_TREE.body if
+               (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in ('SITE', 'LOGIN_EMAIL', 'LOGIN_URL') for target in node.targets)) or
+               (isinstance(node, ast.FunctionDef) and node.name in ('reject_draft_state', 'guard_existing_drafts'))]
+HEADER_VALUES = {'FROM': 'support@chatwoot-dummy.test', 'TO': 'customer@chatwoot-dummy.test', 'CC': '', 'BCC': ''}
+AGENT_EMAIL = 'agent@chatwoot-dummy.test'
+BLOCKING_DRAFT_CASES = [{'headers': {'BCC': HEADER_VALUES['TO']}}, {'headers': {'CC': HEADER_VALUES['FROM']}}]
+
+def address_draft_states(cases):
+    clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+    driver = MagicMock(return_value=json.dumps(clear))
+    env = {'json': json, 'js': driver, 'record': MagicMock()}
+    exec(compile(ast.Module(body=DRAFT_NODES, type_ignores=[]), 'mail_flow.py', 'exec'), env)
+    env['guard_existing_drafts']()
+    component = verify.SOURCE / 'app/javascript/dashboard/components/widgets/conversation/ReplyEmailHead.vue'
+    template = component.read_text().split('<template>', 1)[1].rsplit('</template>', 1)[0]
+    reply_box = (component.parent / 'ReplyBox.vue').read_text()
+    assert 'class="reply-box"' in reply_box and 'showReplyHead && isDefaultEditorMode' in reply_box
+    locale = json.loads((verify.SOURCE / 'app/javascript/dashboard/i18n/locale/en/conversation.json').read_text())
+    node = r'''
+const {JSDOM} = require('jsdom');
+const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const results = input.cases.map(test => {
+  const headers = test.without_headers ? '' : input.template;
+  const html = test.composer === false ? '' : '<div class="reply-box"><div class="reply-box__top">' + headers + '</div></div>';
+  const dom = new JSDOM(html, {url: test.url || input.origin + '/app/accounts/1/conversations/3'});
+  const {document, localStorage, location} = dom.window;
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'innerText', {get() {return this.textContent;}});
+  dom.window.HTMLElement.prototype.checkVisibility = function() {return this.dataset.hidden !== 'true';};
+  // Resolve labels from the actual Vue template and pinned English locale.
+  for (const label of document.querySelectorAll('.input-group-label')) {
+    const key = label.textContent.split("'")[1];
+    label.textContent = key.split('.').reduce((value, part) => value[part], input.locale);
+  }
+  // WootInput renders an input; retain the real mount and label classes.
+  for (const component of document.querySelectorAll('woot-input')) {
+    const field = document.createElement('input');
+    field.type = component.getAttribute('type');
+    component.replaceWith(field);
+  }
+  const values = Object.assign({}, input.values, test.headers || {});
+  for (const group of document.querySelectorAll('.input-group')) {
+    const label = group.querySelector('.input-group-label').textContent.trim().toUpperCase();
+    if ((test.omit_headers || []).includes(label)) {group.remove(); continue;}
+    const field = group.querySelector('input,select');
+    if (field.tagName === 'SELECT') field.replaceChildren(new dom.window.Option(values[label], values[label]));
+    field.value = values[label];
+    if ((test.hidden_headers || []).includes(label)) field.dataset.hidden = 'true';
+  }
+  document.body.insertAdjacentHTML('beforeend', test.extra_html || '');
+  const state = JSON.parse(eval(input.expression));
+  dom.window.close();
+  return state;
+});
+process.stdout.write(JSON.stringify(results));
+'''
+    result = subprocess.run(['node', '-e', node], cwd=verify.ROOT,
+                            input=json.dumps({'template': template, 'locale': locale, 'expression': driver.call_args[0][0], 'origin': verify.SITE, 'values': HEADER_VALUES, 'cases': cases}),
+                            capture_output=True, text=True, timeout=verify.HTTP_TIMEOUT, check=True)
+    return json.loads(result.stdout)
+
+def rejected_browser_state(state, mode='journey'):
+    tab = {'targetId': 'owned-test', 'title': 'Chatwoot Dummy', 'url': verify.SITE + '/app/login', 'profile': 'Profile 14', 'ownership': 'unowned'}
+    main = next(node for node in FLOW_TREE.body if isinstance(node, ast.Try))
+    with tempfile.TemporaryDirectory() as temp:
+        env = {'json': json, 're': re, 'CONFIG': {'target_id': 'owned-test', 'mode': mode}, 'DASHBOARD': 'unused', 'CONVERSATION': 'unused', 'OUT': Path(temp), 'result': {'ok': False}, 'adopted': False, 'PreflightComplete': type('PreflightComplete', (Exception,), {}), 'discover_tabs': MagicMock(return_value=[tab]), 'adopt_tab': MagicMock(), 'record': MagicMock(), 'js': MagicMock(return_value=json.dumps(state)), 'snapshot': MagicMock(), 'release_caller': MagicMock()}
+        env.update({name: MagicMock() for name in ('cdp', 'click_control', 'fill_login', 'fill_input', 'press_key')})
+        exec(compile(ast.Module(body=DRAFT_NODES + [main], type_ignores=[]), 'mail_flow.py', 'exec'), env)
+    return env
 
 class DoctorTests(unittest.TestCase):
     def test_wrong_candidate_precedes_services(self):
@@ -113,7 +184,7 @@ class BrowserTests(unittest.TestCase):
 
     def test_draft_blocks_every_navigation_logout_and_input(self):
         tree = ast.parse((verify.SCRIPT_DIR / 'mail_flow.py').read_text())
-        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('reject_draft_state', 'guard_existing_drafts')]
+        functions = DRAFT_NODES
         main = next(n for n in tree.body if isinstance(n, ast.Try))
         site = 'http://127.0.0.1:3001'
         tab = {'targetId': 'owned-test', 'title': 'Chatwoot Dummy', 'url': site + '/app/login', 'profile': 'Profile 14', 'ownership': 'unowned'}
@@ -130,6 +201,17 @@ class BrowserTests(unittest.TestCase):
                 env['release_caller'].assert_called_once()
                 self.assertIn("localStorage.getItem('draftMessages')", env['js'].call_args[0][0])
 
+    def test_field_aware_address_drafts_block_browser_mutation(self):
+        for state in address_draft_states(BLOCKING_DRAFT_CASES):
+            with self.subTest(state=state):
+                self.assertTrue(state['unexpected_inputs'])
+                env = rejected_browser_state(state)
+                self.assertFalse(env['result']['ok'])
+                self.assertIn('Existing draft', env['result']['error'])
+                for name in ('cdp', 'click_control', 'fill_login', 'fill_input', 'press_key'):
+                    env[name].assert_not_called()
+                env['release_caller'].assert_called_once()
+
     def test_evidence_write_failure_still_releases_browser(self):
         tree = ast.parse((verify.SCRIPT_DIR / 'mail_flow.py').read_text())
         main = next(n for n in tree.body if isinstance(n, ast.Try))
@@ -142,7 +224,7 @@ class BrowserTests(unittest.TestCase):
 class AttachmentDOMTests(unittest.TestCase):
     def test_pasted_file_preview_is_detected_without_body_or_file_input(self):
         tree = ast.parse((verify.SCRIPT_DIR / 'mail_flow.py').read_text())
-        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('reject_draft_state', 'guard_existing_drafts')]
+        functions = DRAFT_NODES
         clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
         driver = MagicMock(return_value=json.dumps(clear))
         env = {'json': json, 'js': driver, 'record': MagicMock()}
@@ -177,8 +259,35 @@ dom.window.close();
                 with self.assertRaisesRegex(RuntimeError, 'Existing draft'): env['reject_draft_state'](observed)
             else: env['reject_draft_state'](observed)
 
+class AddressDOMTests(unittest.TestCase):
+    def test_only_field_specific_baseline_values_are_allowed(self):
+        cases = [{}, {'omit_headers': ['FROM', 'TO', 'BCC']}, {'headers': {'CC': HEADER_VALUES['TO']}},
+                 {'composer': False, 'url': verify.SITE + '/app/login', 'extra_html': '<input name="email_address" value="' + AGENT_EMAIL + '">'}]
+        for state in address_draft_states(cases):
+            self.assertFalse(any(state.values()), state)
+
+    def test_wrong_or_cleared_address_fields_are_refused(self):
+        cases = BLOCKING_DRAFT_CASES + [{'headers': values} for values in
+                 ({'BCC': HEADER_VALUES['FROM']}, {'BCC': AGENT_EMAIL}, {'CC': AGENT_EMAIL},
+                  {'TO': HEADER_VALUES['FROM']}, {'FROM': HEADER_VALUES['TO']}, {'TO': ''}, {'FROM': ''})]
+        for state in address_draft_states(cases):
+            self.assertTrue(state['unexpected_inputs'], state)
+            for key in ('stored_drafts', 'editor_draft', 'attachments'): self.assertFalse(state[key])
+
+    def test_fixture_addresses_in_other_fields_are_refused(self):
+        cases = [{'extra_html': '<input value="' + value + '">'} for value in (HEADER_VALUES['TO'], HEADER_VALUES['FROM'], AGENT_EMAIL)]
+        cases += [{'extra_html': '<input name="email_address" value="' + AGENT_EMAIL + '">'},
+                  {'extra_html': '<div class="input-group"><label class="input-group-label">TO</label><input value="' + HEADER_VALUES['TO'] + '"></div>'}]
+        for state in address_draft_states(cases): self.assertTrue(state['unexpected_inputs'], state)
+
+    def test_hidden_headers_and_uninspectable_composers_are_refused(self):
+        cases = [{'headers': {'BCC': HEADER_VALUES['TO']}, 'hidden_headers': ['BCC']},
+                 {'headers': {'CC': HEADER_VALUES['FROM']}, 'hidden_headers': ['CC']},
+                 {'without_headers': True}]
+        for state in address_draft_states(cases): self.assertTrue(state['unexpected_inputs'], state)
+
 class LifecycleTests(unittest.TestCase):
-    def exercise(self, failure):
+    def exercise(self, failure, draft_state=None):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); (root / 'tmp/dummy').mkdir(parents=True); sock = root / 'socket'; sock.touch()
             actions = []; current = {}
@@ -191,6 +300,9 @@ class LifecycleTests(unittest.TestCase):
                     if (failure == 'start' and actions.count('start') == 1) or (failure == 'restore-start' and actions.count('start') == 2): raise RuntimeError('simulated startup failure')
             def browser(directory, config, run_id, mode='journey'):
                 if failure == 'preflight': raise RuntimeError('Existing draft')
+                if failure == 'address-preflight':
+                    blocked = rejected_browser_state(draft_state, mode='preflight')
+                    if not blocked['result']['ok']: raise RuntimeError(blocked['result']['error'])
                 if mode == 'preflight':
                     (directory / 'browser-preflight-result.json').write_text(json.dumps({'ok': True, 'discovered_target': {'targetId': 'test', 'profile': 'Profile 14'}}))
                     return
@@ -220,6 +332,16 @@ class LifecycleTests(unittest.TestCase):
     def test_preflight_refusal_leaves_services_untouched(self):
         code, actions, receipt, running = self.exercise('preflight')
         self.assertEqual(code, verify.FAILURE_EXIT); self.assertEqual(actions, []); self.assertTrue(running); self.assertTrue(receipt['initial_state_retained'])
+
+    def test_field_aware_address_drafts_leave_services_untouched(self):
+        for state in address_draft_states(BLOCKING_DRAFT_CASES):
+            with self.subTest(state=state):
+                code, actions, receipt, running = self.exercise('address-preflight', state)
+                self.assertEqual(code, verify.FAILURE_EXIT)
+                self.assertEqual(actions, [])
+                self.assertTrue(running)
+                self.assertTrue(receipt['initial_state_retained'])
+                self.assertIn('Existing draft', receipt['error'])
 
     def test_partial_first_start_cleaned(self):
         code, actions, receipt, running = self.exercise('start')
