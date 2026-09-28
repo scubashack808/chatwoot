@@ -18,6 +18,7 @@ ROOT = Path(CONFIG['root'])
 FIXTURE = CONFIG['fixture']
 MARKER = CONFIG['marker']
 SITE = 'http://127.0.0.1:3001'
+AGENT_EMAIL = 'agent@chatwoot-dummy.test'
 MAIL = 'http://127.0.0.1:8025'
 WAIT_SECONDS = 90
 MAIL_WAIT_SECONDS = 45
@@ -54,6 +55,41 @@ def wait_until(expression, description):
             return
         time.sleep(POLL_SECONDS)
     raise RuntimeError('Timed out: ' + description)
+
+def wait_for_entry():
+    # A profile can render before the selected conversation and its inbox.
+    # Wait only for inspectability; the strict draft guard still decides safety.
+    expression = '''(()=>{
+      const visible=e=>Boolean(e?.checkVisibility()&&!e.disabled);
+      if(location.href===LOGIN_URL_VALUE)
+        return visible(document.querySelector(LOGIN_EMAIL_SELECTOR))&&visible(document.querySelector(LOGIN_PASSWORD_SELECTOR));
+      const profiles=[...document.querySelectorAll('button')].filter(e=>visible(e)&&e.innerText.includes(AGENT_EMAIL_VALUE));
+      if(profiles.length!==1)return false;
+      if(location.href===DASHBOARD_URL_VALUE)return !document.querySelector('.reply-box');
+      if(location.href!==CONVERSATION_URL_VALUE)return false;
+      const panels=[...document.querySelectorAll('.conversation-panel')].filter(visible);
+      const boxes=[...document.querySelectorAll('.reply-box')];
+      if(panels.length!==1||!panels[0].innerText.includes(SEED_TEXT_VALUE)||boxes.length!==1||
+         !visible(boxes[0])||!visible(boxes[0].querySelector(EDITOR_SELECTOR)))return false;
+      return [...boxes[0].querySelectorAll('.input-group')].filter(group=>
+        group.querySelector('.input-group-label')?.textContent.trim().toUpperCase()==='CC'&&
+        visible(group.querySelector('input'))).length===1;
+    })()'''
+    substitutions = {'LOGIN_URL_VALUE': LOGIN_URL, 'LOGIN_EMAIL_SELECTOR': LOGIN_EMAIL,
+                     'LOGIN_PASSWORD_SELECTOR': LOGIN_PASSWORD, 'AGENT_EMAIL_VALUE': AGENT_EMAIL,
+                     'DASHBOARD_URL_VALUE': DASHBOARD, 'CONVERSATION_URL_VALUE': CONVERSATION,
+                     'SEED_TEXT_VALUE': FIXTURE['seed_text'], 'EDITOR_SELECTOR': EDITOR}
+    for token, value in substitutions.items():
+        expression = expression.replace(token, json.dumps(value))
+    record('wait for rendered entry', timeout_seconds=WAIT_SECONDS)
+    started = time.monotonic()
+    entry_ready = None
+    try:
+        wait_until(expression, 'inspectable native app entry')
+        entry_ready = True
+    finally:
+        record('rendered entry wait finished', ready=entry_ready, timeout_seconds=WAIT_SECONDS,
+               elapsed_seconds=time.monotonic() - started)
 
 def point(selector, text=None, contains=False):
     expression = '''JSON.stringify((()=>{
@@ -116,7 +152,7 @@ def guard_existing_drafts():
         }
         if(!e.checkVisibility())return false;
         if(e.value==='')return false;
-        return !(location.href===LOGIN_URL_VALUE&&e.matches(LOGIN_EMAIL_SELECTOR)&&e.value==='agent@chatwoot-dummy.test');
+        return !(location.href===LOGIN_URL_VALUE&&e.matches(LOGIN_EMAIL_SELECTOR)&&e.value===AGENT_EMAIL_VALUE);
       };
       return {
         stored_drafts:Object.values(drafts).some(v=>v!=null&&(typeof v!=='string'||Boolean(v.trim()))),
@@ -124,7 +160,8 @@ def guard_existing_drafts():
         attachments:[...document.querySelectorAll('input[type=file]')].some(e=>e.files.length>0)||Boolean(document.querySelector(ATTACHMENT_SELECTOR)),
         unexpected_inputs:unreadableComposer||[...document.querySelectorAll('input,select')].some(unexpectedInput)
       };
-    })())'''.replace('ATTACHMENT_SELECTOR', json.dumps(attachment_preview)).replace('LOGIN_EMAIL_SELECTOR', json.dumps(LOGIN_EMAIL)).replace('LOGIN_URL_VALUE', json.dumps(LOGIN_URL))))
+    })())'''.replace('ATTACHMENT_SELECTOR', json.dumps(attachment_preview)).replace('LOGIN_EMAIL_SELECTOR', json.dumps(LOGIN_EMAIL)).replace('LOGIN_URL_VALUE', json.dumps(LOGIN_URL)).replace('AGENT_EMAIL_VALUE', json.dumps(AGENT_EMAIL))))
+    record('inspect draft state', **state)
     reject_draft_state(state)
     record('draft preflight passed', **state)
 
@@ -159,12 +196,20 @@ try:
         raise PreflightComplete()
     # Reload only this exact local document after the supervised service restart.
     cdp('Page.navigate', {'url': tab['url']})
-    if not wait_for_load():
-        raise RuntimeError('Local document did not load')
-    wait_until('Boolean(document.querySelector(' + json.dumps(LOGIN_EMAIL) + ')||document.body.innerText.includes("agent@chatwoot-dummy.test"))', 'login or synthetic account')
+    load_started = time.monotonic()
+    document_loaded = None
+    record('wait for local document', timeout_seconds=WAIT_SECONDS)
+    try:
+        document_loaded = wait_for_load(timeout=WAIT_SECONDS)
+    finally:
+        record('local document load finished', loaded=document_loaded,
+               timeout_seconds=WAIT_SECONDS, elapsed_seconds=time.monotonic() - load_started)
+    if document_loaded is not True:
+        raise RuntimeError(f'Local document did not load within {WAIT_SECONDS} seconds')
+    wait_for_entry()
     guard_existing_drafts()  # Recheck persisted state before any destructive logout.
     if js('Boolean(document.querySelector(' + json.dumps(LOGIN_EMAIL) + '))') is not True:
-        click_control('button', 'agent@chatwoot-dummy.test', contains=True)
+        click_control('button', AGENT_EMAIL, contains=True)
         wait_until('[...document.querySelectorAll("button")].some(e=>e.checkVisibility()&&e.innerText.trim()==="Log out")', 'Log out menu')
         click_control('button', 'Log out')
         wait_until('Boolean(document.querySelector(' + json.dumps(LOGIN_EMAIL) + '))', 'signed-out form')
