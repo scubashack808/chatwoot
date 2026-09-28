@@ -20,8 +20,17 @@ import verify
 
 FLOW_TREE = ast.parse((verify.SCRIPT_DIR / 'mail_flow.py').read_text())
 DRAFT_NODES = [node for node in FLOW_TREE.body if
-               (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in ('SITE', 'LOGIN_EMAIL', 'LOGIN_URL') for target in node.targets)) or
+               (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in ('SITE', 'LOGIN_EMAIL', 'LOGIN_PASSWORD', 'LOGIN_URL', 'EDITOR', 'AGENT_EMAIL') for target in node.targets)) or
                (isinstance(node, ast.FunctionDef) and node.name in ('reject_draft_state', 'guard_existing_drafts'))]
+ENTRY_NODES = [node for node in FLOW_TREE.body if isinstance(node, ast.FunctionDef) and node.name == 'wait_for_entry']
+TEST_ACCOUNT_ID = 1
+TEST_CONVERSATION_ID = 3
+DASHBOARD_URL = f'{verify.SITE}/app/accounts/{TEST_ACCOUNT_ID}/dashboard'
+CONVERSATION_URL = f'{verify.SITE}/app/accounts/{TEST_ACCOUNT_ID}/conversations/{TEST_CONVERSATION_ID}'
+SEED_TEXT = 'Synthetic incoming readiness fixture'
+RENDERED_BOUNDARY = 'Rendered entry passed; stop before actual UI input'
+READINESS_POLL_SECONDS = next(ast.literal_eval(node.value) for node in FLOW_TREE.body
+                              if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'POLL_SECONDS' for target in node.targets))
 HEADER_VALUES = {'FROM': 'support@chatwoot-dummy.test', 'TO': 'customer@chatwoot-dummy.test', 'CC': '', 'BCC': ''}
 AGENT_EMAIL = 'agent@chatwoot-dummy.test'
 DRIVER_LOAD_TIMEOUT_SECONDS = 15
@@ -30,7 +39,7 @@ READINESS_WAIT_SECONDS = next(ast.literal_eval(node.value) for node in FLOW_TREE
 READY_BOUNDARY = 'Document readiness passed; stop this test before application input'
 BLOCKING_DRAFT_CASES = [{'headers': {'BCC': HEADER_VALUES['TO']}}, {'headers': {'CC': HEADER_VALUES['FROM']}}]
 
-def address_draft_states(cases):
+def address_draft_states(cases, expression=None):
     clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
     driver = MagicMock(return_value=json.dumps(clear))
     env = {'json': json, 'js': driver, 'record': MagicMock()}
@@ -39,6 +48,7 @@ def address_draft_states(cases):
     component = verify.SOURCE / 'app/javascript/dashboard/components/widgets/conversation/ReplyEmailHead.vue'
     template = component.read_text().split('<template>', 1)[1].rsplit('</template>', 1)[0]
     reply_box = (component.parent / 'ReplyBox.vue').read_text()
+    assert 'class="conversation-panel ' in (component.parent / 'MessagesView.vue').read_text()
     assert 'class="reply-box"' in reply_box and 'showReplyHead && isDefaultEditorMode' in reply_box
     locale = json.loads((verify.SOURCE / 'app/javascript/dashboard/i18n/locale/en/conversation.json').read_text())
     node = r'''
@@ -46,7 +56,7 @@ const {JSDOM} = require('jsdom');
 const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 const results = input.cases.map(test => {
   const headers = test.without_headers ? '' : input.template;
-  const html = test.composer === false ? '' : '<div class="reply-box"><div class="reply-box__top">' + headers + '</div></div>';
+  const html = test.composer === false ? '' : '<div class="reply-box"><div class="reply-box__top">' + headers + '</div>' + (test.editor_html || '') + '</div>';
   const dom = new JSDOM(html, {url: test.url || input.origin + '/app/accounts/1/conversations/3'});
   const {document, localStorage, location} = dom.window;
   Object.defineProperty(dom.window.HTMLElement.prototype, 'innerText', {get() {return this.textContent;}});
@@ -79,19 +89,60 @@ const results = input.cases.map(test => {
 process.stdout.write(JSON.stringify(results));
 '''
     result = subprocess.run(['node', '-e', node], cwd=verify.ROOT,
-                            input=json.dumps({'template': template, 'locale': locale, 'expression': driver.call_args[0][0], 'origin': verify.SITE, 'values': HEADER_VALUES, 'cases': cases}),
+                            input=json.dumps({'template': template, 'locale': locale, 'expression': expression or driver.call_args[0][0], 'origin': verify.SITE, 'values': HEADER_VALUES, 'cases': cases}),
                             capture_output=True, text=True, timeout=verify.HTTP_TIMEOUT, check=True)
     return json.loads(result.stdout)
 
-def rejected_browser_state(state, mode='journey', **driver_overrides):
-    tab = {'targetId': 'owned-test', 'title': 'Chatwoot Dummy', 'url': verify.SITE + '/app/login', 'profile': 'Profile 14', 'ownership': 'unowned'}
+def rejected_browser_state(state, mode='journey', target_url=None, real_wait=False, **driver_overrides):
+    tab = {'targetId': 'owned-test', 'title': 'Chatwoot Dummy', 'url': target_url or verify.SITE + '/app/login', 'profile': 'Profile 14', 'ownership': 'unowned'}
     main = next(node for node in FLOW_TREE.body if isinstance(node, ast.Try))
     with tempfile.TemporaryDirectory() as temp:
-        env = {'json': json, 're': re, 'CONFIG': {'target_id': 'owned-test', 'mode': mode}, 'DASHBOARD': 'unused', 'CONVERSATION': 'unused', 'OUT': Path(temp), 'result': {'ok': False}, 'adopted': False, 'PreflightComplete': type('PreflightComplete', (Exception,), {}), 'discover_tabs': MagicMock(return_value=[tab]), 'adopt_tab': MagicMock(), 'record': MagicMock(), 'js': MagicMock(return_value=json.dumps(state)), 'snapshot': MagicMock(), 'release_caller': MagicMock()}
+        env = {'json': json, 're': re, 'CONFIG': {'target_id': 'owned-test', 'mode': mode}, 'DASHBOARD': DASHBOARD_URL, 'CONVERSATION': CONVERSATION_URL, 'FIXTURE': {'seed_text': SEED_TEXT}, 'OUT': Path(temp), 'result': {'ok': False}, 'adopted': False, 'PreflightComplete': type('PreflightComplete', (Exception,), {}), 'discover_tabs': MagicMock(return_value=[tab]), 'adopt_tab': MagicMock(), 'record': MagicMock(), 'js': MagicMock(return_value=json.dumps(state)), 'snapshot': MagicMock(), 'release_caller': MagicMock()}
         env.update({name: MagicMock() for name in ('cdp', 'click_control', 'fill_login', 'fill_input', 'press_key')})
         env.update(driver_overrides)
-        exec(compile(ast.Module(body=DRAFT_NODES + [main], type_ignores=[]), 'mail_flow.py', 'exec'), env)
+        wait_nodes = [node for node in FLOW_TREE.body if real_wait and isinstance(node, ast.FunctionDef) and node.name == 'wait_until']
+        exec(compile(ast.Module(body=DRAFT_NODES + ENTRY_NODES + wait_nodes + [main], type_ignores=[]), 'mail_flow.py', 'exec'), env)
     return env
+
+def entry_wait_expression():
+    clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+    wait = MagicMock(side_effect=RuntimeError(READY_BOUNDARY))
+    env = rejected_browser_state(clear, wait_for_load=MagicMock(return_value=True), wait_until=wait,
+                                 time=SimpleNamespace(monotonic=MagicMock(return_value=0)), WAIT_SECONDS=READINESS_WAIT_SECONDS)
+    assert env['result']['error'] == READY_BOUNDARY, env['result']
+    return wait.call_args[0][0]
+
+def entry_cases(cases):
+    profile = '<button>' + AGENT_EMAIL + '</button>'
+    panel = '<div class="conversation-panel">' + SEED_TEXT + '</div>'
+    defaults = {'url': CONVERSATION_URL, 'editor_html': '<div class="ProseMirror" contenteditable="true"></div>',
+                'extra_html': profile + panel}
+    return [dict(defaults, **case) for case in cases]
+
+def exercise_entry_transition(cases, final_draft=None):
+    expression = entry_wait_expression()
+    readiness = address_draft_states(cases, expression=expression)
+    guard_states = address_draft_states(cases)
+    clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+    state = {'reloaded': False, 'frame': 0, 'elapsed': 0}
+    def sleep(seconds):
+        state['elapsed'] += seconds
+        state['frame'] = min(state['frame'] + 1, len(cases) - 1)
+    def javascript(value):
+        if value == expression: return readiness[state['frame']]
+        if value.startswith('JSON.stringify'):
+            result = guard_states[state['frame']] if state['reloaded'] else clear
+            if final_draft and state['reloaded'] and readiness[state['frame']]: result = dict(result, **final_draft)
+            return json.dumps(result)
+        if value.startswith('Boolean(document.querySelector'): return False
+        raise AssertionError('Unexpected browser observation in readiness test')
+    def navigate(*args): state['reloaded'] = True
+    click = MagicMock(side_effect=RuntimeError(RENDERED_BOUNDARY))
+    env = rejected_browser_state(clear, target_url=CONVERSATION_URL, real_wait=True, js=MagicMock(side_effect=javascript),
+                                 cdp=MagicMock(side_effect=navigate), click_control=click, wait_for_load=MagicMock(return_value=True),
+                                 time=SimpleNamespace(monotonic=lambda: state['elapsed'], sleep=sleep),
+                                 WAIT_SECONDS=READINESS_WAIT_SECONDS, POLL_SECONDS=READINESS_POLL_SECONDS)
+    return env, state, readiness
 
 class DoctorTests(unittest.TestCase):
     def test_wrong_candidate_precedes_services(self):
@@ -183,7 +234,7 @@ class BrowserTests(unittest.TestCase):
         self.assertGreater(delayed_seconds, DRIVER_LOAD_TIMEOUT_SECONDS)
         driver = MagicMock(side_effect=lambda timeout=DRIVER_LOAD_TIMEOUT_SECONDS: delayed_seconds <= timeout)
         ready = MagicMock(side_effect=RuntimeError(READY_BOUNDARY))
-        clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0, delayed_seconds]))
+        clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0, delayed_seconds, delayed_seconds, delayed_seconds]))
         clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
         env = rejected_browser_state(clear, wait_for_load=driver, wait_until=ready, time=clock, WAIT_SECONDS=READINESS_WAIT_SECONDS)
         driver.assert_called_once_with(timeout=READINESS_WAIT_SECONDS)
@@ -281,6 +332,80 @@ class BrowserTests(unittest.TestCase):
         env = {'OUT': out, 'CONFIG': {'mode': 'journey'}, 'json': json, 'result': {'ok': False}, 'adopted': True, 'release_caller': release}
         with self.assertRaises(OSError): exec(compile(ast.Module(body=main.finalbody, type_ignores=[]), 'mail_flow.py', 'exec'), env)
         release.assert_called_once()
+
+class RenderedEntryTests(unittest.TestCase):
+    def test_shell_editor_and_profile_do_not_establish_conversation_readiness(self):
+        cases = entry_cases([{'without_headers': True}, {'omit_headers': ['CC']}, {'hidden_headers': ['CC']},
+                             {'composer': False}, {'extra_html': '<button>' + AGENT_EMAIL + '</button>'}, {'editor_html': ''},
+                             {'editor_html': '<div class="ProseMirror" contenteditable="true" data-hidden="true"></div>'},
+                             {'without_headers': True, 'extra_html': '<button>' + AGENT_EMAIL + '</button><div class="conversation-panel">' + SEED_TEXT + '</div><div class="input-group"><label class="input-group-label">CC</label><input></div>'},
+                             {'url': CONVERSATION_URL + '/wrong'}, {}])
+        self.assertEqual(address_draft_states(cases, expression=entry_wait_expression()), [False] * (len(cases) - 1) + [True])
+
+    def test_login_dashboard_and_unrelated_spinner_have_distinct_readiness(self):
+        login = verify.SITE + '/app/login'
+        fields = '<input name="email_address"><input name="password" type="password">'
+        cases = [{'composer': False, 'url': login, 'extra_html': fields},
+                 {'composer': False, 'url': login, 'extra_html': '<input name="email_address">'},
+                 {'composer': False, 'url': DASHBOARD_URL, 'extra_html': '<button>' + AGENT_EMAIL + '</button>'},
+                 {'composer': False, 'url': DASHBOARD_URL + '/wrong', 'extra_html': '<button>' + AGENT_EMAIL + '</button>'}]
+        loaded = entry_cases([{}])[0]
+        loaded['extra_html'] += '<aside><span class="spinner">Unrelated list loading</span></aside>'
+        cases.append(loaded)
+        self.assertEqual(address_draft_states(cases, expression=entry_wait_expression()), [True, False, True, False, True])
+
+    def test_real_main_waits_for_header_mount_before_rechecking_drafts(self):
+        env, state, readiness = exercise_entry_transition(entry_cases([{'without_headers': True}, {}]))
+        self.assertEqual(readiness, [False, True])
+        self.assertEqual(env['result']['error'], RENDERED_BOUNDARY)
+        self.assertEqual(state['frame'], 1)
+        self.assertGreater(state['elapsed'], 0)
+        env['record'].assert_any_call('rendered entry wait finished', ready=True, timeout_seconds=READINESS_WAIT_SECONDS, elapsed_seconds=READINESS_POLL_SECONDS)
+        env['click_control'].assert_called_once()
+        env['release_caller'].assert_called_once()
+        for name in ('fill_login', 'fill_input', 'press_key'): env[name].assert_not_called()
+
+    def test_uninspectable_entry_exhausts_readonly_budget_without_input(self):
+        env, state, _ = exercise_entry_transition(entry_cases([{'without_headers': True}]))
+        self.assertIn('Timed out:', env['result']['error'])
+        self.assertEqual(state['elapsed'], READINESS_WAIT_SECONDS)
+        env['record'].assert_any_call('rendered entry wait finished', ready=None, timeout_seconds=READINESS_WAIT_SECONDS, elapsed_seconds=READINESS_WAIT_SECONDS)
+        env['cdp'].assert_called_once()
+        for name in ('click_control', 'fill_login', 'fill_input', 'press_key'): env[name].assert_not_called()
+        env['release_caller'].assert_called_once()
+
+    def test_ready_controls_never_approve_draft_or_recipient_values(self):
+        cases = entry_cases([{'headers': {'BCC': HEADER_VALUES['TO']}}])
+        env, _, readiness = exercise_entry_transition(cases)
+        self.assertEqual(readiness, [True])
+        self.assertIn('Existing draft', env['result']['error'])
+        for name in ('click_control', 'fill_login', 'fill_input', 'press_key'): env[name].assert_not_called()
+        env['release_caller'].assert_called_once()
+        for operand in ('stored_drafts', 'editor_draft', 'attachments'):
+            with self.subTest(operand=operand):
+                blocked, _, _ = exercise_entry_transition(entry_cases([{}]), final_draft={operand: True})
+                self.assertIn('Existing draft', blocked['result']['error'])
+                blocked['click_control'].assert_not_called()
+                blocked['release_caller'].assert_called_once()
+
+    def test_refusal_retains_boolean_diagnostics_before_error(self):
+        state = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+        state['unexpected_inputs'] = True
+        env = rejected_browser_state(state)
+        env['record'].assert_any_call('inspect draft state', **state)
+        self.assertIn('Existing draft', env['result']['error'])
+
+    def test_draft_diagnostic_write_failure_remains_fail_closed(self):
+        state = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+        def record(action, **details):
+            if action == 'inspect draft state': raise OSError('diagnostic storage unavailable')
+        env = rejected_browser_state(state, record=MagicMock(side_effect=record),
+                                     wait_for_load=MagicMock(return_value=True),
+                                     wait_until=MagicMock(side_effect=RuntimeError(RENDERED_BOUNDARY)),
+                                     time=SimpleNamespace(monotonic=MagicMock(return_value=0)), WAIT_SECONDS=READINESS_WAIT_SECONDS)
+        self.assertEqual(env['result']['error'], 'diagnostic storage unavailable')
+        for name in ('cdp', 'click_control', 'fill_login', 'fill_input', 'press_key'): env[name].assert_not_called()
+        env['release_caller'].assert_called_once()
 
 class AttachmentDOMTests(unittest.TestCase):
     def test_pasted_file_preview_is_detected_without_body_or_file_input(self):
