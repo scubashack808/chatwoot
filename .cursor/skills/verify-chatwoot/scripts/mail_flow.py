@@ -159,8 +159,16 @@ try:
         raise PreflightComplete()
     # Reload only this exact local document after the supervised service restart.
     cdp('Page.navigate', {'url': tab['url']})
-    if not wait_for_load():
-        raise RuntimeError('Local document did not load')
+    load_started = time.monotonic()
+    document_loaded = None
+    record('wait for local document', timeout_seconds=WAIT_SECONDS)
+    try:
+        document_loaded = wait_for_load(timeout=WAIT_SECONDS)
+    finally:
+        record('local document load finished', loaded=document_loaded,
+               timeout_seconds=WAIT_SECONDS, elapsed_seconds=time.monotonic() - load_started)
+    if document_loaded is not True:
+        raise RuntimeError(f'Local document did not load within {WAIT_SECONDS} seconds')
     wait_until('Boolean(document.querySelector(' + json.dumps(LOGIN_EMAIL) + ')||document.body.innerText.includes("agent@chatwoot-dummy.test"))', 'login or synthetic account')
     guard_existing_drafts()  # Recheck persisted state before any destructive logout.
     if js('Boolean(document.querySelector(' + json.dumps(LOGIN_EMAIL) + '))') is not True:

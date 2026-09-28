@@ -24,6 +24,10 @@ DRAFT_NODES = [node for node in FLOW_TREE.body if
                (isinstance(node, ast.FunctionDef) and node.name in ('reject_draft_state', 'guard_existing_drafts'))]
 HEADER_VALUES = {'FROM': 'support@chatwoot-dummy.test', 'TO': 'customer@chatwoot-dummy.test', 'CC': '', 'BCC': ''}
 AGENT_EMAIL = 'agent@chatwoot-dummy.test'
+DRIVER_LOAD_TIMEOUT_SECONDS = 15
+READINESS_WAIT_SECONDS = next(ast.literal_eval(node.value) for node in FLOW_TREE.body
+                              if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'WAIT_SECONDS' for target in node.targets))
+READY_BOUNDARY = 'Document readiness passed; stop this test before application input'
 BLOCKING_DRAFT_CASES = [{'headers': {'BCC': HEADER_VALUES['TO']}}, {'headers': {'CC': HEADER_VALUES['FROM']}}]
 
 def address_draft_states(cases):
@@ -79,12 +83,13 @@ process.stdout.write(JSON.stringify(results));
                             capture_output=True, text=True, timeout=verify.HTTP_TIMEOUT, check=True)
     return json.loads(result.stdout)
 
-def rejected_browser_state(state, mode='journey'):
+def rejected_browser_state(state, mode='journey', **driver_overrides):
     tab = {'targetId': 'owned-test', 'title': 'Chatwoot Dummy', 'url': verify.SITE + '/app/login', 'profile': 'Profile 14', 'ownership': 'unowned'}
     main = next(node for node in FLOW_TREE.body if isinstance(node, ast.Try))
     with tempfile.TemporaryDirectory() as temp:
         env = {'json': json, 're': re, 'CONFIG': {'target_id': 'owned-test', 'mode': mode}, 'DASHBOARD': 'unused', 'CONVERSATION': 'unused', 'OUT': Path(temp), 'result': {'ok': False}, 'adopted': False, 'PreflightComplete': type('PreflightComplete', (Exception,), {}), 'discover_tabs': MagicMock(return_value=[tab]), 'adopt_tab': MagicMock(), 'record': MagicMock(), 'js': MagicMock(return_value=json.dumps(state)), 'snapshot': MagicMock(), 'release_caller': MagicMock()}
         env.update({name: MagicMock() for name in ('cdp', 'click_control', 'fill_login', 'fill_input', 'press_key')})
+        env.update(driver_overrides)
         exec(compile(ast.Module(body=DRAFT_NODES + [main], type_ignores=[]), 'mail_flow.py', 'exec'), env)
     return env
 
@@ -172,6 +177,62 @@ class BrowserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.object(verify.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='{"enabled":true,"disabled_by_env":false}')) as run:
             with self.assertRaisesRegex(RuntimeError, 'telemetry must be disabled'): verify.browser_run(Path(temp), {}, 'refused')
             self.assertEqual(run.call_count, 1)
+
+    def test_slow_document_gets_the_existing_readiness_budget(self):
+        delayed_seconds = READINESS_WAIT_SECONDS / 2
+        self.assertGreater(delayed_seconds, DRIVER_LOAD_TIMEOUT_SECONDS)
+        driver = MagicMock(side_effect=lambda timeout=DRIVER_LOAD_TIMEOUT_SECONDS: delayed_seconds <= timeout)
+        ready = MagicMock(side_effect=RuntimeError(READY_BOUNDARY))
+        clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0, delayed_seconds]))
+        clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+        env = rejected_browser_state(clear, wait_for_load=driver, wait_until=ready, time=clock, WAIT_SECONDS=READINESS_WAIT_SECONDS)
+        driver.assert_called_once_with(timeout=READINESS_WAIT_SECONDS)
+        ready.assert_called_once()
+        self.assertEqual(env['result']['error'], READY_BOUNDARY)
+        env['record'].assert_any_call('local document load finished', loaded=True, timeout_seconds=READINESS_WAIT_SECONDS, elapsed_seconds=delayed_seconds)
+        env['release_caller'].assert_called_once()
+
+    def test_document_timeout_refuses_before_input_and_retains_timing(self):
+        clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+        driver = MagicMock(return_value=False)
+        ready = MagicMock()
+        clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0, READINESS_WAIT_SECONDS]))
+        env = rejected_browser_state(clear, wait_for_load=driver, wait_until=ready, time=clock, WAIT_SECONDS=READINESS_WAIT_SECONDS)
+        driver.assert_called_once_with(timeout=READINESS_WAIT_SECONDS)
+        ready.assert_not_called()
+        self.assertFalse(env['result']['ok'])
+        self.assertIn(f'Local document did not load within {READINESS_WAIT_SECONDS} seconds', env['result']['error'])
+        env['cdp'].assert_called_once_with('Page.navigate', {'url': verify.SITE + '/app/login'})
+        for name in ('click_control', 'fill_login', 'fill_input', 'press_key'):
+            env[name].assert_not_called()
+        env['record'].assert_any_call('local document load finished', loaded=False, timeout_seconds=READINESS_WAIT_SECONDS, elapsed_seconds=READINESS_WAIT_SECONDS)
+        env['release_caller'].assert_called_once()
+
+    def test_document_readiness_requires_a_native_true_result(self):
+        clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+        for invalid in (None, 'true', 1):
+            with self.subTest(result=invalid):
+                ready = MagicMock()
+                clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0, 0]))
+                env = rejected_browser_state(clear, wait_for_load=MagicMock(return_value=invalid), wait_until=ready, time=clock, WAIT_SECONDS=READINESS_WAIT_SECONDS)
+                ready.assert_not_called()
+                self.assertIn('Local document did not load', env['result']['error'])
+                for name in ('click_control', 'fill_login', 'fill_input', 'press_key'):
+                    env[name].assert_not_called()
+                env['release_caller'].assert_called_once()
+
+    def test_document_driver_error_retains_timing_and_releases(self):
+        clear = dict.fromkeys(('stored_drafts', 'editor_draft', 'attachments', 'unexpected_inputs'), False)
+        message = 'driver response timeout: outcome unknown'
+        ready = MagicMock()
+        clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0, READINESS_WAIT_SECONDS]))
+        env = rejected_browser_state(clear, wait_for_load=MagicMock(side_effect=RuntimeError(message)), wait_until=ready, time=clock, WAIT_SECONDS=READINESS_WAIT_SECONDS)
+        self.assertEqual(env['result']['error'], message)
+        ready.assert_not_called()
+        env['record'].assert_any_call('local document load finished', loaded=None, timeout_seconds=READINESS_WAIT_SECONDS, elapsed_seconds=READINESS_WAIT_SECONDS)
+        for name in ('click_control', 'fill_login', 'fill_input', 'press_key'):
+            env[name].assert_not_called()
+        env['release_caller'].assert_called_once()
 
     def test_native_boolean_wait(self):
         tree = ast.parse((verify.SCRIPT_DIR / 'mail_flow.py').read_text())

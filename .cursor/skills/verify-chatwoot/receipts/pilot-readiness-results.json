@@ -1,0 +1,72 @@
+{
+  "base": "a7d806e4a447db087d3ba4f03427ba7b82a9d2db",
+  "runtime_candidate": "d76b96565762a2b491fa444e9870ee216d9f63ca",
+  "branch": "fix/woot-38-pilot-readiness",
+  "source_status": "uncommitted local repair, exact helper hashes below; no new publication",
+  "repaired_runs": [
+    {
+      "run_id": "20260927T005659242236Z",
+      "helper_hashes": {
+        "SKILL.md": "c48e8e7819c7ba5f9c1465f9af9d60b338e679d14470e0fb7d2064a09d8f84f7",
+        "receipts/pilot-readiness.md": "16857c8072aa98cf5d3aa33cc3ef027bec0ecbdf13fea36fd50bb6ce1f85504e",
+        "features/email-reply.md": "1a635792fda94282c1169d664b9f03d3020d9bb3ad853084444d9eb7e589088e",
+        "features/login.md": "026f89890e8da6a068762c86e1075b92828ce0b0f5e79f56cfe1f39d7ca87f4b",
+        "features/draft-addressing.md": "76ff924fe03d900b7a75e0a9ed50b0b0af596f92ac37b91b65f91eb52a9eb2a4",
+        "features/README.md": "f5f7f3a52a50568011ae9af4d714a516369f1db3af9f2de0cda03f4355a6534e",
+        "features/unread.md": "fe2a01c7620a42ded86f1a7abf5ecd95c989330a56a9d69d14d9449b5d040e6d",
+        "features/snooze.md": "5c6a66b2fd0c629e3b0e1a612378ed24c3570e7cfcbf50de051499322174ef52",
+        "scripts/mail_flow.py": "1054b9811ae4a1050d664cd6e1c4736278c9dddf5c050aeb7da05b786d004837",
+        "scripts/verify.py": "b76693d0f99cfb8e15e98e91acd1abe5b13141e69a0bbe6aceb37ccf52f5d492",
+        "scripts/inspect_fixture.rb": "6fb801c77a70e26b6cd9be896ab6f7bc5d48ec302024647d94646e5115245d2d"
+      },
+      "load_seconds": 9.645619291812181,
+      "document_budget_seconds": 90,
+      "rejected_credentials": true,
+      "ui_login": true,
+      "exact_mail_capture": true,
+      "exact_public_sent_message": true,
+      "database_message_id": 9,
+      "negative_doctor_controls": true,
+      "shared_services_preserved": true,
+      "evidence_survived": true,
+      "prior_running_state_restored": true,
+      "caller_release_reported": true
+    },
+    {
+      "run_id": "20260927T005916494086Z",
+      "helper_hashes": {
+        "SKILL.md": "c48e8e7819c7ba5f9c1465f9af9d60b338e679d14470e0fb7d2064a09d8f84f7",
+        "receipts/pilot-readiness.md": "16857c8072aa98cf5d3aa33cc3ef027bec0ecbdf13fea36fd50bb6ce1f85504e",
+        "features/email-reply.md": "1a635792fda94282c1169d664b9f03d3020d9bb3ad853084444d9eb7e589088e",
+        "features/login.md": "026f89890e8da6a068762c86e1075b92828ce0b0f5e79f56cfe1f39d7ca87f4b",
+        "features/draft-addressing.md": "76ff924fe03d900b7a75e0a9ed50b0b0af596f92ac37b91b65f91eb52a9eb2a4",
+        "features/README.md": "f5f7f3a52a50568011ae9af4d714a516369f1db3af9f2de0cda03f4355a6534e",
+        "features/unread.md": "fe2a01c7620a42ded86f1a7abf5ecd95c989330a56a9d69d14d9449b5d040e6d",
+        "features/snooze.md": "5c6a66b2fd0c629e3b0e1a612378ed24c3570e7cfcbf50de051499322174ef52",
+        "scripts/mail_flow.py": "1054b9811ae4a1050d664cd6e1c4736278c9dddf5c050aeb7da05b786d004837",
+        "scripts/verify.py": "b76693d0f99cfb8e15e98e91acd1abe5b13141e69a0bbe6aceb37ccf52f5d492",
+        "scripts/inspect_fixture.rb": "6fb801c77a70e26b6cd9be896ab6f7bc5d48ec302024647d94646e5115245d2d"
+      },
+      "load_seconds": 8.858333124779165,
+      "document_budget_seconds": 90,
+      "rejected_credentials": true,
+      "ui_login": true,
+      "exact_mail_capture": true,
+      "exact_public_sent_message": true,
+      "database_message_id": 10,
+      "negative_doctor_controls": true,
+      "shared_services_preserved": true,
+      "evidence_survived": true,
+      "prior_running_state_restored": true,
+      "caller_release_reported": true
+    }
+  ],
+  "limits": [
+    "two successful repaired native runs, not an all-load reliability guarantee",
+    "slow-load and exhausted/invalid-result paths qualified deterministically",
+    "no live stuck-load fault injected",
+    "synthetic proof messages retained",
+    "seeded incoming; no inbound IMAP or broader regression/Factory/phone/release claim"
+  ],
+  "manifest_note": "Manifests are the exact source/documents present during each listed run. The result Markdown and this JSON summary were finalized afterward. Executable helpers and operating instructions stayed unchanged; this summary makes no claim that historical report-file hashes equal final reporting bytes."
+}
