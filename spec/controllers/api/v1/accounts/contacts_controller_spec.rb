@@ -14,6 +14,36 @@ RSpec.describe 'Contacts API', type: :request do
   end
 
   describe 'GET /api/v1/accounts/{account.id}/contacts' do
+    context 'with a CSV-imported contact' do
+      let(:admin) { create(:user, account: account, role: :administrator) }
+      let(:csv_data) { [%w[name email city], ['Synthetic import', 'imported@example.test', 'Honolulu']] }
+      let(:data_import) { create(:data_import, account: account, import_file: generate_csv_file(csv_data)) }
+
+      before do
+        account.enable_features!('crm_v2')
+        DataImportJob.perform_now(data_import)
+      end
+
+      it 'includes the imported contact in the CRM V2 list' do
+        contact = account.contacts.find_by!(email: 'imported@example.test')
+
+        get "/api/v1/accounts/#{account.id}/contacts", headers: admin.create_new_auth_token, as: :json
+
+        expect(response).to have_http_status(:success)
+        expect(response.parsed_body['payload'].pluck('id')).to include(contact.id)
+      end
+
+      it 'includes the imported contact in the legacy list' do
+        account.disable_features!('crm_v2')
+        contact = account.contacts.find_by!(email: 'imported@example.test')
+
+        get "/api/v1/accounts/#{account.id}/contacts", headers: admin.create_new_auth_token, as: :json
+
+        expect(response).to have_http_status(:success)
+        expect(response.parsed_body['payload'].pluck('id')).to include(contact.id)
+      end
+    end
+
     context 'when it is an unauthenticated user' do
       it 'returns unauthorized' do
         get "/api/v1/accounts/#{account.id}/contacts"
