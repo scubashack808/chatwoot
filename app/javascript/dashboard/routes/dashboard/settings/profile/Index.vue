@@ -156,12 +156,12 @@ export default {
       const hasEmailChanged = this.currentUser.email !== email;
       this.name = name || this.name;
       this.email = email || this.email;
-      this.displayName = displayName || this.displayName;
+      if (displayName !== undefined) this.displayName = displayName;
 
       const updatePayload = {
         name: this.name,
         email: this.email,
-        displayName: this.displayName,
+        displayName,
         avatar: this.avatarFile,
       };
 

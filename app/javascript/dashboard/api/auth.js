@@ -46,7 +46,9 @@ export default {
         formData.append(`profile[${key}]`, profileAttributes[key]);
       }
     });
-    formData.append('profile[display_name]', displayName || '');
+    if (displayName !== undefined) {
+      formData.append('profile[display_name]', displayName || '');
+    }
     if (avatar) {
       formData.append('profile[avatar]', avatar);
     }
