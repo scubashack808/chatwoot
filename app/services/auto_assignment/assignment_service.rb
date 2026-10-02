@@ -33,7 +33,7 @@ class AutoAssignment::AssignmentService
   end
 
   def unassigned_conversations(limit)
-    scope = inbox.conversations.unassigned.open
+    scope = apply_team_eligibility(inbox.conversations.unassigned.open)
 
     # Skip stale backlog with no activity beyond the age threshold
     policy = inbox.assignment_policy
@@ -47,6 +47,10 @@ class AutoAssignment::AssignmentService
             end
 
     scope.limit(limit)
+  end
+
+  def apply_team_eligibility(scope)
+    scope.where(team_id: nil).or(scope.where(team_id: Team.where(allow_auto_assign: true).select(:id)))
   end
 
   def age_exclusion_hours(policy)
