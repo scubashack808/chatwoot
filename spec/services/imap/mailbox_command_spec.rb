@@ -271,6 +271,51 @@ RSpec.describe Imap::MailboxCommand do
       expect(result.target_uid).to eq 44
     end
 
+    ['[Gmail]/All Mail', '[Gmail]/Alle Nachrichten'].each do |all_mail|
+      context "with roleless All Mail at #{all_mail}" do
+        let(:targets) { super().merge('all' => all_mail) }
+        let(:archived_identity) do
+          Imap::MessageIdentity.build(mailbox: all_mail, uidvalidity: 42, uid: 51, roles: [], provider_id: '9001')
+        end
+
+        it 'adds only the Inbox label and confirms Inbox while preserving All Mail' do
+          allow(client).to receive(:uid_search).with(['UID', 51]).and_return([51])
+          allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([44])
+          allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42], [100])
+
+          result = gmail.call(action: :restore, identity: archived_identity, source: archived_identity.primary)
+
+          expect(client).to have_received(:uid_store).once.with(51, '+X-GM-LABELS', ['\\Inbox'])
+          expect(client).not_to have_received(:uid_move)
+          expect(result.status).to eq :moved
+          expect(result.target_mailbox).to eq 'INBOX'
+          expect(result.target_uidvalidity).to eq 100
+          expect(result.target_uid).to eq 44
+          expect(result.preserve_source).to be true
+        end
+
+        it 'refuses a stale roleless source before mutation' do
+          allow(client).to receive(:responses).with('UIDVALIDITY').and_return([43])
+
+          expect(gmail.call(action: :restore, identity: archived_identity).status).to eq :conflict
+          expect(client).not_to have_received(:uid_store)
+          expect(client).not_to have_received(:uid_move)
+        end
+      end
+    end
+
+    it 'restores from Gmail Spam with UID MOVE instead of retaining the Spam label' do
+      spam_identity = Imap::MessageIdentity.build(
+        mailbox: '[Gmail]/Spam', uidvalidity: 42, uid: 31, roles: ['spam'], provider_id: '9001'
+      )
+      allow(client).to receive(:uid_search).with(['UID', 31]).and_return([31])
+
+      gmail.call(action: :restore, identity: spam_identity)
+
+      expect(client).to have_received(:uid_move).with(31, 'INBOX')
+      expect(client).not_to have_received(:uid_store)
+    end
+
     it 'restores from Gmail Trash with UID MOVE instead of retaining the Trash label' do
       trashed_identity = Imap::MessageIdentity.build(
         mailbox: '[Gmail]/Trash', uidvalidity: 42, uid: 31, roles: ['trash'], provider_id: '9001'

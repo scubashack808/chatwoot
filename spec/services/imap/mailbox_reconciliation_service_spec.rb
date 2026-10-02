@@ -162,6 +162,48 @@ RSpec.describe Imap::MailboxReconciliationService do
     end
   end
 
+  describe 'Gmail All Mail-only reconciliation' do
+    let(:folders) do
+      [Net::IMAP::MailboxList.new([], '/', 'INBOX'),
+       Net::IMAP::MailboxList.new([:All], '/', '[Gmail]/All Mail'),
+       Net::IMAP::MailboxList.new([:Trash], '/', 'INBOX.Trash'),
+       Net::IMAP::MailboxList.new([:Junk], '/', 'INBOX.Junk')]
+    end
+
+    it 'displays Archive and admits Restore with the exact roleless location from a complete scan' do
+      channel.update!(mailbox_sync_config: { 'mode' => 'active', 'sent_mode' => 'provider_managed' })
+      message = create_message('restore@example.com')
+      message.write_imap_identity!(
+        Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 777, uid: 11, roles: ['inbox'], provider_id: '9001')
+      )
+      server['[Gmail]/All Mail'] = { uidvalidity: 782, messages: [[51, 'restore@example.com']] }
+      allow(imap).to receive(:capabilities).and_return(['X-GM-EXT-1'])
+      allow(imap).to receive(:uid_fetch).with([51], anything).and_return(
+        [Net::IMAP::FetchData.new(1, 'UID' => 51, 'X-GM-MSGID' => '9001',
+                                     'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <restore@example.com>\r\n\r\n")]
+      )
+
+      report = reconcile
+      identity = message.reload.imap_identity
+
+      expect(report).to include(status: 'completed', conclusive: true)
+      expect(identity.locations).to contain_exactly(
+        'mailbox' => '[Gmail]/All Mail', 'uidvalidity' => 782, 'uid' => 51, 'roles' => []
+      )
+      expect(identity.provider_id).to eq '9001'
+      expect(Imap::ConversationMailboxState.publishable(conversation: conversation.reload).to_h)
+        .to include(state: 'archive', roles: ['archive'])
+
+      result = Imap::MailboxOperationRequest.new(
+        conversation: conversation, user: create(:user, account: account),
+        action: 'restore', idempotency_key: SecureRandom.uuid
+      ).perform
+
+      expect(result.accepted?).to be true
+      expect(result.operation.items.sole.fetch('source')).to eq identity.primary
+    end
+  end
+
   # Exit row 1: a move performed outside Chatwoot is reflected in derived state.
   describe 'external move' do
     it 'follows a message an external client moved into the archive folder' do
