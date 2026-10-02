@@ -56,6 +56,7 @@ class Imap::MailboxOperationExecutor
 
     message = message_for(item)
     return if message.nil?
+    return if operation.recover_committed_result!(message, item)
 
     identity = snapshot_identity_for(message, item)
     return if identity.nil?
@@ -112,8 +113,10 @@ class Imap::MailboxOperationExecutor
 
   def persist_success(item, message, identity, result)
     updated = moved_identity(identity, result, item)
-    message.write_imap_identity!(updated)
-    operation.record_result!(success_result(item, result, updated))
+    recorded_result = success_result(item, result, updated)
+    receipt = { 'operation_id' => operation.id, 'item' => item, 'identity' => updated.to_h, 'result' => recorded_result }
+    message.write_imap_identity!(updated, mailbox_operation_receipt: receipt)
+    operation.record_result!(recorded_result)
   end
 
   def moved_identity(identity, result, item)

@@ -358,6 +358,163 @@ RSpec.describe Imap::MailboxOperationExecutor do
     expect(message.reload.imap_identity).to have_attributes(mailbox: 'INBOX.Archive', version: 2)
   end
 
+  it 'replays an interrupted receipt while continuing the remaining batch items' do
+    second_message = create(:message, account: account, inbox: inbox, conversation: conversation,
+                                      message_type: :incoming, source_id: 'second@example.com')
+    second_identity = Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 42, uid: 8, roles: ['inbox'])
+    second_message.write_imap_identity!(second_identity)
+    server['INBOX'][8] = second_message.source_id
+    operation.update!(items: [item, { 'message_id' => second_message.id, 'identity_version' => second_identity.version,
+                                      'source' => second_identity.primary, 'provider_id' => nil,
+                                      'message_source_id' => second_message.source_id }])
+    interruption = Class.new(Exception) # rubocop:disable Lint/InheritException
+    allow(operation).to receive(:record_result!).and_raise(interruption)
+    expect { described_class.new(operation: operation).perform }.to raise_error(interruption)
+    expect([message.reload.imap_identity.version, second_message.reload.imap_identity.version]).to eq([2, 1])
+
+    described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+    expect(operation.reload).to have_attributes(status: 'succeeded', attempt_count: 2)
+    expect(operation.recorded_results).to contain_exactly(
+      include('message_id' => message.id, 'status' => 'succeeded'),
+      include('message_id' => second_message.id, 'status' => 'succeeded')
+    )
+    expect([message.reload.imap_identity.version, second_message.reload.imap_identity.version]).to eq([2, 2])
+    expect(client).to have_received(:uid_move).with(7, 'INBOX.Archive').once
+    expect(client).to have_received(:uid_move).with(8, 'INBOX.Archive').once
+  end
+
+  context 'when the identity write succeeds but the result write is interrupted' do
+    before do
+      allow(operation).to receive(:record_result!).and_raise(IOError, 'interrupted result write')
+      described_class.new(operation: operation).perform
+      message.reload
+      allow(operation).to receive(:record_result!).and_call_original
+    end
+
+    it 'recovers with a fresh executor without another move or identity write and remains idempotent' do
+      expect(operation.reload.recorded_results).to be_empty
+      expect(message.imap_identity).to have_attributes(mailbox: 'INBOX.Archive', version: 2)
+      committed_identity = message.imap_identity.to_h
+      receipt = message.external_source_ids.dig('imap', 'mailbox_operation_receipt')
+
+      2.times { described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform }
+
+      expect(operation.reload).to have_attributes(status: 'succeeded', attempt_count: 3)
+      expect(operation.recorded_results).to contain_exactly(receipt.fetch('result'))
+      expect(message.reload.imap_identity.to_h).to eq(committed_identity)
+      expect(client).to have_received(:uid_move).once
+    end
+
+    %w[failed conflict].each do |status|
+      it "replaces a prior #{status} result with the receipt's success" do
+        operation.record_result!('message_id' => message.id, 'status' => status, 'error_code' => 'identity_version_changed')
+        operation.update!(status: status, error_code: 'identity_version_changed')
+
+        described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+        expect(operation.reload).to have_attributes(status: 'succeeded', error_code: nil)
+        expect(operation.recorded_results).to contain_exactly(include('message_id' => message.id, 'status' => 'succeeded'))
+        expect(message.reload.imap_identity.version).to eq(2)
+        expect(client).to have_received(:uid_move).once
+      end
+    end
+
+    {
+      'another operation' => [%w[mailbox_operation_receipt operation_id], -1],
+      'a different frozen version' => [%w[mailbox_operation_receipt item identity_version], 99],
+      'a different frozen source' => [%w[mailbox_operation_receipt item source uid], 99],
+      'a changed provider ID' => [%w[provider_id], 'other-provider-id'],
+      'a changed UID' => [['locations', 0, 'uid'], 99],
+      'a changed UIDVALIDITY' => [['locations', 0, 'uidvalidity'], 999],
+      'a changed location set' => [['locations', 1], { 'mailbox' => 'INBOX', 'uidvalidity' => 42, 'uid' => 7, 'roles' => ['inbox'] }],
+      'a changed identity version' => [%w[version], 3],
+      'a different result message' => [%w[mailbox_operation_receipt result message_id], -1],
+      'a different result source' => [%w[mailbox_operation_receipt result source uid], 99],
+      'a different result target' => [%w[mailbox_operation_receipt result target uid], 99],
+      'a different result version' => [%w[mailbox_operation_receipt result target identity_version], 99]
+    }.each do |description, (path, value)|
+      it "keeps #{description} conflicted rather than accepting the receipt" do
+        source_ids = message.external_source_ids.deep_dup
+        field = path[0...-1].reduce(source_ids.fetch('imap')) { |current, key| current.fetch(key) }
+        field[path.last] = value
+        message.update!(external_source_ids: source_ids)
+
+        described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+        expect(operation.reload).to have_attributes(status: 'conflict', error_code: 'identity_version_changed')
+        expect(operation.recorded_results).to contain_exactly(include('status' => 'conflict', 'error_code' => 'identity_version_changed'))
+        expect(client).to have_received(:uid_move).once
+      end
+    end
+
+    it 'rejects a changed frozen item even when the committed receipt remains intact' do
+      receipt = message.external_source_ids.dig('imap', 'mailbox_operation_receipt').deep_dup
+      operation.update!(items: [item.merge('message_source_id' => 'different@example.com')])
+
+      described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+      expect(operation.reload).to have_attributes(status: 'conflict', error_code: 'identity_version_changed')
+      expect(message.reload.external_source_ids.dig('imap', 'mailbox_operation_receipt')).to eq(receipt)
+      expect(client).to have_received(:uid_move).once
+    end
+
+    it 'rejects the exact same target and version after an unrelated identity write clears the receipt' do
+      message.write_imap_identity!(message.imap_identity)
+
+      described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+      expect(message.reload.external_source_ids.fetch('imap')).not_to have_key('mailbox_operation_receipt')
+      expect(operation.reload).to have_attributes(status: 'conflict', error_code: 'identity_version_changed')
+      expect(client).to have_received(:uid_move).once
+    end
+  end
+
+  it 'recovers an already-in-target receipt without moving again or incrementing the identity twice' do
+    server['INBOX'].delete(7)
+    server['INBOX.Archive'][31] = 'first@example.com'
+    simulated_process_death = Class.new(Exception) # rubocop:disable Lint/InheritException
+    allow(operation).to receive(:record_result!).and_raise(simulated_process_death)
+
+    expect { described_class.new(operation: operation).perform }.to raise_error(simulated_process_death)
+    expect(operation.reload.recorded_results).to be_empty
+    committed_identity = message.reload.imap_identity.to_h
+    expect(message.imap_identity).to have_attributes(mailbox: 'INBOX.Archive', uid: 31, version: 2)
+
+    described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+    expect(operation.reload).to have_attributes(status: 'succeeded', attempt_count: 2)
+    expect(operation.recorded_results).to contain_exactly(
+      message.external_source_ids.dig('imap', 'mailbox_operation_receipt', 'result')
+    )
+    expect(message.reload.imap_identity.to_h).to eq(committed_identity)
+    expect(client).not_to have_received(:uid_move)
+  end
+
+  it 'recovers a preserved-source Gmail move without removing its other location or repeating the label mutation' do
+    archived_identity = Imap::MessageIdentity.build(
+      mailbox: '[Gmail]/All Mail', uidvalidity: 102, uid: 31, roles: ['archive']
+    )
+    message.write_imap_identity!(archived_identity)
+    server['INBOX'].delete(7)
+    server['[Gmail]/All Mail'] = { 31 => 'first@example.com' }
+    uidvalidities['[Gmail]/All Mail'] = 102
+    operation.update!(action: :restore, items: [item.merge('source' => archived_identity.primary)])
+    allow(client).to receive(:capabilities).and_return(%w[X-GM-EXT-1 MOVE UIDPLUS])
+    allow(client).to receive(:uid_store) { server['INBOX'][44] = 'first@example.com' }
+    simulated_process_death = Class.new(Exception) # rubocop:disable Lint/InheritException
+    allow(operation).to receive(:record_result!).and_raise(simulated_process_death)
+
+    expect { described_class.new(operation: operation).perform }.to raise_error(simulated_process_death)
+    described_class.new(operation: EmailMailboxOperation.find(operation.id)).perform
+
+    expect(operation.reload.status).to eq('succeeded')
+    expect(message.reload.imap_identity.version).to eq(2)
+    expect(message.imap_identity.locations.pluck('mailbox')).to contain_exactly('INBOX', '[Gmail]/All Mail')
+    expect(client).to have_received(:uid_store).with(31, '+X-GM-LABELS', ['\\Inbox']).once
+    expect(client).not_to have_received(:uid_move)
+  end
+
   it 'leaves the operation pending when another inbox worker owns the lease' do
     allow(connection_service).to receive(:with_connection).and_raise(Imap::Lease::LeaseNotAcquiredError)
 

@@ -69,6 +69,22 @@ class EmailMailboxOperation < ApplicationRecord
     end
   end
 
+  def recover_committed_result!(message, item)
+    # Identity and receipt commit together; matching a target alone cannot attribute a move.
+    # Lock message before operation, with no provider calls inside either transaction.
+    message.with_lock do
+      receipt = message.external_source_ids&.dig(Imap::MessageIdentity::NAMESPACE, 'mailbox_operation_receipt').to_h
+      return false unless receipt['operation_id'] == id && receipt['item'] == item
+
+      identity = message.imap_identity
+      return false unless receipt.fetch('identity') == identity&.to_h
+      return false unless receipt_result_matches?(receipt.fetch('result'), identity, item)
+
+      record_result!(receipt['result'])
+      true
+    end
+  end
+
   def record_error_code!(code)
     with_lock { update!(error_code: code) }
   end
@@ -123,5 +139,13 @@ class EmailMailboxOperation < ApplicationRecord
     return :succeeded if count_results('succeeded') == frozen_items.length
 
     :partially_succeeded
+  end
+
+  private
+
+  def receipt_result_matches?(result, identity, item)
+    target = result.fetch('target')
+    result['status'] == 'succeeded' && result['message_id'] == item['message_id'] && result['source'] == item['source'] &&
+      target['identity_version'] == identity.version && identity.locations.include?(target.except('identity_version'))
   end
 end
