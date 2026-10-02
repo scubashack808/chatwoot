@@ -4,8 +4,8 @@ const INBOX_SORT_OPTIONS = {
 };
 
 const sortConfig = {
-  newest: (a, b) => b.created_at - a.created_at,
-  oldest: (a, b) => a.created_at - b.created_at,
+  newest: (a, b) => b.last_activity_at - a.last_activity_at,
+  oldest: (a, b) => a.last_activity_at - b.last_activity_at,
 };
 
 export const sortComparator = (a, b, sortOrder) => {
