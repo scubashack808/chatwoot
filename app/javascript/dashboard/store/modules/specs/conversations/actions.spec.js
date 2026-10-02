@@ -1,4 +1,9 @@
 import axios from 'axios';
+import { createPendingMessage } from 'dashboard/helper/commons';
+import {
+  useCamelCase,
+  useSnakeCase,
+} from 'dashboard/composables/useTransformKeys';
 import actions, {
   hasMessageFailedWithExternalError,
 } from '../../conversations/actions';
@@ -53,6 +58,117 @@ describe('#hasMessageFailedWithExternalError', () => {
     };
     expect(hasMessageFailedWithExternalError(pendingMessage)).toBe(true);
   });
+});
+
+describe('#sendMessageWithData', () => {
+  let transport;
+  let originalPath;
+  let pending;
+
+  beforeEach(() => {
+    originalPath = window.location.pathname;
+    window.history.replaceState({}, '', '/app/accounts/7/conversations/123');
+    const response = {
+      data: { id: 801, conversation_id: 123, content: 'Retry me' },
+    };
+    transport = vi.fn().mockResolvedValue(response);
+    transport.post = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('axios', transport);
+    pending = createPendingMessage({
+      conversationId: 123,
+      message: 'Retry me',
+      private: false,
+      ccEmails: 'crew@example.com',
+      bccEmails: 'archive@example.com',
+      toEmails: 'guest@example.com',
+      contentAttributes: { from_email: 'alias@example.com' },
+    });
+  });
+
+  afterEach(() => {
+    window.history.replaceState({}, '', originalPath);
+    vi.unstubAllGlobals();
+  });
+
+  it('preserves the first-create request when retrying a failed local message', async () => {
+    const failure = Object.assign(new Error('Synthetic rejection'), {
+      response: { data: { error: 'Synthetic rejection' } },
+    });
+    transport.mockRejectedValueOnce(failure);
+    await expect(actions.sendMessageWithData({ commit }, pending)).rejects.toBe(
+      failure
+    );
+
+    const failed = commit.mock.calls.at(-1)[1];
+    expect(failed).toEqual({
+      ...pending,
+      status: 'failed',
+      meta: { error: 'Synthetic rejection' },
+    });
+    expect(hasMessageFailedWithExternalError(failed)).toBe(false);
+
+    const retry = useSnakeCase(useCamelCase(failed, { deep: true }));
+    await actions.sendMessageWithData({ commit }, retry);
+
+    expect(transport).toHaveBeenCalledTimes(2);
+    const firstRequest = transport.mock.calls[0][0];
+    expect(firstRequest).toEqual({
+      method: 'post',
+      url: '/api/v1/accounts/7/conversations/123/messages',
+      data: {
+        content: 'Retry me',
+        private: false,
+        echo_id: pending.echo_id,
+        cc_emails: 'crew@example.com',
+        bcc_emails: 'archive@example.com',
+        to_emails: 'guest@example.com',
+        content_attributes: { from_email: 'alias@example.com' },
+        template_params: undefined,
+      },
+    });
+    expect(transport.mock.calls[1][0]).toEqual(firstRequest);
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(commit).toHaveBeenCalledWith(types.ADD_MESSAGE, {
+      id: 801,
+      conversation_id: 123,
+      content: 'Retry me',
+      status: 'sent',
+    });
+  });
+
+  it('sends an ordinary first create successfully', async () => {
+    await actions.sendMessageWithData({ commit }, pending);
+
+    expect(transport).toHaveBeenCalledOnce();
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(commit).toHaveBeenCalledWith(types.ADD_MESSAGE, {
+      id: 801,
+      conversation_id: 123,
+      content: 'Retry me',
+      status: 'sent',
+    });
+  });
+
+  it.each([false, true])(
+    'retries persisted failures by ID only (UI conversion: %s)',
+    async throughUI => {
+      const persisted = {
+        id: 44,
+        conversation_id: 123,
+        status: 'failed',
+        content_attributes: { external_error: 'Synthetic provider failure' },
+      };
+      const retry = throughUI
+        ? useSnakeCase(useCamelCase(persisted, { deep: true }))
+        : persisted;
+      await actions.sendMessageWithData({ commit }, retry);
+
+      expect(transport).not.toHaveBeenCalled();
+      expect(transport.post).toHaveBeenCalledExactlyOnceWith(
+        '/api/v1/accounts/7/conversations/123/messages/44/retry'
+      );
+    }
+  );
 });
 
 describe('#actions', () => {

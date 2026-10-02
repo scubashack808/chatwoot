@@ -1,6 +1,7 @@
 /* eslint no-console: 0 */
 /* global axios */
 import ApiClient from '../ApiClient';
+import { useCamelCase } from 'dashboard/composables/useTransformKeys';
 
 export const buildCreatePayload = ({
   message,
@@ -57,19 +58,20 @@ class MessageApi extends ApiClient {
     super('conversations', { accountScoped: true });
   }
 
-  create({
-    conversationId,
-    message,
-    private: isPrivate,
-    contentAttributes,
-    echo_id: echoId,
-    files,
-    ccEmails = '',
-    bccEmails = '',
-    toEmails = '',
-    templateParams,
-    isVoiceMessage = false,
-  }) {
+  create(params) {
+    const {
+      conversationId,
+      message,
+      private: isPrivate,
+      contentAttributes,
+      echoId,
+      files,
+      ccEmails = '',
+      bccEmails = '',
+      toEmails = '',
+      templateParams,
+      isVoiceMessage = false,
+    } = useCamelCase(params);
     return axios({
       method: 'post',
       url: `${this.url}/${conversationId}/messages`,
