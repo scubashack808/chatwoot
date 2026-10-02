@@ -2,7 +2,7 @@ class Notification::ReopenSnoozedNotificationsJob < ApplicationJob
   queue_as :low
 
   def perform
-    Notification.where(snoozed_until: 3.days.ago..Time.current).find_in_batches(batch_size: 100) do |notifications_batch|
+    Notification.where(snoozed_until: ..Time.current).find_in_batches(batch_size: 100) do |notifications_batch|
       notifications_batch.each do |notification|
         update_notification(notification)
       end
