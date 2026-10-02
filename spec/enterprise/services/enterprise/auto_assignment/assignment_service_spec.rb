@@ -149,6 +149,46 @@ RSpec.describe Enterprise::AutoAssignment::AssignmentService, type: :service do
       end
     end
 
+    context 'when disabled-team conversations precede capacity-policy exclusions' do
+      let!(:blocked_conversation) do
+        team = create(:team, account: account, allow_auto_assign: false)
+        create(:conversation, inbox: inbox, team: team, assignee: nil, created_at: 6.minutes.ago, last_activity_at: 1.hour.ago)
+      end
+      let!(:label_excluded_conversation) do
+        create(:conversation, inbox: inbox, assignee: nil, created_at: 5.minutes.ago, last_activity_at: 1.hour.ago)
+      end
+      let!(:age_excluded_conversation) do
+        create(:conversation, inbox: inbox, assignee: nil, created_at: 26.hours.ago, last_activity_at: 25.hours.ago)
+      end
+      let!(:first_eligible_conversation) do
+        create(:conversation, inbox: inbox, assignee: nil, created_at: 2.minutes.ago, last_activity_at: 1.hour.ago)
+      end
+      let!(:next_eligible_conversation) do
+        create(:conversation, inbox: inbox, assignee: nil, created_at: 1.minute.ago, last_activity_at: 1.hour.ago)
+      end
+
+      before do
+        label_excluded_conversation.update_labels([label1.title])
+        capacity_policy.update!(exclusion_rules: {
+                                  'excluded_labels' => [label1.title],
+                                  'exclude_older_than_hours' => 24
+                                })
+      end
+
+      it 'makes bounded progress without assigning disabled-team, labelled or stale conversations' do
+        team_id = blocked_conversation.team_id
+
+        expect(assignment_service.perform_bulk_assignment(limit: 1)).to eq(1)
+        expect(first_eligible_conversation.reload.assignee).to be_present
+        expect(next_eligible_conversation.reload.assignee).to be_nil
+
+        expect(assignment_service.perform_bulk_assignment(limit: 1)).to eq(1)
+        expect(next_eligible_conversation.reload.assignee).to be_present
+        expect(blocked_conversation.reload).to have_attributes(assignee_id: nil, team_id: team_id, status: 'open')
+        expect([label_excluded_conversation, age_excluded_conversation].map { |conversation| conversation.reload.assignee_id }).to all(be_nil)
+      end
+    end
+
     context 'when exclusion rules are empty' do
       let!(:conversation1) { create(:conversation, inbox: inbox, assignee: nil) }
       let!(:conversation2) { create(:conversation, inbox: inbox, assignee: nil) }
