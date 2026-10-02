@@ -112,7 +112,7 @@ export const formatQuotedEmailDate = date => {
 };
 
 /**
- * Extracts inbox email address from last email message
+ * Extracts the outgoing From address, falling back to the inbox email
  * @param {Object} lastEmail - Last email message object
  * @param {Object} inbox - Inbox object
  * @returns {string} Inbox email address
@@ -122,10 +122,10 @@ export const getInboxEmail = (lastEmail, inbox) => {
     lastEmail?.contentAttributes || lastEmail?.content_attributes || {};
   const emailMeta = contentAttributes.email || {};
 
-  if (Array.isArray(emailMeta.to) && emailMeta.to.length > 0) {
-    const toAddress = emailMeta.to[0];
-    if (toAddress && toAddress.trim()) {
-      return toAddress.trim();
+  if (Array.isArray(emailMeta.from) && emailMeta.from.length > 0) {
+    const fromAddress = emailMeta.from[0];
+    if (fromAddress && fromAddress.trim()) {
+      return fromAddress.trim();
     }
   }
 
