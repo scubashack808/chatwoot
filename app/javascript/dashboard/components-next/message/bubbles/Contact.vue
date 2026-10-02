@@ -71,7 +71,7 @@ function openContactNewTab(contactId) {
 
 async function addContact() {
   try {
-    let contact = await filterContactByNumber(rawPhoneNumber);
+    let contact = await filterContactByNumber(rawPhoneNumber.value);
     if (!contact) {
       contact = await $store.dispatch('contacts/create', getContactObject());
       useAlert(t('CONTACT_FORM.SUCCESS_MESSAGE'));
