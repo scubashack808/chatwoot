@@ -44,11 +44,10 @@ const ALLOWED_FILE_TYPES = {
 const isDownloading = ref(false);
 const activeAttachment = ref({});
 const activeFileType = ref('');
-const activeImageIndex = ref(
-  props.allAttachments.findIndex(
-    attachment => attachment.message_id === props.attachment.message_id
-  ) || 0
+const clickedAttachmentIndex = props.allAttachments.findIndex(
+  attachment => attachment.id === props.attachment.id
 );
+const activeImageIndex = ref(Math.max(clickedAttachmentIndex, 0));
 
 const imageRef = useTemplateRef('imageRef');
 
