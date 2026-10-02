@@ -426,8 +426,17 @@ const actions = {
 
   applyMailboxOperationUpdate(
     { commit, dispatch, state },
-    { conversationId, mailboxOperation, mailboxState }
+    { conversationId, mailboxOperation, mailboxState, stateOnly }
   ) {
+    if (stateOnly) {
+      commit(types.UPDATE_CONVERSATION_MAILBOX, {
+        conversationId,
+        mailboxState,
+        stateOnly,
+      });
+      return;
+    }
+
     commit(types.UPDATE_CONVERSATION_MAILBOX, {
       conversationId,
       mailboxOperation,

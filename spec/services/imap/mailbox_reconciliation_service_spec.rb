@@ -105,6 +105,148 @@ RSpec.describe Imap::MailboxReconciliationService do
     Redis::Alfred.delete(format(Redis::RedisKeys::IMAP_RECONCILED_AT, inbox_id: inbox.id))
   end
 
+  describe 'agent state publication' do
+    before do
+      channel.update!(mailbox_sync_config: { 'mode' => 'active' })
+    end
+
+    { 'INBOX' => 'inbox', 'INBOX.Archive' => 'archive', 'INBOX.Trash' => 'trash' }.each do |mailbox, role|
+      it "publishes the final #{role} state from the reconciliation job while holding the lease" do
+        message = tracked_message('external@example.com', mailbox: 'INBOX.Junk', uidvalidity: 780, roles: ['spam'])
+        place(mailbox, 5, message.source_id)
+        allow(Rails.configuration.dispatcher).to receive(:dispatch) do |event, _time, data|
+          expect(event).to eq(Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED)
+          expect(Redis::Alfred.get(lease_key)).to be_present
+          expect(data).to eq(
+            account_id: account.id, inbox_id: inbox.id, conversation_id: conversation.display_id,
+            state_only: true, mailbox_state: state_for
+          )
+        end
+
+        report = Inboxes::ReconcileImapMailboxJob.new.perform(channel)
+
+        expect(report[:moved]).to eq(1)
+        expect(state_for[:roles]).to eq([role])
+        expect(Rails.configuration.dispatcher).to have_received(:dispatch).once
+        expect(EmailMailboxOperation.where(conversation: conversation)).to be_empty
+      end
+    end
+
+    it 'coalesces multiple message changes into one final conversation publication' do
+      first = tracked_message('first@example.com')
+      second = tracked_message('second@example.com', uid: 12)
+      place('INBOX.Archive', 5, first.source_id)
+      place('INBOX.Archive', 6, second.source_id)
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).with(
+        Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, anything,
+        hash_including(mailbox_state: hash_including(state: 'archive', roles: ['archive'], tracked_count: 2))
+      ).once
+    end
+
+    it 'does not publish coordinate changes that leave the derived state unchanged' do
+      message = tracked_message('new-uid@example.com')
+      place('INBOX', 42, message.source_id)
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      expect(reconcile[:moved]).to eq(1)
+
+      expect(message.reload.imap_identity.to_h['uid']).to eq(42)
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'does not publish unchanged full scans or settled probes' do
+      message = tracked_message('unchanged@example.com')
+      place('INBOX', 11, message.source_id)
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+      reconcile
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'publishes invalidation only on confirmed absence, not the first absence or repeated missing scan' do
+      tracked_message('absent@example.com')
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+      Redis::Alfred.delete(full_scan_key)
+      reconcile
+      Redis::Alfred.delete(full_scan_key)
+      reconcile
+
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).with(
+        Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, anything,
+        { account_id: account.id, inbox_id: inbox.id, conversation_id: conversation.display_id, state_only: true }
+      ).once
+    end
+
+    it 'publishes recovered missing identities even when their coordinates have not changed' do
+      message = tracked_message('recovered@example.com')
+      message.write_imap_identity!(message.imap_identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_MISSING))
+      place('INBOX', 11, message.source_id)
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).with(
+        Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, anything,
+        hash_including(state_only: true, mailbox_state: hash_including(state: 'inbox', missing_count: 0))
+      ).once
+    end
+
+    it 'does not publish a false absence from an incomplete scan' do
+      message = tracked_message('partial@example.com')
+      message.write_imap_identity!(message.imap_identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_STALE))
+      place('INBOX', 11, message.source_id)
+      dropped_fetch_responses['INBOX'] = 1
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+
+      expect(message.reload.imap_identity.sync_state).to eq(Imap::MessageIdentity::SYNC_STATE_STALE)
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'does not publish a state change in observe mode' do
+      message = tracked_message('observe@example.com')
+      place('INBOX.Archive', 5, message.source_id)
+      channel.update!(mailbox_sync_config: { 'mode' => 'observe' })
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      expect(reconcile[:moved]).to eq(1)
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'does not publish when the feature is disabled' do
+      message = tracked_message('disabled@example.com')
+      place('INBOX.Archive', 5, message.source_id)
+      account.disable_features!(:email_mailbox_actions)
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'does not publish when the channel mode is off' do
+      message = tracked_message('off@example.com')
+      place('INBOX.Archive', 5, message.source_id)
+      channel.update!(mailbox_sync_config: { 'mode' => 'off' })
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      reconcile
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+  end
+
   describe 'reading the server' do
     it 'opens every scanned mailbox read only so reconciliation cannot mutate the provider' do
       place('INBOX', 11, 'a@example.com')

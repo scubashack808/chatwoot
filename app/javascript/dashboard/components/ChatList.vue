@@ -849,19 +849,26 @@ useEmitter('fetch_conversation_stats', () => {
 
 useEmitter(
   BUS_EVENTS.MAILBOX_OPERATION_UPDATED,
-  async ({ conversationId, mailboxOperation, mailboxState } = {}) => {
+  async ({
+    conversationId,
+    mailboxOperation,
+    mailboxState,
+    stateOnly,
+  } = {}) => {
     if (
       showMailboxRoles.value &&
-      isMailboxOperationTerminal(mailboxOperation)
+      (stateOnly || isMailboxOperationTerminal(mailboxOperation))
     ) {
       const isSelectedConversation =
         Number(route.params.conversation_id) === Number(conversationId);
       if (
         isSelectedConversation &&
+        (!stateOnly || mailboxState) &&
         !mailboxStateIncludesRole(mailboxState, activeMailboxRole.value)
       ) {
         await redirectToConversationList();
       }
+      store.dispatch('conversationStats/get', conversationFilters.value);
       resetAndFetchData();
     }
   }
