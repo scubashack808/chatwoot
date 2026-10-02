@@ -13,6 +13,7 @@ import {
 import messageReadActions from './actions/messageReadActions';
 import messageTranslateActions from './actions/messageTranslateActions';
 import * as Sentry from '@sentry/vue';
+import { useAbortableRequest } from 'dashboard/composables/useAbortableRequest';
 import {
   handleVoiceCallCreated,
   handleVoiceCallUpdated,
@@ -41,6 +42,8 @@ export const hasMessageFailedWithExternalError = pendingMessage => {
   return status === MESSAGE_STATUS.FAILED && externalError !== '';
 };
 
+const conversationListRequest = useAbortableRequest();
+
 // actions
 const actions = {
   getConversation: async ({ commit }, conversationId) => {
@@ -53,38 +56,53 @@ const actions = {
     }
   },
 
-  fetchAllConversations: async ({ commit, state, dispatch }) => {
-    commit(types.SET_LIST_LOADING_STATUS);
-    try {
-      const params = state.conversationFilters;
-      const {
-        data: { data },
-      } = await ConversationApi.get(params);
-      buildConversationList(
-        { commit, dispatch },
-        params,
-        data,
-        params.assigneeType
-      );
-    } catch (error) {
-      // Handle error
-    }
+  fetchAllConversations: ({ commit, state, dispatch }) => {
+    return conversationListRequest.run(async signal => {
+      commit(types.SET_LIST_LOADING_STATUS);
+      try {
+        const params = state.conversationFilters;
+        const {
+          data: { data },
+        } = await ConversationApi.get(params, { signal });
+        if (signal.aborted) return;
+
+        buildConversationList(
+          { commit, dispatch },
+          params,
+          data,
+          params.assigneeType
+        );
+      } catch (error) {
+        // Handle error
+      }
+    });
   },
 
-  fetchFilteredConversations: async ({ commit, dispatch }, params) => {
-    commit(types.SET_LIST_LOADING_STATUS);
-    try {
-      const { data } = await ConversationApi.filter(params);
-      buildConversationList(
-        { commit, dispatch },
-        params,
-        data,
-        'appliedFilters'
-      );
-    } catch (error) {
-      commit(types.CLEAR_LIST_LOADING_STATUS);
-      throw error;
-    }
+  fetchFilteredConversations: ({ commit, dispatch }, params) => {
+    return conversationListRequest.run(async signal => {
+      commit(types.SET_LIST_LOADING_STATUS);
+      try {
+        const { data } = await ConversationApi.filter(params, { signal });
+        if (signal.aborted) return;
+
+        buildConversationList(
+          { commit, dispatch },
+          params,
+          data,
+          'appliedFilters'
+        );
+      } catch (error) {
+        if (signal.aborted) return;
+
+        commit(types.CLEAR_LIST_LOADING_STATUS);
+        throw error;
+      }
+    });
+  },
+
+  invalidateConversationListRequests({ commit }) {
+    conversationListRequest.abort();
+    commit(types.CLEAR_LIST_LOADING_STATUS);
   },
 
   emptyAllConversations({ commit }) {

@@ -68,6 +68,28 @@ describe('#ConversationAPI', () => {
       });
     });
 
+    it('#get forwards the abort signal alongside the mailbox role', () => {
+      const { signal } = new AbortController();
+      conversationAPI.get({ inboxId: 1, mailboxRole: 'sent' }, { signal });
+      expect(axiosMock.get).toHaveBeenCalledWith('/api/v1/conversations', {
+        signal,
+        params: expect.objectContaining({ inbox_id: 1, mailbox_role: 'sent' }),
+      });
+    });
+
+    it('#filter forwards the abort signal alongside pagination', () => {
+      const { signal } = new AbortController();
+      conversationAPI.filter(
+        { page: 2, queryData: { payload: [] } },
+        { signal }
+      );
+      expect(axiosMock.post).toHaveBeenCalledWith(
+        '/api/v1/conversations/filter',
+        { payload: [] },
+        { signal, params: { page: 2 } }
+      );
+    });
+
     it('#get keeps mailbox sorting and pagination server-side', () => {
       conversationAPI.get({
         inboxId: 1,
