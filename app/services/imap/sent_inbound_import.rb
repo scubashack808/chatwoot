@@ -22,10 +22,13 @@ class Imap::SentInboundImport
   end
 
   def perform
-    uids = sent_mailbox.search_since(since).last(MAX_PER_CYCLE)
+    progress = Imap::SentImportProgress.new(channel: channel, sent_mailbox: sent_mailbox, interval: interval)
+    uids = progress.select(limit: MAX_PER_CYCLE)
     return @counts.merge(examined: 0) if uids.empty?
 
-    sent_mailbox.fetch_headers(uids).each { |data| consider(data) }
+    headers = sent_mailbox.fetch_headers(uids).index_by { |data| data.attr['UID'] }
+    retry_uids = uids.select { |uid| !headers.key?(uid) || consider(headers.fetch(uid)) == :retry }
+    progress.acknowledge(uids: uids, retry_uids: retry_uids)
     @counts.merge(examined: uids.length)
   end
 
@@ -47,6 +50,7 @@ class Imap::SentInboundImport
   rescue StandardError => e
     @counts[:failed] += 1
     Rails.logger.error "[IMAP::SENT_SYNC] Could not import a Sent message for inbox #{channel.inbox.id}: #{e.class}"
+    :retry
   end
 
   def thread(header, uid, message_id)
@@ -63,15 +67,17 @@ class Imap::SentInboundImport
 
   def import(conversation, uid, message_id)
     body = sent_mailbox.fetch_body(uid)
-    return if body.blank?
+    return :retry if body.blank?
 
     mail = Mail.read_from_string(body)
     presenter = MailPresenter.new(mail, channel.account)
-    message = create_message(conversation, presenter, message_id)
-    message.write_imap_sent_sync!(
-      Imap::SentSyncState.build(state: Imap::SentSyncState::SYNCED),
-      identity: Imap::MessageIdentity.build(mailbox: sent_mailbox.mailbox, uidvalidity: sent_mailbox.uidvalidity, uid: uid, roles: ['sent'])
-    )
+    Message.transaction(requires_new: true) do
+      message = create_message(conversation, presenter, message_id)
+      message.write_imap_sent_sync!(
+        Imap::SentSyncState.build(state: Imap::SentSyncState::SYNCED),
+        identity: Imap::MessageIdentity.build(mailbox: sent_mailbox.mailbox, uidvalidity: sent_mailbox.uidvalidity, uid: uid, roles: ['sent'])
+      )
+    end
     @counts[:imported] += 1
   end
 
@@ -95,9 +101,5 @@ class Imap::SentInboundImport
     return presenter.text_content[:reply] if presenter.text_content.present?
 
     presenter.html_content[:reply] if presenter.html_content.present?
-  end
-
-  def since
-    (Time.zone.today - interval.to_i).strftime('%d-%b-%Y')
   end
 end
