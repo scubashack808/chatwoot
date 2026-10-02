@@ -140,32 +140,58 @@ export const actions = {
   },
 
   syncLatestMessages: async ({ state, commit }) => {
+    const { lastMessageId } = state;
+    let after = lastMessageId;
+    let conversations = state.conversations;
     try {
-      const { lastMessageId, conversations } = state;
+      let hasMore;
+      do {
+        const {
+          data: { payload, meta },
+          // Each request needs the cursor returned by the preceding page.
+          // eslint-disable-next-line no-await-in-loop
+        } = await getMessagesAPI({ after });
+        if (
+          state.conversations !== conversations ||
+          state.lastMessageId !== lastMessageId
+        ) {
+          return false;
+        }
 
-      const {
-        data: { payload, meta },
-      } = await getMessagesAPI({ after: lastMessageId });
-
-      const { contact_last_seen_at: lastSeen } = meta;
-      const formattedMessages = getNonDeletedMessages({ messages: payload });
-      const missingMessages = formattedMessages.filter(
-        message => conversations?.[message.id] === undefined
-      );
-      if (!missingMessages.length) return;
-      missingMessages.forEach(message => {
-        conversations[message.id] = message;
-      });
-      // Sort conversation messages by created_at
-      const updatedConversation = Object.fromEntries(
-        Object.entries(conversations).sort(
-          (a, b) => a[1].created_at - b[1].created_at
-        )
-      );
-      commit('conversation/setMetaUserLastSeenAt', lastSeen, { root: true });
-      commit('setMissingMessagesInConversation', updatedConversation);
+        const nextCursor = payload[payload.length - 1]?.id;
+        if (lastMessageId != null && payload.length && !(nextCursor > after)) {
+          return false;
+        }
+        const updatedConversation = { ...state.conversations };
+        getNonDeletedMessages({ messages: payload }).forEach(message => {
+          if (updatedConversation[message.id] === undefined) {
+            updatedConversation[message.id] = message;
+          }
+        });
+        commit(
+          'conversation/setMetaUserLastSeenAt',
+          meta.contact_last_seen_at,
+          {
+            root: true,
+          }
+        );
+        commit(
+          'setMissingMessagesInConversation',
+          Object.fromEntries(
+            Object.entries(updatedConversation).sort(
+              (a, b) => a[1].created_at - b[1].created_at
+            )
+          )
+        );
+        conversations = state.conversations;
+        // Use the raw page, including deleted/duplicate rows, to advance recovery.
+        hasMore = lastMessageId != null && payload.length === 100;
+        after = nextCursor;
+      } while (hasMore);
+      commit('clearLastMessageId');
+      return true;
     } catch (error) {
-      // IgnoreError
+      return false;
     }
   },
 

@@ -168,6 +168,40 @@ describe('#mutations', () => {
     });
   });
 
+  describe('reconnect cursor lifecycle', () => {
+    it('captures persisted IDs, keeps a pending anchor, and resets after recovery', () => {
+      const state = {
+        lastMessageId: null,
+        conversations: { 1: { id: 1 }, temporary: { id: 'temporary' } },
+      };
+      mutations.setLastMessageId(state);
+      expect(state.lastMessageId).toBe(1);
+      state.conversations[200] = { id: 200 };
+      mutations.setLastMessageId(state);
+      expect(state.lastMessageId).toBe(1);
+      mutations.clearLastMessageId(state);
+      mutations.setLastMessageId(state);
+      expect(state.lastMessageId).toBe(200);
+      mutations.clearConversations(state);
+      expect(state.lastMessageId).toBeNull();
+    });
+
+    it('does not use an optimistic message as a server cursor', () => {
+      const state = { conversations: { temporary: { id: 'temporary' } } };
+      mutations.setLastMessageId(state);
+      expect(state.lastMessageId).toBeNull();
+    });
+
+    it('merges recovery into the plural state read by the widget', () => {
+      const state = { conversations: {}, uiFlags: { allMessagesLoaded: true } };
+      const payload = { 1: { id: 1 } };
+      mutations.setMissingMessagesInConversation(state, payload);
+      expect(state.conversations).toEqual(payload);
+      expect(state).not.toHaveProperty('conversation');
+      expect(state.uiFlags.allMessagesLoaded).toBe(true);
+    });
+  });
+
   describe('#clearConversations', () => {
     it('clears conversations and pending metadata', () => {
       const state = {

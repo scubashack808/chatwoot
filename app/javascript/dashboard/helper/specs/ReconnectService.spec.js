@@ -373,6 +373,47 @@ describe('ReconnectService', () => {
   });
 
   describe('onReconnect', () => {
+    it.each([true, false])(
+      'waits for recovery and emits completion only on success (%s)',
+      async recovered => {
+        let finishRecovery;
+        routerMock.currentRoute.value.params.conversation_id = 1;
+        isAConversationRoute.mockReturnValue(true);
+        reconnectService.refetchMailboxOperationOnReconnect = vi.fn();
+        reconnectService.fetchConversationsOnReconnect = vi.fn();
+        reconnectService.revalidateCaches = vi.fn();
+        storeMock.dispatch.mockImplementationOnce(
+          () =>
+            new Promise(resolve => {
+              finishRecovery = resolve;
+            })
+        );
+
+        const reconnect = reconnectService.onReconnect();
+        await vi.waitFor(() =>
+          expect(storeMock.dispatch).toHaveBeenCalledWith(
+            'syncActiveConversationMessages',
+            { conversationId: 1 }
+          )
+        );
+        expect(emitter.emit).not.toHaveBeenCalledWith(
+          BUS_EVENTS.WEBSOCKET_RECONNECT_COMPLETED
+        );
+        finishRecovery(recovered);
+        await reconnect;
+        expect(reconnectService.revalidateCaches).toHaveBeenCalled();
+        if (recovered) {
+          expect(emitter.emit).toHaveBeenCalledWith(
+            BUS_EVENTS.WEBSOCKET_RECONNECT_COMPLETED
+          );
+        } else {
+          expect(emitter.emit).not.toHaveBeenCalledWith(
+            BUS_EVENTS.WEBSOCKET_RECONNECT_COMPLETED
+          );
+        }
+      }
+    );
+
     it('should handle route-specific fetch, revalidate caches, and emit WEBSOCKET_RECONNECT_COMPLETED event', async () => {
       reconnectService.handleRouteSpecificFetch = vi.fn();
       reconnectService.revalidateCaches = vi.fn();

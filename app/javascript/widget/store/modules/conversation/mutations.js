@@ -4,6 +4,7 @@ import { findUndeliveredMessage } from './helpers';
 export const mutations = {
   clearConversations($state) {
     $state.conversations = {};
+    $state.lastMessageId = null;
     $state.pendingCustomAttributes = {};
     $state.pendingLabels = [];
   },
@@ -72,7 +73,7 @@ export const mutations = {
   },
 
   setMissingMessagesInConversation($state, payload) {
-    $state.conversation = payload;
+    $state.conversations = payload;
   },
 
   updateMessage($state, { id, content_attributes }) {
@@ -109,11 +110,15 @@ export const mutations = {
   },
 
   setLastMessageId($state) {
-    const { conversations } = $state;
-    const lastMessage = Object.values(conversations).pop();
-    if (!lastMessage) return;
-    const { id } = lastMessage;
-    $state.lastMessageId = id;
+    if ($state.lastMessageId != null) return;
+    const ids = Object.values($state.conversations)
+      .map(message => message.id)
+      .filter(Number.isInteger);
+    $state.lastMessageId = ids.length ? Math.max(...ids) : null;
+  },
+
+  clearLastMessageId($state) {
+    $state.lastMessageId = null;
   },
 
   setPendingCustomAttributes($state, data) {
