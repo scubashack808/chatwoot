@@ -872,6 +872,38 @@ describe Conversations::FilterService do
     end
   end
 
+  describe '#perform with combined custom not-equal filters' do
+    let(:custom_condition) do
+      { attribute_key: 'conversation_type', custom_attribute_type: 'conversation_attribute', filter_operator: 'not_equal_to', values: ['platinum'] }
+    end
+    let(:priority_condition) do
+      { attribute_key: 'priority', filter_operator: 'equal_to', values: ['high'] }
+    end
+    let!(:missing_value_conversation) do
+      create(:conversation, account: account, inbox: inbox, assignee: user_1, priority: :high, custom_attributes: {})
+    end
+    let!(:null_value_conversation) do
+      create(:conversation, account: account, inbox: inbox, assignee: user_1, priority: :high, custom_attributes: { conversation_type: nil })
+    end
+
+    before do
+      en_conversation_1.update!(priority: :high, custom_attributes: { conversation_type: 'gold' })
+      en_conversation_2.update!(priority: :high, custom_attributes: { conversation_type: 'platinum' })
+      user_2_assigned_conversation.update!(priority: :low, custom_attributes: {})
+    end
+
+    %i[custom_first priority_first].each do |order|
+      it "groups the missing-value alternative with #{order}" do
+        conditions = order == :custom_first ? [custom_condition, priority_condition] : [priority_condition, custom_condition]
+        payload = [conditions.first.merge(query_operator: 'AND'), conditions.last.merge(query_operator: nil)].map(&:with_indifferent_access)
+
+        result = filter_service.new({ payload: payload, page: 1 }, user_1, account).perform
+
+        expect(result[:conversations].pluck(:id)).to contain_exactly(en_conversation_1.id, missing_value_conversation.id, null_value_conversation.id)
+      end
+    end
+  end
+
   describe '#base_relation' do
     let!(:account) { create(:account) }
     let!(:user_1) { create(:user, account: account, role: :agent) }

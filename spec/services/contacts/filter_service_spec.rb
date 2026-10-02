@@ -56,6 +56,83 @@ describe Contacts::FilterService do
            attribute_display_type: 'number')
   end
 
+  describe '#perform with combined custom not-equal filters' do
+    let(:custom_rule) do
+      { attribute_key: 'customer_type', filter_operator: 'not_equal_to', values: ['platinum'], query_operator: nil }.with_indifferent_access
+    end
+    let(:email_rule) do
+      { attribute_key: 'email', filter_operator: 'equal_to', values: [en_contact.email], query_operator: nil }.with_indifferent_access
+    end
+    let(:name_rule) do
+      { attribute_key: 'name', filter_operator: 'equal_to', values: [en_contact.name], query_operator: nil }.with_indifferent_access
+    end
+
+    before do
+      account.custom_attribute_definitions.find_by!(attribute_key: 'customer_type').update!(attribute_display_type: 'text')
+      en_contact.update!(name: 'Selected contact', email: 'selected@example.test', custom_attributes: { customer_type: 'gold', lifetime_value: 100 })
+      el_contact.update!(name: 'Other contact', email: 'other@example.test', custom_attributes: {})
+      cs_contact.update!(name: 'Excluded contact', email: 'third@example.test', custom_attributes: { customer_type: 'platinum', lifetime_value: 200 })
+    end
+
+    it 'includes missing values for a standalone custom not-equal rule' do
+      result = filter_service.new(account, first_user, { payload: [custom_rule], page: 1 }).perform
+
+      expect(result[:contacts].pluck(:id)).to contain_exactly(en_contact.id, el_contact.id)
+    end
+
+    %i[custom_first email_first].each do |order|
+      context "with #{order}" do
+        let(:rules) { order == :custom_first ? [custom_rule, email_rule] : [email_rule, custom_rule] }
+
+        it 'returns only the selected contact when joined by AND' do
+          payload = [rules.first.merge(query_operator: 'AND'), rules.last]
+          result = filter_service.new(account, first_user, { payload: payload, page: 1 }).perform
+
+          expect(result[:contacts].pluck(:id)).to eq([en_contact.id])
+        end
+
+        it 'includes a selected contact with a missing custom value when joined by AND' do
+          en_contact.update!(custom_attributes: {})
+          payload = [rules.first.merge(query_operator: 'AND'), rules.last]
+          result = filter_service.new(account, first_user, { payload: payload, page: 1 }).perform
+
+          expect(result[:contacts].pluck(:id)).to eq([en_contact.id])
+        end
+
+        it 'combines the complete custom predicate with OR' do
+          email_rule[:values] = [cs_contact.email]
+          payload = [rules.first.merge(query_operator: 'OR'), rules.last]
+          result = filter_service.new(account, first_user, { payload: payload, page: 1 }).perform
+
+          expect(result[:contacts].pluck(:id)).to contain_exactly(en_contact.id, el_contact.id, cs_contact.id)
+        end
+
+        it 'groups numeric custom predicates before joining with AND' do
+          custom_rule.merge!(attribute_key: 'lifetime_value', values: [200])
+          payload = [rules.first.merge(query_operator: 'AND'), rules.last]
+          result = filter_service.new(account, first_user, { payload: payload, page: 1 }).perform
+
+          expect(result[:contacts].pluck(:id)).to eq([en_contact.id])
+        end
+      end
+    end
+
+    it 'groups a custom not-equal rule between two AND rules' do
+      payload = [email_rule.merge(values: [en_contact.email, el_contact.email], query_operator: 'AND'),
+                 custom_rule.merge(query_operator: 'AND'), name_rule]
+      result = filter_service.new(account, first_user, { payload: payload, page: 1 }).perform
+
+      expect(result[:contacts].pluck(:id)).to eq([en_contact.id])
+    end
+
+    it 'preserves AND precedence over OR across complete predicates' do
+      payload = [email_rule.merge(values: [cs_contact.email], query_operator: 'OR'), custom_rule.merge(query_operator: 'AND'), name_rule]
+      result = filter_service.new(account, first_user, { payload: payload, page: 1 }).perform
+
+      expect(result[:contacts].pluck(:id)).to contain_exactly(en_contact.id, cs_contact.id)
+    end
+  end
+
   describe '#perform' do
     let!(:params) { { payload: [], page: 1 } }
 
