@@ -121,12 +121,14 @@ export default {
     },
     async updateNotificationSettings() {
       try {
-        this.$store.dispatch('userNotificationSettings/update', {
+        await this.$store.dispatch('userNotificationSettings/update', {
           selectedEmailFlags: this.selectedEmailFlags,
           selectedPushFlags: this.selectedPushFlags,
         });
         useAlert(this.$t('PROFILE_SETTINGS.FORM.API.UPDATE_SUCCESS'));
       } catch (error) {
+        this.selectedEmailFlags = [...(this.emailFlags || [])];
+        this.selectedPushFlags = [...(this.pushFlags || [])];
         useAlert(this.$t('PROFILE_SETTINGS.FORM.API.UPDATE_ERROR'));
       }
     },
