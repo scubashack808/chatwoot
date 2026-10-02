@@ -72,12 +72,20 @@ export const actions = {
     }
   },
 
-  delete: async ({ commit }, { notification, count, unreadCount }) => {
+  delete: async ({ commit, state }, { notification }) => {
     commit(types.SET_NOTIFICATIONS_UI_FLAG, { isDeleting: true });
     try {
       await NotificationsAPI.delete(notification.id);
-      commit(types.SET_NOTIFICATIONS_UNREAD_COUNT, unreadCount - 1);
-      commit(types.DELETE_NOTIFICATION, { notification, count, unreadCount });
+      const currentNotification = state.records[notification.id];
+      // A realtime deletion may have already removed the record and updated counts.
+      if (currentNotification) {
+        commit(types.DELETE_NOTIFICATION, {
+          notification,
+          count: state.meta.count - 1,
+          unread_count:
+            state.meta.unreadCount - (currentNotification.read_at ? 0 : 1),
+        });
+      }
       commit(types.SET_NOTIFICATIONS_UI_FLAG, { isDeleting: false });
     } catch (error) {
       commit(types.SET_NOTIFICATIONS_UI_FLAG, { isDeleting: false });
