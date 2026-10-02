@@ -33,6 +33,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  isVerifying: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['cancel', 'verify', 'complete']);
@@ -76,15 +80,18 @@ watch(
   { immediate: true }
 );
 
-const verifyCode = async () => {
+const verifyCode = () => {
+  if (props.isVerifying || verificationCode.value.length !== 6) return;
+
   verificationError.value = '';
-  try {
-    emit('verify', verificationCode.value);
-    setupStep.value = 'backup';
-    verificationCode.value = '';
-  } catch (error) {
-    verificationError.value = t('MFA_SETTINGS.SETUP.INVALID_CODE');
-  }
+  emit('verify', verificationCode.value);
+};
+
+const handleVerificationSuccess = () => {
+  verificationCode.value = '';
+  verificationError.value = '';
+  backupCodesConfirmed.value = false;
+  setupStep.value = 'backup';
 };
 
 const copySecret = async () => {
@@ -142,6 +149,7 @@ const handleVerificationError = error => {
 };
 
 defineExpose({
+  handleVerificationSuccess,
   handleVerificationError,
   setupStep,
 });
@@ -226,11 +234,13 @@ defineExpose({
               color="slate"
               class="flex-1"
               :label="$t('MFA_SETTINGS.SETUP.CANCEL')"
+              :disabled="isVerifying"
               @click="cancelSetup"
             />
             <Button
               class="flex-1"
-              :disabled="verificationCode.length !== 6"
+              :disabled="isVerifying || verificationCode.length !== 6"
+              :is-loading="isVerifying"
               :label="$t('MFA_SETTINGS.SETUP.VERIFY_BUTTON')"
               @click="verifyCode"
             />
