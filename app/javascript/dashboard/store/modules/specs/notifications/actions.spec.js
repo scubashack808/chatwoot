@@ -111,20 +111,21 @@ describe('#actions', () => {
     it('sends correct actions if API is success', async () => {
       axios.delete.mockResolvedValue({});
       await actions.delete(
-        { commit },
         {
-          notification: { id: 1 },
-          count: 2,
-          unreadCount: 1,
-        }
+          commit,
+          state: {
+            records: { 1: { id: 1, read_at: null } },
+            meta: { count: 2, unreadCount: 1 },
+          },
+        },
+        { notification: { id: 1 } }
       );
 
       expect(commit.mock.calls).toEqual([
         [types.SET_NOTIFICATIONS_UI_FLAG, { isDeleting: true }],
-        [types.SET_NOTIFICATIONS_UNREAD_COUNT, 0],
         [
           types.DELETE_NOTIFICATION,
-          { notification: { id: 1 }, count: 2, unreadCount: 1 },
+          { notification: { id: 1 }, count: 1, unread_count: 0 },
         ],
         [types.SET_NOTIFICATIONS_UI_FLAG, { isDeleting: false }],
       ]);
@@ -133,12 +134,14 @@ describe('#actions', () => {
       axios.delete.mockRejectedValue({ message: 'Incorrect header' });
       await expect(actions.delete({ commit })).rejects.toThrow(Error);
       await actions.delete(
-        { commit },
         {
-          notification: { id: 1 },
-          count: 2,
-          unreadCount: 1,
-        }
+          commit,
+          state: {
+            records: { 1: { id: 1, read_at: null } },
+            meta: { count: 2, unreadCount: 1 },
+          },
+        },
+        { notification: { id: 1 } }
       );
       expect(commit.mock.calls).toEqual([
         [types.SET_NOTIFICATIONS_UI_FLAG, { isDeleting: true }],
