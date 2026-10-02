@@ -140,10 +140,19 @@ export const mutations = {
 
   [types.UPDATE_CONVERSATION_MAILBOX](
     _state,
-    { conversationId, mailboxOperation, mailboxState }
+    { conversationId, mailboxOperation, mailboxState, stateOnly }
   ) {
     const conversation = getConversationById(_state)(conversationId);
     if (!conversation) return;
+
+    if (stateOnly) {
+      if (mailboxState === undefined) {
+        delete conversation.mailbox_state;
+      } else {
+        conversation.mailbox_state = mailboxState;
+      }
+      return;
+    }
 
     const currentOperation = conversation.mailbox_operation;
     if (
