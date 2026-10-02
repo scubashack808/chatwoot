@@ -70,6 +70,46 @@ describe MessageFinder do
       end
     end
 
+    [101, 201].each do |count|
+      context "with #{count} messages after the reconnect cursor" do
+        let(:params) { { after: anchor.id } }
+        let!(:anchor) { create(:message, account: account, inbox: inbox, conversation: conversation) }
+
+        it 'drains bounded ID pages despite equal and out-of-order timestamps' do
+          missed = Array.new(count) do |index|
+            create(:message, account: account, inbox: inbox, conversation: conversation,
+                             created_at: anchor.created_at - (index / 2).minutes)
+          end
+          recovered = []
+          cursor = anchor.id
+          loop do
+            page = described_class.new(conversation, after: cursor).perform.to_a
+            expect(page.length).to be <= 100
+            recovered.concat(page.map(&:id))
+            break if page.length < 100
+
+            cursor = page.last.id
+          end
+
+          expect(recovered).to eq(missed.map(&:id))
+        end
+
+        it 'filters internal rows before applying the widget page limit' do
+          missed = Array.new(count) do |index|
+            create(:message, account: account, inbox: inbox, conversation: conversation,
+                             created_at: anchor.created_at - (index + 1).minutes)
+          end
+          missed.first.update!(private: true)
+          missed.second.update!(message_type: :activity)
+          first = described_class.new(conversation, after: anchor.id, filter_internal_messages: true).perform.to_a
+          second = described_class.new(conversation, after: first.last.id, filter_internal_messages: true).perform.to_a
+
+          expect(first.length).to eq([count - 2, 100].min)
+          expect((first + second).map(&:id)).to eq(missed.drop(2).map(&:id))
+        end
+      end
+    end
+
     context 'with an after attribute above the message id range' do
       let(:params) { { after: 881_965_304_328 } }
 

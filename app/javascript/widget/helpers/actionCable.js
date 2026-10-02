@@ -35,10 +35,11 @@ class ActionCableConnector extends BaseActionCableConnector {
   };
 
   onReconnect = () => {
-    this.syncLatestMessages();
+    const recovery = this.syncLatestMessages();
     // Re-fetch conversation attributes so a status change (e.g. auto-resolve)
     // that happened while disconnected is reflected, keeping the reply box state correct.
     this.app.$store.dispatch('conversationAttributes/getAttributes');
+    return recovery;
   };
 
   setLastMessageId = () => {
@@ -46,7 +47,7 @@ class ActionCableConnector extends BaseActionCableConnector {
   };
 
   syncLatestMessages = () => {
-    this.app.$store.dispatch('conversation/syncLatestMessages');
+    return this.app.$store.dispatch('conversation/syncLatestMessages');
   };
 
   onStatusChange = data => {

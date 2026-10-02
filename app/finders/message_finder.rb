@@ -37,7 +37,7 @@ class MessageFinder
   end
 
   def messages_after(after_id)
-    messages.reorder('created_at asc').where('id > ?', after_id).limit(100)
+    messages.reorder('id asc').where('id > ?', after_id).limit(100)
   end
 
   def messages_before(before_id)

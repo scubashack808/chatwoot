@@ -103,10 +103,11 @@ class ReconnectService {
     const { conversation_id: conversationId } =
       this.router.currentRoute.value.params;
     if (conversationId) {
-      await this.store.dispatch('syncActiveConversationMessages', {
+      return this.store.dispatch('syncActiveConversationMessages', {
         conversationId: Number(conversationId),
       });
     }
+    return true;
   };
 
   refetchMailboxOperationOnReconnect = async () => {
@@ -140,12 +141,14 @@ class ReconnectService {
     if (isAConversationRoute(currentRoute, true)) {
       await this.refetchMailboxOperationOnReconnect();
       await this.fetchConversationsOnReconnect();
-      await this.fetchConversationMessagesOnReconnect();
-    } else if (isAInboxViewRoute(currentRoute, true)) {
+      return this.fetchConversationMessagesOnReconnect();
+    }
+    if (isAInboxViewRoute(currentRoute, true)) {
       await this.fetchNotificationsOnReconnect(
         this.store.getters['notifications/getNotificationFilters']
       );
     }
+    return true;
   };
 
   setConversationLastMessageId = async () => {
@@ -164,8 +167,9 @@ class ReconnectService {
   };
 
   onReconnect = async () => {
-    await this.handleRouteSpecificFetch();
+    const recovered = await this.handleRouteSpecificFetch();
     await this.revalidateCaches();
+    if (recovered === false) return;
     emitter.emit(BUS_EVENTS.WEBSOCKET_RECONNECT_COMPLETED);
   };
 }
