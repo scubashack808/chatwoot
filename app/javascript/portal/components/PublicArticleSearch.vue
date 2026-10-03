@@ -27,6 +27,7 @@ export default {
       isLoading: false,
       showSearchBox: false,
       searchResults: [],
+      searchGeneration: 0,
     };
   },
 
@@ -67,12 +68,14 @@ export default {
   },
 
   unmounted() {
+    this.searchGeneration += 1;
     if (this.showKbd) document.removeEventListener('keydown', this.onKeydown);
     clearTimeout(this.typingTimer);
   },
 
   methods: {
     onUpdateSearchTerm(value) {
+      this.searchGeneration += 1;
       this.searchTerm = value;
       if (this.typingTimer) {
         clearTimeout(this.typingTimer);
@@ -104,7 +107,7 @@ export default {
       this.showSearchBox = false;
     },
     clearSearchTerm() {
-      this.searchTerm = '';
+      this.onUpdateSearchTerm('');
     },
     onKeydown(e) {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
@@ -117,6 +120,7 @@ export default {
       }
     },
     async fetchArticlesByQuery() {
+      const generation = this.searchGeneration;
       const query = this.normalizedSearchTerm;
       if (!query) {
         this.isLoading = false;
@@ -131,11 +135,15 @@ export default {
           this.localeCode,
           query
         );
-        this.searchResults = data.payload;
+        if (generation === this.searchGeneration) {
+          this.searchResults = data.payload;
+        }
       } catch (error) {
         // Show something wrong message
       } finally {
-        this.isLoading = false;
+        if (generation === this.searchGeneration) {
+          this.isLoading = false;
+        }
       }
     },
     handleSubmit() {
