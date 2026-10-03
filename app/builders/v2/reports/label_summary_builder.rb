@@ -29,9 +29,9 @@ class V2::Reports::LabelSummaryBuilder < V2::Reports::BaseSummaryBuilder
     {
       conversation_counts: fetch_conversation_counts(conversation_filter),
       resolved_counts: fetch_resolved_counts,
-      resolution_metrics: fetch_metrics(conversation_filter, 'conversation_resolved', use_business_hours),
-      first_response_metrics: fetch_metrics(conversation_filter, 'first_response', use_business_hours),
-      reply_metrics: fetch_metrics(conversation_filter, 'reply_time', use_business_hours)
+      resolution_metrics: fetch_metrics('conversation_resolved', use_business_hours),
+      first_response_metrics: fetch_metrics('first_response', use_business_hours),
+      reply_metrics: fetch_metrics('reply_time', use_business_hours)
     }
   end
 
@@ -93,13 +93,16 @@ class V2::Reports::LabelSummaryBuilder < V2::Reports::BaseSummaryBuilder
       .each_with_object({}) { |record, hash| hash[record.name] = record.count }
   end
 
-  def fetch_metrics(conversation_filter, event_name, use_business_hours)
+  def fetch_metrics(event_name, use_business_hours)
+    reporting_event_filter = { name: event_name, account_id: account.id }
+    reporting_event_filter[:created_at] = range if range.present?
+
     ReportingEvent
       .joins(conversation: { taggings: :tag })
       .where(
-        conversations: conversation_filter,
-        name: event_name,
-        taggings: { taggable_type: 'Conversation', context: 'labels' }
+        reporting_event_filter.merge(
+          taggings: { taggable_type: 'Conversation', context: 'labels' }
+        )
       )
       .group('tags.name')
       .order('tags.name')
