@@ -473,6 +473,49 @@ RSpec.describe 'Reports API', type: :request do
     end
   end
 
+  describe 'label report event-window parity' do
+    let(:label) { create(:label, account: account, title: 'timing-proof') }
+    let(:window_start) { Time.zone.parse('2026-09-17 00:00:00') }
+    let(:params) { { since: window_start.to_i.to_s, until: (window_start + 1.day).to_i.to_s, timezone_offset: 0 } }
+    let(:headers) { admin.create_new_auth_token }
+
+    before do
+      [
+        [window_start - 12.hours, window_start + 12.hours, 120],
+        [window_start + 10.hours, window_start + 36.hours, 240]
+      ].each do |created_at, handled_at, reply_time|
+        conversation = create(:conversation, account: account, inbox: inbox, assignee: user, created_at: created_at)
+        conversation.update_labels(label.title)
+        travel_to(handled_at) do
+          message = create(:message, account: account, inbox: inbox, conversation: conversation, sender: user, message_type: :outgoing)
+          listener = ReportingEventListener.instance
+          listener.first_reply_created(Events::Base.new('first.reply.created', handled_at, message: message))
+          listener.reply_created(Events::Base.new('reply.created', handled_at, message: message, waiting_since: handled_at - reply_time))
+          listener.conversation_resolved(Events::Base.new('conversation.resolved', handled_at, conversation: conversation))
+        end
+      end
+    end
+
+    it 'uses the same event-day averages in overview, detail and CSV without changing creation counts' do
+      get "/api/v2/accounts/#{account.id}/summary_reports/label", params: params, headers: headers
+      expect(response).to have_http_status(:success)
+      overview = response.parsed_body.find { |row| row['id'] == label.id }
+      expect(overview).to include('avg_first_response_time' => 86_400, 'avg_resolution_time' => 86_400,
+                                  'avg_reply_time' => 120, 'conversations_count' => 1, 'resolved_conversations_count' => 1)
+
+      { 'avg_first_response_time' => 86_400, 'avg_resolution_time' => 86_400, 'reply_time' => 120 }.each do |metric, expected|
+        get "/api/v2/accounts/#{account.id}/reports", params: params.merge(type: 'label', id: label.id, metric: metric), headers: headers
+        expect(response).to have_http_status(:success)
+        expect(response.parsed_body.pluck('value').compact).to include(expected)
+      end
+
+      get "/api/v2/accounts/#{account.id}/reports/labels.csv", params: params, headers: headers
+      expect(response).to have_http_status(:success)
+      row = CSV.parse(response.body).find { |values| values.first == label.title }
+      expect(row).to eq(['timing-proof', '1', '1 day', '1 day', '2 minutes', '1'])
+    end
+  end
+
   describe 'GET /api/v2/accounts/:account_id/reports/teams' do
     context 'when it is an unauthenticated user' do
       it 'returns unauthorized' do
