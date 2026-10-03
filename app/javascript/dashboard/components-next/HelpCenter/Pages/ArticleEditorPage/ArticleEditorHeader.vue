@@ -68,7 +68,8 @@ const isUpdatingArticle = computed(
 
 // Publishing while a save is still in flight would promote a stale draft, so we show an alert
 const blockedWhileSaving = () => {
-  if (!props.isSaving && !isUpdatingArticle.value) return false;
+  if (!props.isSaving && !props.isUpdating && !isUpdatingArticle.value)
+    return false;
   useAlert(t('HELP_CENTER.EDIT_ARTICLE_PAGE.HEADER.SAVE_IN_PROGRESS'));
   return true;
 };
