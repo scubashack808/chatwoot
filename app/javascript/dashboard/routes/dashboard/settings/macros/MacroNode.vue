@@ -45,7 +45,9 @@ const showActionInput = computed(() => {
 });
 
 const dropdownValues = () => {
-  return getMacroDropdownValues(actionData.value.action_name);
+  const { action_name: name, action_params: params } = actionData.value;
+  const selected = Array.isArray(params) ? params[0] : params;
+  return getMacroDropdownValues(name, selected?.id);
 };
 </script>
 

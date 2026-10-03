@@ -112,6 +112,12 @@
       "ADD_PRIVATE_NOTE": "Add a Private Note",
       "SEND_WEBHOOK_EVENT": "Send Webhook Event"
     },
+    "STATUS_TYPES": {
+      "OPEN": "Open",
+      "RESOLVED": "Resolved",
+      "PENDING": "Pending",
+      "SNOOZED": "Snoozed"
+    },
     "PRIORITY_TYPES": {
       "NONE": "None",
       "LOW": "Low",
