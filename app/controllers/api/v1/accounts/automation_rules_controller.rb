@@ -53,6 +53,7 @@ class Api::V1::Accounts::AutomationRulesController < Api::V1::Accounts::BaseCont
     return render_delayed_automations_error if automation_rule.execution_delay.present? && !delayed_automations_enabled?
 
     @automation_rule = automation_rule.dup
+    @automation_rule.files = automation_rule.files.blobs
     @automation_rule.save!
   end
 

@@ -301,6 +301,148 @@ RSpec.describe 'Api::V1::Accounts::AutomationRulesController', type: :request do
     end
   end
 
+  describe 'cloning attachment automations' do
+    let(:headers) { administrator.create_new_auth_token }
+    let(:blob) do
+      ActiveStorage::Blob.create_and_upload!(io: StringIO.new('automation attachment'), filename: 'workflow.txt', content_type: 'text/plain')
+    end
+    let(:rule_params) do
+      {
+        name: 'Attachment rule', event_name: 'conversation_created',
+        conditions: [{ attribute_key: 'status', filter_operator: 'equal_to', values: ['open'], query_operator: nil }],
+        actions: [{ action_name: 'send_attachment', action_params: [blob.signed_id] }]
+      }
+    end
+    let(:source) { account.automation_rules.order(:id).first }
+    let(:copy) { account.automation_rules.order(:id).last }
+
+    before do
+      post "/api/v1/accounts/#{account.id}/automation_rules", headers: headers, params: rule_params
+    end
+
+    it 'creates separate attachment rows with the same blobs and complete file metadata' do
+      expect do
+        post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+      end.not_to change(ActiveStorage::Blob, :count)
+
+      expect(response).to have_http_status(:success)
+      expect(copy.id).not_to eq(source.id)
+      expect(copy).to have_attributes(account_id: source.account_id, actions: source.actions, conditions: source.conditions)
+      expect(copy.files.pluck(:id) & source.files.pluck(:id)).to be_empty
+      file = response.parsed_body['payload']['files'].sole
+      expect(file).to include('id' => copy.files.sole.id, 'automation_rule_id' => copy.id, 'account_id' => account.id,
+                              'blob_id' => blob.id, 'filename' => 'workflow.txt', 'file_type' => 'text/plain')
+      expect(file['file_url']).to be_present
+    end
+
+    it 'retains all attachments when a rule has multiple files' do
+      second_blob = ActiveStorage::Blob.create_and_upload!(io: StringIO.new('second attachment'), filename: 'second.txt', content_type: 'text/plain')
+      actions = [{ action_name: 'send_attachment', action_params: [blob.id] },
+                 { action_name: 'send_attachment', action_params: [second_blob.signed_id] }]
+      patch "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}", headers: headers, as: :json, params: { actions: actions }
+      expect(response).to have_http_status(:success)
+
+      post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+
+      expect(response).to have_http_status(:success)
+      expect(copy.files.pluck(:blob_id)).to contain_exactly(blob.id, second_blob.id)
+      expect(copy.actions).to eq(source.reload.actions)
+    end
+
+    it 'allows saving the cloned actions without re-uploading the attachment' do
+      post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+      expect(response).to have_http_status(:success)
+
+      patch "/api/v1/accounts/#{account.id}/automation_rules/#{copy.id}", headers: headers, params: { actions: copy.actions }, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(copy.reload.actions).to eq(source.actions)
+      expect(copy.files.sole.blob_id).to eq(blob.id)
+    end
+
+    it 'sends exactly one outgoing attachment message from each rule' do
+      post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+      expect(response).to have_http_status(:success)
+      conversation = create(:conversation, account: account, inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+
+      [source, copy].each do |rule|
+        expect do
+          AutomationRules::ActionService.new(rule, account, conversation).perform
+        end.to change { conversation.messages.outgoing.count }.by(1)
+        message = conversation.messages.outgoing.last
+        expect(message.private).to be(false)
+        expect(message.attachments.sole.file.blob_id).to eq(blob.id)
+        expect(message.attachments.sole.file.download).to eq('automation attachment')
+      end
+    end
+
+    %w[source copy].each do |deleted_rule|
+      it "keeps the file after deleting the #{deleted_rule} and purges it after deleting the survivor" do
+        post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+        expect(response).to have_http_status(:success)
+        removed, survivor = deleted_rule == 'source' ? [source, copy] : [copy, source]
+        blob_key = blob.key
+        storage = blob.service
+
+        perform_enqueued_jobs(only: ActiveStorage::PurgeJob) do
+          delete "/api/v1/accounts/#{account.id}/automation_rules/#{removed.id}", headers: headers
+          expect(response).to have_http_status(:success)
+        end
+
+        expect(survivor.reload.files.sole.download).to eq('automation attachment')
+        expect(storage.exist?(blob_key)).to be(true)
+
+        perform_enqueued_jobs(only: ActiveStorage::PurgeJob) do
+          delete "/api/v1/accounts/#{account.id}/automation_rules/#{survivor.id}", headers: headers
+          expect(response).to have_http_status(:success)
+        end
+
+        expect(ActiveStorage::Blob.exists?(blob.id)).to be(false)
+        expect(storage.exist?(blob_key)).to be(false)
+      end
+    end
+
+    it 'does not accept a numeric blob ID from another account on the clone' do
+      other_rule = create(:automation_rule)
+      other_rule.files.attach(io: StringIO.new('other account'), filename: 'other.txt', content_type: 'text/plain')
+      post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+      expect(response).to have_http_status(:success)
+
+      actions = [{ action_name: 'send_attachment', action_params: [other_rule.files.sole.blob_id] }]
+      patch "/api/v1/accounts/#{account.id}/automation_rules/#{copy.id}", headers: headers, params: { actions: actions }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(copy.reload.actions).to eq(source.actions)
+      expect(copy.files.pluck(:blob_id)).to eq([blob.id])
+    end
+
+    it 'does not allow an administrator from another account to clone the rule' do
+      other_administrator = create(:user, account: create(:account), role: :administrator)
+      expect do
+        post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: other_administrator.create_new_auth_token
+      end.not_to change(AutomationRule, :count)
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    context 'with a private note and no files' do
+      let(:rule_params) { super().merge(actions: [{ action_name: 'add_private_note', action_params: ['Internal note'] }]) }
+
+      it 'preserves the action and executes the cloned private note' do
+        post "/api/v1/accounts/#{account.id}/automation_rules/#{source.id}/clone", headers: headers
+        expect(response).to have_http_status(:success)
+        expect(copy.actions).to eq(source.actions)
+        expect(copy.files).not_to be_attached
+        conversation = create(:conversation, account: account, inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+
+        expect do
+          AutomationRules::ActionService.new(copy, account, conversation).perform
+        end.to change { conversation.messages.outgoing.count }.by(1)
+        expect(conversation.messages.outgoing.last).to have_attributes(content: 'Internal note', private: true)
+      end
+    end
+  end
+
   describe 'PATCH /api/v1/accounts/{account.id}/automation_rules/{automation_rule.id}' do
     let!(:automation_rule) { create(:automation_rule, account: account, name: 'Test Automation Rule') }
 
