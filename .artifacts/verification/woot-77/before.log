@@ -1,0 +1,46 @@
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :message_type, {incoming: 0, outgoing: 1, activity: 2, template: 3}
+ (called from <class:Message> at /srv/factory-sandboxes/4941973b-f7b3-4e24-844d-c9f154b5ee5e/chatwoot/app/models/message.rb:88)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :content_type, {text: 0, input_text: 1, input_textarea: 2, input_email: 3, input_select: 4, cards: 5, form: 6, article: 7, incoming_email: 8, input_csat: 9, integrations: 10, sticker: 11, voice_call: 12}
+ (called from <class:Message> at /srv/factory-sandboxes/4941973b-f7b3-4e24-844d-c9f154b5ee5e/chatwoot/app/models/message.rb:89)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {sent: 0, delivered: 1, read: 2, failed: 3}
+ (called from <class:Message> at /srv/factory-sandboxes/4941973b-f7b3-4e24-844d-c9f154b5ee5e/chatwoot/app/models/message.rb:104)
+
+Super Admin account feature selection
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :sender_name_type, {friendly: 0, professional: 1}
+ (called from <class:Inbox> at /srv/factory-sandboxes/4941973b-f7b3-4e24-844d-c9f154b5ee5e/chatwoot/app/models/inbox.rb:81)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :bot_type, {webhook: 0}
+ (called from <class:AgentBot> at /srv/factory-sandboxes/4941973b-f7b3-4e24-844d-c9f154b5ee5e/chatwoot/app/models/agent_bot.rb:41)
+  persists clearing the last feature from the rendered all-unchecked form (FAILED - 1)
+  replaces help_center with campaigns without a submission marker
+
+Failures:
+
+  1) Super Admin account feature selection persists clearing the last feature from the rendered all-unchecked form
+     Failure/Error: expect(account.feature_enabled?('help_center')).to be(false)
+
+       expected false
+            got true
+     # ./spec/enterprise/controllers/super_admin/accounts_controller_spec.rb:28:in 'block (2 levels) in <top (required)>'
+
+Finished in 59.59 seconds (files took 4.15 seconds to load)
+2 examples, 1 failure
+
+Failed examples:
+
+rspec ./spec/enterprise/controllers/super_admin/accounts_controller_spec.rb:12 # Super Admin account feature selection persists clearing the last feature from the rendered all-unchecked form
+
