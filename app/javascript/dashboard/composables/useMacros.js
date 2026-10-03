@@ -2,6 +2,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useStoreGetters } from 'dashboard/composables/store';
 import { PRIORITY_CONDITION_VALUES } from 'dashboard/constants/automation';
+import { MACRO_STATUS_VALUES } from 'dashboard/routes/dashboard/settings/macros/constants';
 import {
   generateLabelOptions,
   generateTeamOptions,
@@ -33,7 +34,7 @@ export const useMacros = () => {
    * @param {string} type - The type of dropdown values to retrieve
    * @returns {Array} An array of dropdown values
    */
-  const getMacroDropdownValues = type => {
+  const getMacroDropdownValues = (type, selectedId) => {
     switch (type) {
       case 'assign_team':
         return withNoneOption(generateTeamOptions(teams.value));
@@ -46,6 +47,11 @@ export const useMacros = () => {
       case 'add_label':
       case 'remove_label':
         return generateLabelOptions(labels.value);
+      case 'change_status':
+        return MACRO_STATUS_VALUES.map(item => ({
+          id: typeof selectedId === 'number' ? item.value : item.id,
+          name: t(`MACROS.STATUS_TYPES.${item.id.toUpperCase()}`),
+        }));
       case 'change_priority':
         return PRIORITY_CONDITION_VALUES.map(item => ({
           id: item.id,
@@ -62,7 +68,7 @@ export const useMacros = () => {
   ) => {
     if (!params?.length) return '';
 
-    const options = getMacroDropdownValues(name);
+    const options = getMacroDropdownValues(name, params[0]);
     if (options.length) {
       return params
         .map(id => options.find(option => option.id === id)?.name)

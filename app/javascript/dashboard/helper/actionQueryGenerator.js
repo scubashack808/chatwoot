@@ -18,7 +18,7 @@ const formatArray = params => {
 };
 
 const generatePayloadForObject = item => {
-  if (item.action_params.id) {
+  if (item.action_params.id !== undefined && item.action_params.id !== null) {
     item.action_params = [item.action_params.id];
   } else {
     item.action_params = [item.action_params];
