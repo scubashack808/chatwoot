@@ -83,7 +83,9 @@ const syncLocalState = () => {
 watch(
   [() => props.article?.id, hasPendingChanges],
   ([id, pending], [prevId, prevPending]) => {
-    if ((id && id !== prevId) || (prevPending && !pending)) syncLocalState();
+    const idleDraftCleared =
+      prevPending && !pending && !props.isUpdating && !isSaving.value;
+    if ((id && id !== prevId) || idleDraftCleared) syncLocalState();
     if (prevPending && !pending) diffPanelRef.value?.close();
   }
 );
