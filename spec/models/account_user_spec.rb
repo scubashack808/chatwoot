@@ -17,6 +17,55 @@ RSpec.describe AccountUser do
     end
   end
 
+  describe 'membership lifecycle transactions' do
+    it 'replaces stale settings and permissions when directly re-added' do
+      account = account_user.account
+      user = account_user.user
+      old_setting = user.notification_settings.find_by!(account: account)
+      create(:inbox_member, inbox: inbox, user: user)
+      account_user.destroy!
+
+      replacement = described_class.create!(account: account, user: user)
+
+      expect(replacement).to be_persisted
+      expect(NotificationSetting.exists?(old_setting.id)).to be(false)
+      expect(user.notification_settings.where(account: account).count).to eq(1)
+      expect(user.inbox_members.where(inbox: inbox)).to be_empty
+    end
+
+    it 'rolls back membership and restores stale resources when settings creation fails' do
+      account = account_user.account
+      user = account_user.user
+      old_setting = user.notification_settings.find_by!(account: account)
+      old_member = create(:inbox_member, inbox: inbox, user: user)
+      account_user.destroy!
+      replacement = described_class.new(account: account, user: user)
+      setting = NotificationSetting.new(account: account, user: user)
+      allow(user.notification_settings).to receive(:new).with(account_id: account.id).and_return(setting)
+      allow(setting).to receive(:save!).and_raise(ActiveRecord::RecordInvalid.new(setting))
+
+      expect do
+        described_class.transaction(requires_new: true) { replacement.save! }
+      end.to raise_error(ActiveRecord::RecordInvalid)
+
+      expect(described_class.exists?(account: account, user: user)).to be(false)
+      expect(NotificationSetting.exists?(old_setting.id)).to be(true)
+      expect(InboxMember.exists?(old_member.id)).to be(true)
+    end
+
+    it 'does not enqueue cleanup for a rolled-back destruction' do
+      clear_enqueued_jobs
+
+      described_class.transaction(requires_new: true) do
+        account_user.destroy!
+        raise ActiveRecord::Rollback
+      end
+
+      expect(account_user.reload).to be_persisted
+      expect(Agents::DestroyJob).not_to have_been_enqueued
+    end
+  end
+
   describe 'permissions' do
     it 'returns the right permissions' do
       expect(account_user.permissions).to eq(['agent'])
