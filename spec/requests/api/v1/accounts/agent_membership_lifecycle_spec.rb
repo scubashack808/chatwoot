@@ -15,12 +15,18 @@ RSpec.describe 'Committed agent membership lifecycle', type: :request do
   end
 
   after do
+    team_ids = Team.where(account: [account, retained_account]).pluck(:id)
+    conversation_ids = Conversation.where(account: [account, retained_account]).pluck(:id)
     clear_enqueued_jobs
     perform_enqueued_jobs(only: ActiveRecord::DestroyAssociationAsyncJob) do
       [account, retained_account].each { |owned_account| owned_account.contacts.destroy_all }
       [account, retained_account].each(&:destroy!)
       [administrator, agent].each(&:destroy!)
     end
+    Audited::Audit.where(associated_type: 'Account', associated_id: [account.id, retained_account.id]).delete_all
+    Audited::Audit.where(auditable_type: 'User', auditable_id: [administrator.id, agent.id]).delete_all
+    Audited::Audit.where(auditable_type: 'Team', auditable_id: team_ids).delete_all
+    Audited::Audit.where(auditable_type: 'Conversation', auditable_id: conversation_ids).delete_all
   ensure
     clear_enqueued_jobs
     clear_performed_jobs
@@ -30,7 +36,7 @@ RSpec.describe 'Committed agent membership lifecycle', type: :request do
   [[false, 2], [true, 0], [true, 2]].each do |cleanup_first, repeat_deliveries|
     it "preserves re-addition with cleanup_first=#{cleanup_first} and #{repeat_deliveries} delayed deliveries", :aggregate_failures do
       expect(agent).to be_confirmed
-      expect([account.saml_enabled?, retained_account.saml_enabled?]).to eq([false, false])
+      expect([account.saml_enabled?, retained_account.saml_enabled?]).to eq([false, false]) if ChatwootApp.enterprise?
       expect(ActiveRecord::Base.connection.transaction_open?).to be(false)
       original_setting = agent.notification_settings.find_by!(account: account)
       retained_setting = agent.notification_settings.find_by!(account: retained_account)

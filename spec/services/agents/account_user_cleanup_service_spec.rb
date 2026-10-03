@@ -62,6 +62,9 @@ RSpec.describe Agents::AccountUserCleanupService do
       user.destroy!
       account.destroy!
       other_account.destroy!
+      Audited::Audit.where(associated_type: 'Account', associated_id: [account.id, other_account.id]).delete_all
+      Audited::Audit.where(auditable_type: 'User', auditable_id: user.id).delete_all
+      Audited::Audit.where(auditable_type: 'Team', auditable_id: team.id).delete_all
       clear_enqueued_jobs
       Current.reset
     end
