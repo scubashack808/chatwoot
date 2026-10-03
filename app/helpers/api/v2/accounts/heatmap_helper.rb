@@ -99,6 +99,6 @@ module Api::V2::Accounts::HeatmapHelper
   end
 
   def until_timestamp(date)
-    date.to_i.to_s
+    date.end_of_day.to_i.to_s
   end
 end
