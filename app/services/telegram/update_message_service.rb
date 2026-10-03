@@ -7,8 +7,13 @@ class Telegram::UpdateMessageService
   def perform
     transform_business_message!
     find_contact_inbox
-    find_conversation
     find_message
+    unless @message
+      Rails.logger.warn "Telegram edit target not found: inbox_id=#{inbox.id} " \
+                        "contact_inbox_id=#{@contact_inbox.id} message_id=#{params[:edited_message][:message_id]}"
+      return
+    end
+
     update_message
   rescue StandardError => e
     Rails.logger.error "Error while processing telegram message update #{e.message}"
@@ -20,12 +25,9 @@ class Telegram::UpdateMessageService
     @contact_inbox = inbox.contact_inboxes.find_by!(source_id: params[:edited_message][:chat][:id])
   end
 
-  def find_conversation
-    @conversation = @contact_inbox.conversations.last
-  end
-
   def find_message
-    @message = @conversation.messages.find_by(source_id: params[:edited_message][:message_id])
+    @message = inbox.messages.where(conversation_id: @contact_inbox.conversations.select(:id))
+                    .find_by(source_id: params[:edited_message][:message_id])
   end
 
   def update_message
