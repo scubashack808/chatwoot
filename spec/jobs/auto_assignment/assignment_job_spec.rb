@@ -98,7 +98,7 @@ RSpec.describe AutoAssignment::AssignmentJob, type: :job do
     end
 
     before do
-      account.enable_features('assignment_v2')
+      account.enable_features!('assignment_v2')
       create(:inbox_assignment_policy, inbox: inbox, assignment_policy: policy)
       allow(OnlineStatusTracker).to receive(:get_available_users).and_return({ agent.id.to_s => 'online' })
       clear_enqueued_jobs
