@@ -12,11 +12,11 @@ module Enterprise::Concerns::Article
 
     def self.vector_search(params)
       embedding = Captain::Llm::EmbeddingService.new(account_id: params[:account_id]).get_embedding(params['query'])
-      records = joins(
+      records = left_outer_joins(
         :category
       ).search_by_category_slug(
         params[:category_slug]
-      ).search_by_category_locale(params[:locale]).search_by_author(params[:author_id]).search_by_status(params[:status])
+      ).search_by_locale(params[:locale]).search_by_author(params[:author_id]).search_by_status(params[:status])
       filtered_article_ids = records.pluck(:id)
 
       # Fetch nearest neighbors and their distances, then filter directly
