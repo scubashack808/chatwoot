@@ -191,6 +191,63 @@ RSpec.describe MailboxHelper do
     end
   end
 
+  describe 'exact CID matching' do
+    let(:helper_instance) { mailbox_helper_obj.new(conversation, processed_mail) }
+    let(:cid) { 'image/name@test' }
+    let(:mail_attachment) { { original: OpenStruct.new(cid: cid), blob: nil } }
+
+    delimiters = ['"', "'", ' ', '>', '<', ')', "\n", '']
+    suffixes = ['a', '2', '.', '-', '_', '/', '%2F']
+    ['image/name@test', 'image%2Fname%40test', 'image%2fname%40test'].each do |reference|
+      delimiters.each do |delimiter|
+        it "preserves the delimiter after #{reference.inspect} followed by #{delimiter.inspect}" do
+          html = "CiD:#{reference}#{delimiter}"
+          helper_instance.instance_variable_set(:@html_content, html)
+          allow(helper_instance).to receive(:inline_image_url).and_return('/image.png')
+
+          expect(helper_instance.send(:body_references_cid?, cid)).to be true
+          helper_instance.send(:upload_inline_image, mail_attachment)
+          expect(helper_instance.instance_variable_get(:@html_content)).to eq("/image.png#{delimiter}")
+        end
+      end
+
+      suffixes.each do |suffix|
+        it "does not match or replace the prefix of #{reference}#{suffix}" do
+          html = "<img src=\"cid:#{reference}#{suffix}\">"
+          helper_instance.instance_variable_set(:@html_content, html)
+          allow(helper_instance).to receive(:inline_image_url).and_return('/image.png')
+
+          expect(helper_instance.send(:body_references_cid?, cid)).to be false
+          helper_instance.send(:upload_inline_image, mail_attachment)
+          expect(helper_instance.instance_variable_get(:@html_content)).to eq(html)
+        end
+      end
+    end
+
+    it 'matches and replaces unquoted CSS url(cid:...) references' do
+      html = %(<td style="background:url(cid:#{cid})"><td style="background:url(cid:#{cid}2)">)
+      helper_instance.instance_variable_set(:@html_content, html)
+      allow(helper_instance).to receive(:inline_image_url).and_return('/image.png')
+
+      expect(helper_instance.send(:body_references_cid?, cid)).to be true
+      helper_instance.send(:upload_inline_image, mail_attachment)
+      expect(helper_instance.instance_variable_get(:@html_content))
+        .to eq(%(<td style="background:url(/image.png)"><td style="background:url(cid:#{cid}2)">))
+    end
+
+    it 'replaces repeated exact references without changing longer references or surrounding HTML' do
+      html = %(<img src="cid:#{cid}"><img src='CID:#{cid}'><img src=cid:#{cid} ><img src="cid:#{cid}2">)
+      helper_instance.instance_variable_set(:@html_content, html)
+      allow(helper_instance).to receive(:inline_image_url).and_return('/image.png')
+
+      helper_instance.send(:upload_inline_image, mail_attachment)
+
+      expect(helper_instance.instance_variable_get(:@html_content)).to eq(
+        %(<img src="/image.png"><img src='/image.png'><img src=/image.png ><img src="cid:#{cid}2">)
+      )
+    end
+  end
+
   describe '#add_attachments_to_message' do
     let(:mail) { create_inbound_email_from_fixture('cid_inline_images_without_disposition.eml').mail }
     let(:processed_mail) { MailPresenter.new(mail) }
@@ -213,6 +270,56 @@ RSpec.describe MailboxHelper do
 
       expect(html_content).to include('/fake-image-url"')
       expect(html_content).not_to include('cid:')
+    end
+
+    {
+      'short CID first' => [['photo@sender.test', 'photo@sender.test2'], 'cid:photo@sender.test2'],
+      'long CID first' => [['photo@sender.test2', 'photo@sender.test'], 'cid:photo@sender.test2'],
+      'disjoint CIDs' => [['other@sender.test', 'photo@sender.test2'], 'cid:photo@sender.test2'],
+      'percent-encoded exact CID' => [['photo@sender.test2'], 'CID:photo%40sender.test2']
+    }.each do |scenario, (ids, reference)|
+      context "with #{scenario}" do
+        let(:mail) do
+          mime = Mail.new
+          mime.from = 'Sender <sender@example.com>'
+          mime.to = 'Inbox <inbox@example.com>'
+          mime.subject = 'Exact inline image reference'
+          mime.message_id = '<exact-inline-image@example.com>'
+          mime.text_part = Mail::Part.new { body 'Ordinary email body.' }
+          mime.html_part = Mail::Part.new do
+            content_type 'text/html; charset=UTF-8'
+            body %(<html><body><p>Ordinary email body.</p><img src="#{reference}"></body></html>)
+          end
+          ids.each_with_index do |cid, index|
+            mime.add_part(Mail::Part.new do
+              content_type 'image/png'
+              content_disposition %(inline; filename="image#{index}.png")
+              content_id "<#{cid}>"
+              body File.binread(Rails.root.join('spec/assets/avatar.png'))
+            end)
+          end
+          Mail.read_from_string(mime.encoded)
+        end
+
+        it 'uses the exact referenced blob and retains every unreferenced image', :aggregate_failures do
+          expect(mail.attachments.map(&:cid)).to eq(ids)
+          captured = nil
+          allow(processed_mail).to receive(:attachments).and_wrap_original do |original, *args|
+            captured = original.call(*args)
+          end
+
+          helper_instance.send(:add_attachments_to_message)
+
+          message = conversation.messages.first.reload
+          blobs = captured.to_h { |attachment| [attachment[:original].cid, attachment[:blob]] }
+          html = message.content_attributes.dig('email', 'html_content', 'full')
+          selected = 'photo@sender.test2'
+          expect(Nokogiri::HTML.fragment(html).at_css('img')['src']).to eq(Rails.application.routes.url_helpers.url_for(blobs.fetch(selected)))
+          expect(message.attachments.map { |attachment| attachment.file.blob_id }).to eq(
+            (ids - [selected]).map { |cid| blobs.fetch(cid).id }
+          )
+        end
+      end
     end
 
     context 'when an inline-marked image CID is not referenced in the HTML body' do
