@@ -20,6 +20,7 @@ export const MESSAGE_MAX_LENGTH = {
   BANDWIDTH_SMS: 160,
   // https://core.telegram.org/bots/api#sendmessage
   TELEGRAM: 4096,
-  LINE: 2000,
+  // https://developers.line.biz/en/reference/messaging-api/#text-message
+  LINE: 5000,
   EMAIL: 25000,
 };
