@@ -18,7 +18,32 @@ export const getUserString = ({ identifier = '', user }) => {
   return `${userStringWithSortedKeys}identifier${identifier}`;
 };
 
-export const computeHashForUserData = (...args) => md5(getUserString(...args));
+const sortCustomAttributes = value => {
+  if (Array.isArray(value)) return value.map(sortCustomAttributes);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map(key => [key, sortCustomAttributes(value[key])])
+    );
+  }
+  return value;
+};
+
+export const computeHashForUserData = ({ identifier, user }) => {
+  const profileString = getUserString({ identifier, user });
+  const customAttributes = user.custom_attributes;
+  // Preserve existing cookies when no custom attributes are supplied.
+  if (!customAttributes || !Object.keys(customAttributes).length) {
+    return md5(profileString);
+  }
+  // Fingerprint the JSON payload the iframe receives, so Date and other
+  // toJSON values compare by their transmitted form.
+  const wireAttributes = JSON.parse(JSON.stringify(customAttributes));
+  return md5(
+    JSON.stringify([profileString, sortCustomAttributes(wireAttributes)])
+  );
+};
 
 export const hasUserKeys = user =>
   REQUIRED_USER_KEYS.reduce((acc, key) => acc || !!user[key], false);
