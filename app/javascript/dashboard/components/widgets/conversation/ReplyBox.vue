@@ -342,6 +342,9 @@ export default {
       if (this.isATiktokChannel) {
         return MESSAGE_MAX_LENGTH.TIKTOK;
       }
+      if (this.isALineChannel) {
+        return MESSAGE_MAX_LENGTH.LINE;
+      }
       if (this.isATwilioWhatsAppChannel) {
         return MESSAGE_MAX_LENGTH.TWILIO_WHATSAPP;
       }
