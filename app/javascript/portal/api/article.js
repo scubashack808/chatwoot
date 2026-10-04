@@ -6,8 +6,10 @@ class ArticlesAPI {
   }
 
   searchArticles(portalSlug, locale, query) {
-    let baseUrl = `${this.baseUrl}/hc/${portalSlug}/${locale}/articles.json?query=${query}`;
-    return axios.get(baseUrl);
+    const searchParams = new URLSearchParams({ query });
+    return axios.get(
+      `${this.baseUrl}/hc/${portalSlug}/${locale}/articles.json?${searchParams.toString()}`
+    );
   }
 }
 
