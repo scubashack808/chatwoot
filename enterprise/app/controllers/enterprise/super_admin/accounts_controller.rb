@@ -1,4 +1,12 @@
 module Enterprise::SuperAdmin::AccountsController
+  def resource_params
+    permitted_params = super
+    if action_name == 'update' && params[:account_features_submitted] == '1' && params[:enabled_features].blank?
+      permitted_params[:selected_feature_flags] = []
+    end
+    permitted_params
+  end
+
   def create
     manually_managed = params[:account]&.delete(:manually_managed_features)
 
