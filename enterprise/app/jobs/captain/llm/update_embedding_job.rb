@@ -7,5 +7,8 @@ class Captain::Llm::UpdateEmbeddingJob < ApplicationJob
     record.with_lock do
       record.update!(embedding: embedding) if record.embedding_content == content
     end
+  rescue ActiveRecord::RecordNotFound
+    # The record was deleted during the embedding request, so there is nothing to update.
+    nil
   end
 end

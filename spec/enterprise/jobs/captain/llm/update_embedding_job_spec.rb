@@ -82,6 +82,18 @@ RSpec.describe Captain::Llm::UpdateEmbeddingJob, type: :job do
       expect(record.embedding).to be_nil
     end
 
+    it 'finishes quietly when the record is deleted during its request' do
+      record.save!
+      older = enqueued_jobs.find { |job| job[:job] == described_class }
+      allow(embedding_service).to receive(:get_embedding).with(content_a) do
+        record.class.find(record.id).destroy!
+        vector_a
+      end
+
+      expect { described_class.deserialize(older).perform_now }.not_to raise_error
+      expect(record.class.exists?(record.id)).to be(false)
+    end
+
     it 'does not enqueue another job for an embedding-only update' do
       record.save!
       clear_enqueued_jobs
