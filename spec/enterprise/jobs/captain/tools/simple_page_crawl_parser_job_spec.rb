@@ -173,6 +173,47 @@ RSpec.describe Captain::Tools::SimplePageCrawlParserJob, type: :job do
       end
     end
 
+    context 'when the account has a finite captain document limit' do
+      let(:account) { assistant.account }
+      let(:documents_limits) { account.reload.usage_limits[:captain][:documents] }
+
+      it 'processes an existing document that holds the final permitted slot' do
+        account.update!(limits: { 'captain_documents' => 1 })
+        document = assistant.documents.create!(external_link: 'https://example.com/page')
+        expect(documents_limits[:current_available]).to eq(0)
+
+        expect do
+          described_class.perform_now(assistant_id: assistant.id, page_link: page_link)
+        end.not_to change(assistant.documents, :count)
+
+        expect(document.reload).to have_attributes(status: 'available', content: content)
+        expect(documents_limits[:consumed]).to eq(1)
+      end
+
+      it 'processes an existing document when spare capacity remains' do
+        account.update!(limits: { 'captain_documents' => 2 })
+        document = assistant.documents.create!(external_link: 'https://example.com/page')
+        expect(documents_limits[:current_available]).to eq(1)
+
+        described_class.perform_now(assistant_id: assistant.id, page_link: page_link)
+
+        expect(document.reload).to have_attributes(status: 'available', content: content)
+        expect(documents_limits[:consumed]).to eq(1)
+      end
+
+      it 'skips a new page without crawling it when the limit is reached' do
+        account.update!(limits: { 'captain_documents' => 1 })
+        assistant.documents.create!(external_link: 'https://example.com/other')
+        expect(documents_limits[:current_available]).to eq(0)
+
+        expect do
+          described_class.perform_now(assistant_id: assistant.id, page_link: page_link)
+        end.not_to change(assistant.documents, :count)
+
+        expect(Captain::Tools::SimplePageCrawlService).not_to have_received(:new)
+      end
+    end
+
     context 'when title and content are nil' do
       before do
         allow(crawler).to receive(:page_title).and_return(nil)
