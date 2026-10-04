@@ -32,7 +32,8 @@ export default defineConfig({
     },
     server: {
       deps: {
-        inline: ['tinykeys', '@material/mwc-icon'],
+        // Keep VueUse on Vite's deduplicated Vue instance for scope disposal.
+        inline: ['tinykeys', '@material/mwc-icon', /@vueuse\//],
       },
     },
     setupFiles: ['fake-indexeddb/auto', 'vitest.setup.js'],
