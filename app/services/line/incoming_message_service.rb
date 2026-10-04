@@ -18,6 +18,8 @@ class Line::IncomingMessageService
   def parse_events
     params[:events].each do |event|
       next unless event_type_message?(event)
+      # LINE redelivers events with the same message id; skip ones already persisted for this inbox.
+      next if @inbox.messages.exists?(source_id: event['message']['id'].to_s)
 
       get_line_contact_info(event)
       next if @line_contact_info['userId'].blank?
