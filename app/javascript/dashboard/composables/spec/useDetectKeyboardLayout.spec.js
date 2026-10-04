@@ -70,11 +70,15 @@ describe('useDetectKeyboardLayout', () => {
     expect(layout).toBe(LAYOUT_AZERTY);
   });
 
-  it('should use legacy method if navigator.keyboard is not available', async () => {
+  it('falls back to QWERTY if navigator.keyboard is not available', async () => {
     navigator.keyboard = undefined;
+    const dispatchEvent = vi.spyOn(EventTarget.prototype, 'dispatchEvent');
 
     const layout = await useDetectKeyboardLayout();
-    expect([LAYOUT_QWERTY, LAYOUT_QWERTZ, LAYOUT_AZERTY]).toContain(layout);
+    expect(layout).toBe(LAYOUT_QWERTY);
+    expect(window.cw_keyboard_layout).toBe(LAYOUT_QWERTY);
+    expect(dispatchEvent).not.toHaveBeenCalled();
+    dispatchEvent.mockRestore();
   });
 
   it('should cache the detected layout', async () => {
