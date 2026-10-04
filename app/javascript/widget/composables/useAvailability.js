@@ -1,4 +1,5 @@
-import { computed, unref } from 'vue';
+import { computed, ref, unref } from 'vue';
+import { useIntervalFn } from '@vueuse/core';
 import {
   isOnline as checkIsOnline,
   isInWorkingHours as checkInWorkingHours,
@@ -33,7 +34,10 @@ export function useAvailability(agents = []) {
     replyTime: channelConfig.value.replyTime || DEFAULT_REPLY_TIME,
   }));
 
-  const currentTime = computed(() => new Date());
+  const currentTime = ref(new Date());
+  useIntervalFn(() => {
+    currentTime.value = new Date();
+  }, 1000);
 
   const hasOnlineAgents = computed(() => {
     const agentList = availableAgents.value || [];
