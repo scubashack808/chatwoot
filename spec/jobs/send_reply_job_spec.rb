@@ -11,6 +11,55 @@ RSpec.describe SendReplyJob do
       .on_queue('high')
   end
 
+  context 'when delivering an Instagram text reply' do
+    let(:channel) { create(:channel_instagram) }
+    let(:conversation) { create(:conversation, inbox: channel.inbox, account: channel.account) }
+    let(:message) do
+      create(:message, conversation: conversation, inbox: channel.inbox, account: channel.account,
+                       message_type: :outgoing, private: false, content: 'Synthetic Instagram reply')
+    end
+    let(:endpoint) { %r{https://graph.instagram.com/.*/#{channel.instagram_id}/messages} }
+
+    before do
+      allow(ChatwootExceptionTracker).to receive(:new).and_return(instance_double(ChatwootExceptionTracker, capture_exception: nil))
+    end
+
+    it 'persists a retryable failure when the connection is refused before sending' do
+      request = stub_request(:post, endpoint).to_raise(Errno::ECONNREFUSED)
+
+      expect { described_class.perform_now(message.id) }.not_to raise_error
+
+      expect(request).to have_been_requested.once
+      expect(message.reload.status).to eq('failed')
+      expect(message.source_id).to be_nil
+      expect(message.external_error).to eq('Instagram connection refused before sending. Please retry.')
+      expect(message.content).to eq('Synthetic Instagram reply')
+      expect(ChatwootExceptionTracker).to have_received(:new).with(instance_of(Errno::ECONNREFUSED), anything)
+    end
+
+    it 'stores the provider ID after a successful send' do
+      stub_request(:post, endpoint).to_return(status: 200, body: { message_id: 'synthetic-instagram-id' }.to_json,
+                                              headers: { 'Content-Type' => 'application/json' })
+
+      described_class.perform_now(message.id)
+
+      expect(message.reload.status).to eq('sent')
+      expect(message.source_id).to eq('synthetic-instagram-id')
+      expect(message.external_error).to be_blank
+    end
+
+    it 'retains failure handling for an HTTP rejection' do
+      stub_request(:post, endpoint).to_return(status: 400, body: { error: { code: 100, message: 'Synthetic rejection' } }.to_json,
+                                              headers: { 'Content-Type' => 'application/json' })
+
+      described_class.perform_now(message.id)
+
+      expect(message.reload.status).to eq('failed')
+      expect(message.source_id).to be_nil
+      expect(message.external_error).to eq('100 - Synthetic rejection')
+    end
+  end
+
   context 'when the job is triggered on a new message' do
     let(:process_service) { double }
 
