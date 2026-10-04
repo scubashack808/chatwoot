@@ -856,7 +856,7 @@ useEmitter('fetch_conversation_stats', () => {
 });
 
 // Reconciliation publishes one state-only event per touched conversation, so an external bulk
-// move arrives as a burst. Merge one page-1 refetch per burst instead of resetting the view.
+// move arrives as a burst. Refresh the loaded page range without resetting the view.
 const MAILBOX_STATE_REFRESH_DELAY = 1000;
 let mailboxStateRefreshTimer = null;
 
@@ -867,7 +867,11 @@ function refreshMailboxView() {
     ...conversationFilters.value,
     page: 1,
   });
-  store.dispatch('fetchAllConversations').then(emitConversationLoaded);
+  store
+    .dispatch('fetchAllConversations', {
+      refreshPages: Math.max(currentPage.value, 1),
+    })
+    .then(emitConversationLoaded);
 }
 
 function scheduleMailboxViewRefresh() {

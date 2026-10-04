@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(() => Promise.resolve()),
   push: vi.fn(() => Promise.resolve()),
   featureEnabled: true,
+  currentPage: 1,
   loadedConversationIds: [],
   route: {
     name: 'inbox_conversation',
@@ -49,7 +50,8 @@ vi.mock('dashboard/composables/store.js', () => ({
   useFunctionGetter: key =>
     computed(() => {
       if (key === 'inboxes/getInbox') return {};
-      if (key === 'conversationPage/getCurrentPageFilter') return 1;
+      if (key === 'conversationPage/getCurrentPageFilter')
+        return mocks.currentPage;
       return [];
     }),
 }));
@@ -111,6 +113,7 @@ describe('ChatList mailbox publication', () => {
   beforeEach(async () => {
     vi.useFakeTimers();
     mocks.featureEnabled = true;
+    mocks.currentPage = 1;
     mocks.loadedConversationIds = [];
     await mountChatList();
   });
@@ -139,6 +142,17 @@ describe('ChatList mailbox publication', () => {
       expect(dispatchedActions(action)).toHaveLength(0)
     );
     expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it('passes the retained page range to a single burst refresh', async () => {
+    wrapper.unmount();
+    mocks.currentPage = 3;
+    await mountChatList();
+    await publishState(999, { state: 'inbox', roles: ['inbox'] });
+    await vi.runAllTimersAsync();
+    expect(dispatchedActions('fetchAllConversations')).toEqual([
+      ['fetchAllConversations', { refreshPages: 3 }],
+    ]);
   });
 
   it.each(['inbox', 'archive', 'trash'])(

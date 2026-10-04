@@ -53,16 +53,36 @@ const actions = {
     }
   },
 
-  fetchAllConversations: async ({ commit, state, dispatch }) => {
+  fetchAllConversations: async (
+    { commit, state, dispatch },
+    { refreshPages } = {}
+  ) => {
     commit(types.SET_LIST_LOADING_STATUS);
     try {
       const params = state.conversationFilters;
       const {
         data: { data },
       } = await ConversationApi.get(params);
+      if (refreshPages) {
+        // Refill the retained range, not just its first page: external inserts can
+        // shift matching conversations across every previously loaded boundary.
+        let lastPage = data.payload;
+        for (let page = 2; page <= refreshPages; page += 1) {
+          // Keep a large retained range from issuing parallel requests per tab.
+          // eslint-disable-next-line no-await-in-loop
+          const response = await ConversationApi.get({ ...params, page });
+          lastPage = response.data.data.payload;
+          data.payload.push(...lastPage);
+          data.meta = response.data.data.meta;
+        }
+        dispatch('conversationPage/setEndReached', {
+          filter: params.assigneeType,
+          endReached: !lastPage.length,
+        });
+      }
       buildConversationList(
         { commit, dispatch },
-        params,
+        { ...params, page: refreshPages || params.page },
         data,
         params.assigneeType
       );
