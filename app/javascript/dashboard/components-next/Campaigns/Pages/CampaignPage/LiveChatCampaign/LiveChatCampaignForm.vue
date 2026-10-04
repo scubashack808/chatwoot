@@ -110,8 +110,6 @@ const formErrors = computed(() => ({
   sender: getErrorMessage('senderId', 'SENT_BY'),
 }));
 
-const resetState = () => Object.assign(state, initialState);
-
 const handleCancel = () => emit('cancel');
 
 const handleInboxChange = async inboxId => {
@@ -150,10 +148,6 @@ const handleSubmit = async () => {
   if (!isFormValid) return;
 
   emit('submit', prepareCampaignDetails());
-  if (props.mode === 'create') {
-    resetState();
-    handleCancel();
-  }
 };
 
 const updateStateFromCampaign = campaign => {
