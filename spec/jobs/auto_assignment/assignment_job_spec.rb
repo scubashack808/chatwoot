@@ -79,6 +79,55 @@ RSpec.describe AutoAssignment::AssignmentJob, type: :job do
     end
   end
 
+  describe 'progress past disabled-team conversations' do
+    let(:team) { create(:team, account: account, allow_auto_assign: false) }
+    let(:policy) { create(:assignment_policy, account: account, enabled: true, fair_distribution_limit: 1000) }
+    let!(:blockers) do
+      create_list(:conversation, 100, account: account, inbox: inbox, team: team, status: :open,
+                                      assignee: nil, created_at: 2.minutes.ago, last_activity_at: Time.current)
+    end
+    let!(:eligible) do
+      create(:conversation, account: account, inbox: inbox, status: :open,
+                            assignee: nil, created_at: 1.minute.ago, last_activity_at: Time.current)
+    end
+
+    around do |example|
+      with_modified_env AUTO_ASSIGNMENT_BULK_LIMIT: nil do
+        freeze_time { example.run }
+      end
+    end
+
+    before do
+      account.enable_features!('assignment_v2')
+      create(:inbox_assignment_policy, inbox: inbox, assignment_policy: policy)
+      allow(OnlineStatusTracker).to receive(:get_available_users).and_return({ agent.id.to_s => 'online' })
+      clear_enqueued_jobs
+    end
+
+    after do
+      Current.reset
+      clear_enqueued_jobs
+    end
+
+    it 'reaches the eligible 101st conversation with the default bounded job' do
+      expect(inbox.conversations.unassigned.open.count).to eq(101)
+
+      described_class.perform_now(inbox_id: inbox.id)
+
+      expect(eligible.reload.assignee).to eq(agent)
+      described_class.perform_now(inbox_id: inbox.id)
+
+      expect(inbox.conversations.where.not(assignee_id: nil).pluck(:id)).to eq([eligible.id])
+      expect(Conversation.where(id: blockers.map(&:id)).pluck(:team_id, :status, :assignee_id).uniq).to eq([[team.id, 'open', nil]])
+    end
+
+    it 'assigns only the eligible conversation with the independent limit-101 control' do
+      expect(AutoAssignment::AssignmentService.new(inbox: inbox).perform_bulk_assignment(limit: 101)).to eq(1)
+      expect(eligible.reload.assignee).to eq(agent)
+      expect(Conversation.where(id: blockers.map(&:id)).pluck(:team_id, :status, :assignee_id).uniq).to eq([[team.id, 'open', nil]])
+    end
+  end
+
   describe '.enqueue_for_inbox' do
     after { Redis::Alfred.delete(format(Redis::Alfred::AUTO_ASSIGNMENT_IN_FLIGHT_KEY, inbox_id: inbox.id)) }
 

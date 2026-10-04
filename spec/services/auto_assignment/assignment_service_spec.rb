@@ -400,6 +400,75 @@ RSpec.describe AutoAssignment::AssignmentService do
       end
     end
 
+    context 'with ineligible teams before the batch limit' do
+      let(:disabled_team) { create(:team, account: account, allow_auto_assign: false) }
+      let(:unset_team) { create(:team, account: account, allow_auto_assign: nil) }
+      let!(:disabled_conversation) do
+        create(:conversation, account: account, inbox: inbox, team: disabled_team, assignee: nil,
+                              created_at: 10.minutes.ago, last_activity_at: 10.minutes.ago)
+      end
+      let!(:unset_conversation) do
+        create(:conversation, account: account, inbox: inbox, team: unset_team, assignee: nil,
+                              created_at: 9.minutes.ago, last_activity_at: 9.minutes.ago)
+      end
+      let!(:teamless_conversation) do
+        create(:conversation, account: account, inbox: inbox, assignee: nil,
+                              created_at: 8.minutes.ago, last_activity_at: 1.minute.ago)
+      end
+      let!(:team_conversation) do
+        team = create(:team, account: account, allow_auto_assign: true)
+        create(:conversation, account: account, inbox: inbox, team: team, assignee: nil,
+                              created_at: 7.minutes.ago, last_activity_at: 2.minutes.ago)
+      end
+
+      before do
+        create(:inbox_member, inbox: inbox, user: agent2)
+        create(:team_member, team: team_conversation.team, user: agent2)
+        inbox.reload
+        allow(OnlineStatusTracker).to receive(:get_available_users).and_return({ agent.id.to_s => 'online', agent2.id.to_s => 'online' })
+        clear_enqueued_jobs
+      end
+
+      after do
+        Current.reset
+        clear_enqueued_jobs
+      end
+
+      %w[earliest_created longest_waiting].each do |priority|
+        context "with #{priority} priority" do
+          let(:ordered) do
+            priority == 'earliest_created' ? [teamless_conversation, team_conversation] : [team_conversation, teamless_conversation]
+          end
+
+          before { assignment_policy.update!(conversation_priority: priority) }
+
+          it 'limits the eligible candidate relation before materializing conversations' do
+            candidates = service.send(:unassigned_conversations, 1)
+
+            expect(candidates.limit_value).to eq(1)
+            expect(candidates.to_a).to eq([ordered.first])
+          end
+
+          it 'assigns one eligible conversation per batch and progresses in policy order' do
+            expect(service.perform_bulk_assignment(limit: 1)).to eq(1)
+            expect([ordered.first.reload.assignee_id, ordered.last.reload.assignee_id]).to match([be_present, nil])
+
+            expect(service.perform_bulk_assignment(limit: 1)).to eq(1)
+            expect(team_conversation.reload.assignee).to eq(agent2)
+            expect([agent.id, agent2.id]).to include(teamless_conversation.reload.assignee_id)
+            expect(service.perform_bulk_assignment(limit: 1)).to eq(0)
+            blockers = [disabled_conversation.reload, unset_conversation.reload]
+            expect(blockers).to match(
+              [
+                have_attributes(assignee_id: nil, team_id: disabled_team.id, status: 'open'),
+                have_attributes(assignee_id: nil, team_id: unset_team.id, status: 'open')
+              ]
+            )
+          end
+        end
+      end
+    end
+
     context 'with team assignments' do
       let(:team) { create(:team, account: account, allow_auto_assign: true) }
       let(:team_member) { create(:user, account: account, role: :agent, availability: :online) }
