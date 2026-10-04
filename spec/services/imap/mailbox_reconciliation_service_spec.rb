@@ -147,6 +147,32 @@ RSpec.describe Imap::MailboxReconciliationService do
       ).once
     end
 
+    it 'still publishes changes already written when reconciliation fails partway through' do
+      moved = tracked_message('moved@example.com')
+      other_conversation = create(:conversation, account: account, inbox: inbox)
+      failing = create(:message, account: account, inbox: inbox, conversation: other_conversation,
+                                 message_type: :incoming, source_id: 'failing@example.com')
+      failing.write_imap_identity!(Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 777, uid: 12, roles: ['inbox']))
+      place('INBOX.Archive', 5, moved.source_id)
+      place('INBOX.Archive', 6, failing.source_id)
+      writes = 0
+      allow_any_instance_of(Message).to receive(:write_imap_identity!).and_wrap_original do |original, *args| # rubocop:disable RSpec/AnyInstance
+        writes += 1
+        raise Errno::ECONNRESET if writes > 1
+
+        original.call(*args)
+      end
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      expect { reconcile }.to raise_error(Errno::ECONNRESET)
+
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).once
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).with(
+        Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, anything,
+        hash_including(mailbox_state: hash_including(state: 'archive'))
+      )
+    end
+
     it 'does not publish coordinate changes that leave the derived state unchanged' do
       message = tracked_message('new-uid@example.com')
       place('INBOX', 42, message.source_id)

@@ -378,6 +378,10 @@ const actions = {
     }
   },
 
+  removeConversationFromList({ commit }, conversationId) {
+    commit(types.DELETE_CONVERSATION, conversationId);
+  },
+
   deleteConversation: async ({ commit, dispatch }, conversationId) => {
     try {
       await ConversationApi.delete(conversationId);

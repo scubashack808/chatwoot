@@ -62,15 +62,23 @@ class Imap::MailboxReconciliationService
 
     Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|
       @previous_mailbox_states = {}
-      report = reconcile_server(client, session)
-      @previous_mailbox_states.each_value do |conversation, previous_state|
-        Imap::MailboxOperationNotifier.publish_state(conversation: conversation, previous_state: previous_state)
+      begin
+        reconcile_server(client, session)
+      ensure
+        # Writes already committed before a failure must still reach agents; a later unchanged cycle
+        # compares against the written state and would never publish them.
+        publish_changed_states
       end
-      report
     end
   end
 
   private
+
+  def publish_changed_states
+    @previous_mailbox_states.each_value do |conversation, previous_state|
+      Imap::MailboxOperationNotifier.publish_state(conversation: conversation, previous_state: previous_state)
+    end
+  end
 
   def reconcile_server(client, session)
     return scan_and_reconcile(client, session, nil) if full_scan_due?
