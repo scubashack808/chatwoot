@@ -74,17 +74,8 @@ class SearchService
     base_query = apply_message_filters(base_query)
 
     if search_query.present?
-      # Use the @@ operator with to_tsquery for better GIN index utilization
-      # Convert search query to tsquery format with prefix matching
-
-      # Use this if we wanna match splitting the words
-      # split_query = search_query.split.map { |term| "#{term} | #{term}:*" }.join(' & ')
-
-      # This will do entire sentence matching using phrase distance operator
-      tsquery = search_query.split.join(' <-> ')
-
-      # Apply the text search using the GIN index
-      base_query.where('content @@ to_tsquery(?)', tsquery)
+      # phraseto_tsquery matches the whole phrase and treats punctuation in user text as separators, not tsquery operators
+      base_query.where('content @@ phraseto_tsquery(?)', search_query)
                 .reorder('messages.created_at DESC, messages.id DESC')
                 .page(params[:page])
                 .per(15)
