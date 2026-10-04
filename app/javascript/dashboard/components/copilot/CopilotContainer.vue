@@ -51,7 +51,7 @@ const isFeatureEnabledonAccount = useMapGetter(
   'accounts/isFeatureEnabledonAccount'
 );
 
-const selectedAssistantId = ref(null);
+let sessionGeneration = 0;
 
 const activeAssistant = computed(() => {
   const preferredId = uiSettings.value.preferred_captain_assistant_id;
@@ -83,9 +83,8 @@ const closeCopilotPanel = () => {
   }
 };
 
-const setAssistant = async assistant => {
-  selectedAssistantId.value = assistant.id;
-  await updateUISettings({
+const setAssistant = assistant => {
+  updateUISettings({
     preferred_captain_assistant_id: assistant.id,
   });
 };
@@ -103,10 +102,15 @@ const shouldShowCopilotPanel = computed(() => {
 });
 
 const handleReset = () => {
+  sessionGeneration += 1;
   selectedCopilotThreadId.value = null;
 };
 
-watch(() => currentChat.value?.id, handleReset);
+watch(
+  [() => currentChat.value?.id, () => activeAssistant.value?.id],
+  handleReset,
+  { flush: 'sync' }
+);
 
 const sendMessage = async payload => {
   const message = typeof payload === 'string' ? payload : payload.message;
@@ -123,13 +127,19 @@ const sendMessage = async payload => {
       });
     } else {
       const conversationId = currentChat.value?.id;
+      const assistantId = activeAssistant.value.id;
+      const generation = sessionGeneration;
       const response = await store.dispatch('copilotThreads/create', {
-        assistant_id: activeAssistant.value.id,
+        assistant_id: assistantId,
         conversation_id: conversationId,
         message,
         ...(requestType && { request_type: requestType }),
       });
-      if (currentChat.value?.id === conversationId) {
+      if (
+        sessionGeneration === generation &&
+        activeAssistant.value?.id === assistantId &&
+        currentChat.value?.id === conversationId
+      ) {
         selectedCopilotThreadId.value = response.id;
       }
     }
