@@ -56,6 +56,10 @@ class Captain::AssistantResponse < ApplicationRecord
     documentable.customer_visible_source_url if documentable.is_a?(Captain::Document)
   end
 
+  def embedding_content
+    "#{question}: #{answer}"
+  end
+
   private
 
   def ensure_status
@@ -79,6 +83,6 @@ class Captain::AssistantResponse < ApplicationRecord
   def update_response_embedding
     return unless saved_change_to_question? || saved_change_to_answer? || embedding.nil?
 
-    Captain::Llm::UpdateEmbeddingJob.perform_later(self, "#{question}: #{answer}")
+    Captain::Llm::UpdateEmbeddingJob.perform_later(self, embedding_content)
   end
 end

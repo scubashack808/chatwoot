@@ -4,6 +4,8 @@ class Captain::Llm::UpdateEmbeddingJob < ApplicationJob
   def perform(record, content)
     account_id = record.account_id
     embedding = Captain::Llm::EmbeddingService.new(account_id: account_id).get_embedding(content)
-    record.update!(embedding: embedding)
+    record.with_lock do
+      record.update!(embedding: embedding) if record.embedding_content == content
+    end
   end
 end
