@@ -54,6 +54,7 @@ RSpec.describe 'Conversation message retry identity', type: :request do
       expect { retry_message }.not_to change(Message, :count)
       success = stub_request(:post, endpoint).to_return(status: 200, body: { message_id: 'synthetic-retry-id' }.to_json,
                                                         headers: { 'Content-Type' => 'application/json' })
+      WebMock.reset_executed_requests!
       perform_enqueued_jobs(only: SendReplyJob)
 
       expect(success).to have_been_requested.once
