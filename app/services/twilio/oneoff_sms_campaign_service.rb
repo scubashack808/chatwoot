@@ -5,10 +5,15 @@ class Twilio::OneoffSmsCampaignService
     raise "Invalid campaign #{campaign.id}" if campaign.inbox.inbox_type != 'Twilio SMS' || !campaign.one_off?
     raise 'Completed Campaign' if campaign.completed?
 
-    audience_label_ids = campaign.audience.select { |audience| audience['type'] == 'Label' }.pluck('id')
-    audience_labels = campaign.account.labels.where(id: audience_label_ids).pluck(:title)
-    process_audience(audience_labels)
+    process_audience(prepare_audience)
     campaign.completed!
+  end
+
+  def prepare_audience
+    @prepare_audience ||= begin
+      audience_label_ids = campaign.audience.select { |audience| audience['type'] == 'Label' }.pluck('id')
+      campaign.account.labels.where(id: audience_label_ids).pluck(:title)
+    end
   end
 
   private
