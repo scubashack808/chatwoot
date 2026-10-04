@@ -121,21 +121,32 @@ RSpec.describe Imap::SentInboundImport do
     expect(channel.reload.sent_import_progress['retry_uids']).to eq [1]
   end
 
-  it 'retains a selected UID missing from a partial header response' do
+  it 'treats a UID expunged between SEARCH and FETCH as finished instead of retrying it forever' do
+    fetched = []
+    allow(sent_mailbox).to receive(:search_since).and_return([1, 2], [1])
     allow(sent_mailbox).to receive(:fetch_headers) do |uids|
-      (uids - [1]).reverse.map { |uid| Net::IMAP::FetchData.new(uid, 'UID' => uid, 'BODY[HEADER]' => raw_messages.fetch(uid)) }
+      fetched.concat(uids)
+      (uids - [2]).map { |uid| Net::IMAP::FetchData.new(uid, 'UID' => uid, 'BODY[HEADER]' => raw_messages.fetch(uid)) }
     end
     report = described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox).perform
 
-    expect(report[:examined]).to eq 100
-    expect(channel.reload.sent_import_progress['retry_uids']).to eq [1]
-    allow(sent_mailbox).to receive(:fetch_headers) do |uids|
-      uids.reverse.map { |uid| Net::IMAP::FetchData.new(uid, 'UID' => uid, 'BODY[HEADER]' => raw_messages.fetch(uid)) }
-    end
-    described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox).perform
+    expect(report.values_at(:examined, :missing, :imported)).to eq [2, 1, 1]
+    expect(channel.reload.sent_import_progress).to include('pending_uids' => [], 'retry_uids' => [], 'retry_since' => nil)
+    30.times { described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox).perform }
 
+    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_attempts' => {}, 'retry_since' => nil)
+    expect(fetched.count(2)).to eq 1
     expect(conversation.messages.where(source_id: 'sent-1@example.test').count).to eq 1
-    expect(channel.reload.sent_import_progress['retry_uids']).to eq []
+  end
+
+  it 'gives up on a UID whose body is never returned after the retry cap' do
+    allow(sent_mailbox).to receive(:search_since).and_return([1], [])
+    allow(sent_mailbox).to receive(:fetch_body).with(1).and_return(nil)
+    10.times { described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox).perform }
+
+    attempts = Imap::SentImportProgress::MAX_RETRY_ATTEMPTS
+    expect(sent_mailbox).to have_received(:fetch_body).with(1).exactly(attempts).times
+    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_attempts' => {}, 'retry_since' => nil)
   end
 
   it 'processes only selected UIDs once despite duplicate and unsolicited header responses' do

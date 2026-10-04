@@ -27,7 +27,14 @@ class Imap::SentInboundImport
     return @counts.merge(examined: 0) if uids.empty?
 
     headers = sent_mailbox.fetch_headers(uids).index_by { |data| data.attr['UID'] }
-    retry_uids = uids.select { |uid| !headers.key?(uid) || consider(headers.fetch(uid)) == :retry }
+    # A UID absent from the FETCH response was expunged after the snapshot: it is finished, not retried.
+    # If it still exists, the next sweep's SEARCH rediscovers it.
+    retry_uids = uids.select do |uid|
+      next consider(headers.fetch(uid)) == :retry if headers.key?(uid)
+
+      @counts[:missing] += 1
+      false
+    end
     progress.acknowledge(uids: uids, retry_uids: retry_uids)
     @counts.merge(examined: uids.length)
   end
