@@ -35,6 +35,10 @@ class Captain::FaqSuggestion < ApplicationRecord
   scope :ordered, -> { order(source_count: :desc, updated_at: :desc) }
   scope :by_language, ->(language) { where(language: language) }
 
+  def embedding_content
+    "#{question}: #{answer}"
+  end
+
   private
 
   def ensure_account
@@ -46,6 +50,6 @@ class Captain::FaqSuggestion < ApplicationRecord
     return unless saved_change_to_question? || saved_change_to_answer? || embedding.nil?
     return if previously_new_record? && embedding.present?
 
-    Captain::Llm::UpdateEmbeddingJob.perform_later(self, "#{question}: #{answer}")
+    Captain::Llm::UpdateEmbeddingJob.perform_later(self, embedding_content)
   end
 end
