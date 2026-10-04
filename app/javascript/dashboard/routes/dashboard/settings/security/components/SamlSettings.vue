@@ -145,15 +145,21 @@ const handleSubmit = async () => {
 };
 
 const handleDisable = async () => {
+  try {
+    // the empty save will delete the SAML settings item
+    await saveSamlSettings({});
+  } catch {
+    // saveSamlSettings already alerted; keep the configuration and draft
+    isEnabled.value = true;
+    return;
+  }
+
   id.value = null;
   formState.ssoUrl = '';
   formState.certificate = '';
   spEntityId.value = '';
   formState.idpEntityId = '';
   fingerprint.value = '';
-
-  // the empty save will delete the SAML settings item
-  await saveSamlSettings({});
 };
 
 const toggleSaml = async () => {
