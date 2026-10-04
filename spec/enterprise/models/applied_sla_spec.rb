@@ -87,6 +87,38 @@ RSpec.describe AppliedSla, type: :model do
     end
   end
 
+  describe '.filter_by_label_list' do
+    let(:account) { create(:account) }
+    let(:policy) { create(:sla_policy, account: account) }
+    let!(:vip_sla) { create(:applied_sla, sla_policy: policy, conversation: create(:conversation, account: account)) }
+    let!(:followup_sla) { create(:applied_sla, sla_policy: policy, conversation: create(:conversation, account: account)) }
+    let!(:multi_label_sla) { create(:applied_sla, sla_policy: policy, conversation: create(:conversation, account: account)) }
+    let!(:unlabeled_sla) { create(:applied_sla, sla_policy: policy, conversation: create(:conversation, account: account)) }
+    let!(:other_account_sla) { create(:applied_sla) }
+
+    before do
+      vip_sla.conversation.update_labels('vip')
+      followup_sla.conversation.update_labels('vip-followup')
+      multi_label_sla.conversation.update_labels(%w[vip urgent])
+      other_account_sla.conversation.update_labels('vip')
+    end
+
+    it 'matches exact membership, retains additional labels and preserves account scoping without duplicates' do
+      expect(account.applied_slas.filter_by_label_list('vip').ids).to contain_exactly(vip_sla.id, multi_label_sla.id)
+    end
+
+    it 'preserves the full distinct label control' do
+      expect(account.applied_slas.filter_by_label_list('vip-followup').ids).to contain_exactly(followup_sla.id)
+    end
+
+    [nil, ''].each do |label_filter|
+      it "does not filter when the label is #{label_filter.inspect}" do
+        expect(account.applied_slas.filter_by_label_list(label_filter).ids)
+          .to contain_exactly(vip_sla.id, followup_sla.id, multi_label_sla.id, unlabeled_sla.id)
+      end
+    end
+  end
+
   describe '#frt_due_at' do
     it 'returns nil when first_response_time_threshold is blank' do
       applied_sla = create(:applied_sla)

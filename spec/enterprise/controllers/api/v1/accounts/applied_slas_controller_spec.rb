@@ -16,6 +16,78 @@ RSpec.describe 'Applied SLAs API', type: :request do
     AppliedSla.destroy_all
   end
 
+  describe 'exact label filtering across SLA reports' do
+    let(:headers) { administrator.create_new_auth_token }
+    let(:window_start) { Time.utc(2026, 9, 17) }
+    let(:date_params) { { since: window_start.to_i.to_s, until: (window_start + 1.day).to_i.to_s, timezone_offset: 0 } }
+
+    before do
+      conversation1.update_labels('vip')
+      conversation2.update_labels('vip-followup')
+      create(:applied_sla, sla_policy: sla_policy1, conversation: conversation1, sla_status: :hit, created_at: window_start + 12.hours)
+      create(:applied_sla, sla_policy: sla_policy1, conversation: conversation2, sla_status: :missed, created_at: window_start + 12.hours)
+    end
+
+    [
+      ['vip', 1, 0, '100%'],
+      ['vip-followup', 1, 1, '0.0%'],
+      [nil, 2, 1, '50.0%']
+    ].each do |label, total, misses, hit_rate|
+      context "with label filter #{label.inspect}" do
+        let(:params) { date_params.merge(label_list: label) }
+
+        it 'returns metrics for the selected cohort' do
+          get "/api/v1/accounts/#{account.id}/applied_slas/metrics", params: params, headers: headers
+
+          expect(response).to have_http_status(:ok)
+          expect(response.parsed_body).to include('total_applied_slas' => total, 'number_of_sla_misses' => misses, 'hit_rate' => hit_rate)
+        end
+
+        it 'returns only the selected breached conversations' do
+          get "/api/v1/accounts/#{account.id}/applied_slas", params: params, headers: headers
+
+          expect(response).to have_http_status(:ok)
+          expect(response.parsed_body['meta']['count']).to eq(misses)
+          expected_ids = misses.zero? ? [] : [conversation2.display_id]
+          expect(response.parsed_body['payload'].map { |row| row.dig('conversation', 'id') }).to match_array(expected_ids)
+        end
+
+        it 'exports only the selected breached conversations' do
+          get "/api/v1/accounts/#{account.id}/applied_slas/download", params: params, headers: headers
+
+          expect(response).to have_http_status(:ok)
+          rows = CSV.parse(response.body).reject { |row| row.all?(&:nil?) }.drop(1)
+          expected_ids = misses.zero? ? [] : [conversation2.display_id]
+          expect(rows.map { |row| row[0].to_i }).to match_array(expected_ids)
+        end
+      end
+    end
+
+    context 'when a matching breached conversation has additional labels' do
+      before do
+        conversation3.update_labels(%w[vip urgent])
+        create(:applied_sla, sla_policy: sla_policy1, conversation: conversation3, sla_status: :missed, created_at: window_start + 12.hours)
+      end
+
+      it 'includes it exactly once in metrics, breach rows and CSV' do
+        params = date_params.merge(label_list: 'vip')
+        get "/api/v1/accounts/#{account.id}/applied_slas/metrics", params: params, headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body).to include('total_applied_slas' => 2, 'number_of_sla_misses' => 1, 'hit_rate' => '50.0%')
+
+        get "/api/v1/accounts/#{account.id}/applied_slas", params: params, headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body['meta']['count']).to eq(1)
+        expect(response.parsed_body['payload'].map { |row| row.dig('conversation', 'id') }).to contain_exactly(conversation3.display_id)
+
+        get "/api/v1/accounts/#{account.id}/applied_slas/download", params: params, headers: headers
+        expect(response).to have_http_status(:ok)
+        rows = CSV.parse(response.body).reject { |row| row.all?(&:nil?) }.drop(1)
+        expect(rows.map { |row| row[0].to_i }).to contain_exactly(conversation3.display_id)
+      end
+    end
+  end
+
   describe 'GET /api/v1/accounts/{account.id}/applied_slas/metrics' do
     context 'when it is an unauthenticated user' do
       it 'returns unauthorized' do
