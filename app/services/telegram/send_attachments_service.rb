@@ -39,11 +39,10 @@ class Telegram::SendAttachmentsService
   end
 
   def send_attachments(type, attachments)
-    if [:media, :audio].include?(type)
-      media_group_request(channel.chat_id(message), attachments, channel.reply_to_message_id(message))
-    else
-      send_individual_attachments(attachments)
-    end
+    return send_individual_attachments(attachments) unless [:media, :audio].include?(type)
+    return single_media_request(attachments.first) if attachments.one?
+
+    media_group_request(channel.chat_id(message), attachments, channel.reply_to_message_id(message))
   end
 
   def group_attachments_by_type
@@ -67,6 +66,15 @@ class Telegram::SendAttachmentsService
 
   def attachment_type(file_type)
     { 'audio' => 'audio', 'image' => 'photo', 'file' => 'document', 'video' => 'video' }[file_type] || 'document'
+  end
+
+  def single_media_request(attachment)
+    type = attachment[:type]
+    body = { :chat_id => channel.chat_id(message), type => attachment[:media], **business_connection_body }
+    reply_to_message_id = channel.reply_to_message_id(message)
+    body[:reply_parameters] = { message_id: reply_to_message_id.to_i }.to_json if reply_to_message_id.present?
+
+    HTTParty.post("#{channel.telegram_api_url}/send#{type.capitalize}", body: body)
   end
 
   def media_group_request(chat_id, attachments, reply_to_message_id)
@@ -153,7 +161,7 @@ class Telegram::SendAttachmentsService
 
     result = response.parsed_response['result']
     # response will be an array if the request for media group
-    # response will be a hash if the request for document
+    # response will be a hash for a document or singleton media request
     result.is_a?(Array) ? result.first['message_id'] : result['message_id']
   end
 

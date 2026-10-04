@@ -11,6 +11,104 @@ RSpec.describe SendReplyJob do
       .on_queue('high')
   end
 
+  context 'when delivering Telegram attachments through the real service' do
+    let(:channel) { create(:channel_telegram) }
+    let(:conversation) do
+      create(:conversation, account: channel.account, inbox: channel.inbox,
+                            additional_attributes: { chat_id: '1001', business_connection_id: 'business123' })
+    end
+    let(:reply_target) { create(:message, account: channel.account, conversation: conversation, message_type: :incoming, source_id: '42') }
+    let(:message) do
+      create(:message, account: channel.account, conversation: conversation, message_type: :outgoing,
+                       content: nil, content_attributes: { in_reply_to: reply_target.id })
+    end
+    let(:telegram_api_url) { channel.telegram_api_url }
+
+    [[:image, 'photo', 'sendPhoto', 'sample.png', 'image/png'],
+     [:audio, 'audio', 'sendAudio', 'sample.mp3', 'audio/mpeg']].each do |file_type, parameter, endpoint, filename, content_type|
+      context "with one #{file_type}" do
+        before do
+          attachment = message.attachments.new(account_id: message.account_id, file_type: file_type)
+          attachment.file.attach(io: Rails.root.join("spec/assets/#{filename}").open, filename: filename, content_type: content_type)
+          message.save!
+        end
+
+        it 'sends text separately and a singleton with reply and business context, persisting the attachment ID' do
+          message.update!(content: 'Attached media')
+          text_request = stub_request(:post, "#{telegram_api_url}/sendMessage")
+                         .with(body: hash_including('chat_id' => '1001', 'text' => 'Attached media'))
+                         .to_return(status: 200, body: { ok: true, result: { message_id: 500 } }.to_json,
+                                    headers: { 'Content-Type' => 'application/json' })
+          request = stub_request(:post, "#{telegram_api_url}/#{endpoint}")
+                    .with do |req|
+            body = URI.decode_www_form(req.body).to_h
+            expect(body[parameter]).to be_present
+            expect(body).to include('chat_id' => '1001', 'business_connection_id' => 'business123')
+            expect(JSON.parse(body.fetch('reply_parameters'))).to eq('message_id' => 42)
+            expect(body.keys).not_to include('caption', 'media')
+          end.to_return(status: 200, body: { ok: true, result: { message_id: 501 } }.to_json,
+                        headers: { 'Content-Type' => 'application/json' })
+
+          described_class.perform_now(message.id)
+
+          expect(request).to have_been_requested.once
+          expect(text_request).to have_been_requested.once
+          expect(message.reload.source_id).to eq('501')
+        end
+
+        it 'does not send a private note' do
+          message.update!(private: true)
+
+          described_class.perform_now(message.id)
+
+          expect(a_request(:post, /api.telegram.org/)).not_to have_been_made
+          expect(message.reload.source_id).to be_nil
+        end
+
+        it 'does not resend a message with a source ID' do
+          message.update!(source_id: 'existing')
+
+          described_class.perform_now(message.id)
+
+          expect(a_request(:post, /api.telegram.org/)).not_to have_been_made
+          expect(message.reload.source_id).to eq('existing')
+        end
+      end
+    end
+
+    context 'with two images and text' do
+      before do
+        2.times do
+          attachment = message.attachments.new(account_id: message.account_id, file_type: :image)
+          attachment.file.attach(io: Rails.root.join('spec/assets/sample.png').open, filename: 'sample.png', content_type: 'image/png')
+        end
+        message.update!(content: 'Two photos')
+      end
+
+      it 'keeps text separate from the album and persists the album response message ID' do
+        text_request = stub_request(:post, "#{telegram_api_url}/sendMessage")
+                       .with(body: hash_including('chat_id' => '1001', 'text' => 'Two photos'))
+                       .to_return(status: 200, body: { ok: true, result: { message_id: 500 } }.to_json,
+                                  headers: { 'Content-Type' => 'application/json' })
+        album_request = stub_request(:post, "#{telegram_api_url}/sendMediaGroup")
+                        .with do |req|
+          body = URI.decode_www_form(req.body).to_h
+          expect(body).to include('chat_id' => '1001', 'business_connection_id' => 'business123', 'reply_to_message_id' => '42')
+          media = JSON.parse(body.fetch('media'))
+          expect(media).to match([{ 'type' => 'photo', 'media' => be_present }, { 'type' => 'photo', 'media' => be_present }])
+        end.to_return(status: 200, body: { ok: true, result: [{ message_id: 501 }, { message_id: 502 }] }.to_json,
+                      headers: { 'Content-Type' => 'application/json' })
+
+        described_class.perform_now(message.id)
+
+        expect(text_request).to have_been_requested.once
+        expect(album_request).to have_been_requested.once
+        expect(a_request(:post, "#{telegram_api_url}/sendPhoto")).not_to have_been_made
+        expect(message.reload.source_id).to eq('501')
+      end
+    end
+  end
+
   context 'when the job is triggered on a new message' do
     let(:process_service) { double }
 
