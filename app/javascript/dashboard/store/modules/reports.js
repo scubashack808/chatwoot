@@ -113,8 +113,7 @@ export const actions = {
       value: true,
     });
     Report.getReports(reportObj).then(accountReport => {
-      let { data } = accountReport;
-      data = clampDataBetweenTimeline(data, reportObj.from, reportObj.to);
+      const { data } = accountReport;
       commit(types.default.SET_ACCOUNT_REPORTS, {
         metric,
         data,

@@ -6,6 +6,45 @@ RSpec.describe Api::V2::Accounts::ReportsController, type: :request do
   let(:agent) { create(:user, account: account, role: :agent) }
   let(:inbox) { create(:inbox, account: account) }
 
+  describe 'a custom range starting in a partial week' do
+    let(:params) do
+      { metric: 'conversations_count', type: 'account', group_by: 'week', business_hours: false,
+        since: '1785888000', until: '1788911999', timezone_offset: '0' }
+    end
+    let(:headers) { admin.create_new_auth_token }
+
+    around do |example|
+      Time.use_zone('UTC') { travel_to(Time.utc(2026, 9, 18, 12)) { example.run } }
+    end
+
+    before do
+      [Time.utc(2026, 8, 3, 12), Time.utc(2026, 8, 5, 12), Time.utc(2026, 8, 10, 12), Time.utc(2026, 9, 9, 12)].each do |created_at|
+        create(:conversation, account: account, inbox: inbox, created_at: created_at)
+      end
+    end
+
+    it 'retains the Sunday bucket but excludes records outside the requested range' do
+      get "/api/v2/accounts/#{account.id}/reports", params: params, headers: headers, as: :json
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to eq([
+                                           { 'value' => 1, 'timestamp' => 1_785_628_800 },
+                                           { 'value' => 1, 'timestamp' => 1_786_233_600 },
+                                           { 'value' => 0, 'timestamp' => 1_786_838_400 },
+                                           { 'value' => 0, 'timestamp' => 1_787_443_200 },
+                                           { 'value' => 0, 'timestamp' => 1_788_048_000 },
+                                           { 'value' => 0, 'timestamp' => 1_788_652_800 }
+                                         ])
+
+      get "/api/v2/accounts/#{account.id}/reports", params: params.merge(group_by: 'day'), headers: headers, as: :json
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body.sum { |row| row.fetch('value') }).to eq(2)
+
+      get "/api/v2/accounts/#{account.id}/reports/summary", params: params, headers: headers, as: :json
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body.fetch('conversations_count')).to eq(2)
+    end
+  end
+
   describe 'GET /api/v2/accounts/{account.id}/reports' do
     context 'when authenticated and authorized' do
       before do
