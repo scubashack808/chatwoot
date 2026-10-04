@@ -196,7 +196,7 @@ RSpec.describe MailboxHelper do
     let(:cid) { 'image/name@test' }
     let(:mail_attachment) { { original: OpenStruct.new(cid: cid), blob: nil } }
 
-    delimiters = ['"', "'", ' ', '>', '<', "\n", '']
+    delimiters = ['"', "'", ' ', '>', '<', ')', "\n", '']
     suffixes = ['a', '2', '.', '-', '_', '/', '%2F']
     ['image/name@test', 'image%2Fname%40test', 'image%2fname%40test'].each do |reference|
       delimiters.each do |delimiter|
@@ -222,6 +222,17 @@ RSpec.describe MailboxHelper do
           expect(helper_instance.instance_variable_get(:@html_content)).to eq(html)
         end
       end
+    end
+
+    it 'matches and replaces unquoted CSS url(cid:...) references' do
+      html = %(<td style="background:url(cid:#{cid})"><td style="background:url(cid:#{cid}2)">)
+      helper_instance.instance_variable_set(:@html_content, html)
+      allow(helper_instance).to receive(:inline_image_url).and_return('/image.png')
+
+      expect(helper_instance.send(:body_references_cid?, cid)).to be true
+      helper_instance.send(:upload_inline_image, mail_attachment)
+      expect(helper_instance.instance_variable_get(:@html_content))
+        .to eq(%(<td style="background:url(/image.png)"><td style="background:url(cid:#{cid}2)">))
     end
 
     it 'replaces repeated exact references without changing longer references or surrounding HTML' do

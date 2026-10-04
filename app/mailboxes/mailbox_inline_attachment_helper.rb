@@ -48,7 +48,7 @@ module MailboxInlineAttachmentHelper
     lowercase_encoded_cid = encoded_cid.gsub(/%[0-9A-F]{2}/, &:downcase)
 
     [cid, encoded_cid, lowercase_encoded_cid].uniq.map do |cid_value|
-      /(?i:cid):#{Regexp.escape(cid_value)}(?=[\s"'<>]|\z)/
+      /(?i:cid):#{Regexp.escape(cid_value)}(?=[\s"'<>)]|\z)/
     end
   end
 end
