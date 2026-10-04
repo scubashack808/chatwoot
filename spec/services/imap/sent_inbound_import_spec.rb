@@ -134,19 +134,33 @@ RSpec.describe Imap::SentInboundImport do
     expect(channel.reload.sent_import_progress).to include('pending_uids' => [], 'retry_uids' => [], 'retry_since' => nil)
     30.times { described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox).perform }
 
-    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_attempts' => {}, 'retry_since' => nil)
+    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_since' => nil)
     expect(fetched.count(2)).to eq 1
     expect(conversation.messages.where(source_id: 'sent-1@example.test').count).to eq 1
   end
 
-  it 'gives up on a UID whose body is never returned after the retry cap' do
-    allow(sent_mailbox).to receive(:search_since).and_return([1], [])
-    allow(sent_mailbox).to receive(:fetch_body).with(1).and_return(nil)
-    10.times { described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox).perform }
+  [nil, IOError].each do |failure|
+    it "recovers exactly once after six #{failure || 'blank body'} failures spanning search-window expiry" do
+      travel_to Time.zone.local(2026, 10, 2)
+      allow(sent_mailbox).to receive(:search_since).with('01-Oct-2026').and_return(searched_uids)
+      allow(sent_mailbox).to receive(:search_since).with('07-Oct-2026').and_return([])
+      allow(sent_mailbox).to receive(:fetch_body).with(1) { raise failure if failure }
+      described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox, interval: 1).perform
 
-    attempts = Imap::SentImportProgress::MAX_RETRY_ATTEMPTS
-    expect(sent_mailbox).to have_received(:fetch_body).with(1).exactly(attempts).times
-    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_attempts' => {}, 'retry_since' => nil)
+      travel_to Time.zone.local(2026, 10, 8)
+      5.times { described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox, interval: 1).perform }
+
+      expect(sent_mailbox).to have_received(:fetch_body).with(1).exactly(6).times
+      expect(sent_mailbox).to have_received(:search_since).with('07-Oct-2026').at_least(:once)
+      expect(channel.reload.sent_import_progress).to include('retry_uids' => [1], 'retry_since' => '2026-10-01')
+      expect(conversation.messages.where(source_id: 'sent-101@example.test').count).to eq 1
+      allow(sent_mailbox).to receive(:fetch_body).with(1).and_return(raw_messages.fetch(1))
+      3.times { described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox, interval: 1).perform }
+
+      expect(conversation.messages.where(source_id: 'sent-1@example.test').count).to eq 1
+      expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_since' => nil)
+      expect(requests).to all(satisfy { |uids| uids.length <= 100 && uids.uniq == uids })
+    end
   end
 
   it 'processes only selected UIDs once despite duplicate and unsolicited header responses' do

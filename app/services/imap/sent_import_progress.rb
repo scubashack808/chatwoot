@@ -2,9 +2,6 @@ class Imap::SentImportProgress
   class CheckpointConflict < StandardError; end
 
   VERSION = 1
-  # A UID that keeps failing (a body the server never returns, a message that always raises) stops
-  # being retried after this many attempts so the retry queue and its search lower bound stay bounded.
-  MAX_RETRY_ATTEMPTS = 5
 
   def initialize(channel:, sent_mailbox:, interval:)
     @channel = channel
@@ -27,7 +24,7 @@ class Imap::SentImportProgress
   end
 
   def acknowledge(uids:, retry_uids:)
-    retry_uids = record_attempts(uids, retry_uids)
+    # Failed imports can recover after the search window expires; preserve their UIDs and earliest date.
     pending_failures = @state['pending_uids'] & retry_uids
     remaining_retries = @state['retry_uids'] - (uids - retry_uids)
     retry_dates = []
@@ -41,18 +38,6 @@ class Imap::SentImportProgress
   end
 
   private
-
-  def record_attempts(uids, retry_uids)
-    attempts = @state['retry_attempts'].except(*uids.map(&:to_s))
-    exhausted = retry_uids.select do |uid|
-      count = @state['retry_attempts'].fetch(uid.to_s, 0) + 1
-      attempts[uid.to_s] = count if count < MAX_RETRY_ATTEMPTS
-      count >= MAX_RETRY_ATTEMPTS
-    end
-    Rails.logger.warn "[IMAP::SENT_SYNC] Giving up on #{exhausted.length} Sent UIDs for channel #{@channel.id}" if exhausted.any?
-    @state['retry_attempts'] = attempts
-    retry_uids - exhausted
-  end
 
   def source
     {
@@ -74,7 +59,7 @@ class Imap::SentImportProgress
     Rails.logger.info "[IMAP::SENT_SYNC] Resetting import progress for channel #{@channel.id}" if @state.present?
     @state = {
       'version' => VERSION, 'source' => source,
-      'pending_uids' => [], 'retry_uids' => [], 'retry_attempts' => {},
+      'pending_uids' => [], 'retry_uids' => [],
       'active_since' => nil, 'next_since' => dates.compact.min, 'retry_since' => nil
     }
   end

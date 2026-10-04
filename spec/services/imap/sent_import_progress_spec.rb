@@ -86,7 +86,7 @@ RSpec.describe Imap::SentImportProgress do
 
     expect(visited.uniq.sort).to eq((1..10_001).to_a)
     expect(retry_visits.uniq.sort).to eq((1..150).to_a)
-    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_attempts' => {})
+    expect(channel.reload.sent_import_progress['retry_uids'].sort).to eq((1..150).to_a)
     expect(sent_mailbox).to have_received(:search_since).once
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     RSpec.configuration.reporter.message("10,001 UID snapshot: #{snapshot_bytes} JSON bytes; traversal #{elapsed.round(3)}s")
@@ -122,22 +122,25 @@ RSpec.describe Imap::SentImportProgress do
     expect(sent_mailbox).to have_received(:search_since).once
   end
 
-  it 'drops a UID after the retry cap and forgets attempts for UIDs that complete' do
+  it 'retains repeated failures until completion while retiring successful retries' do
     allow(sent_mailbox).to receive(:search_since).and_return([1, 2], [])
     selected = progress.select(limit: 100)
     progress.acknowledge(uids: selected, retry_uids: selected)
+    retry_since = channel.reload.sent_import_progress['retry_since']
 
     resumed = described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox, interval: 1)
     resumed.acknowledge(uids: resumed.select(limit: 100), retry_uids: [1])
-    expect(channel.reload.sent_import_progress['retry_attempts']).to eq('1' => 2)
 
-    (described_class::MAX_RETRY_ATTEMPTS - 2).times do
+    10.times do
       resumed = described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox, interval: 1)
       expect(resumed.select(limit: 100)).to eq [1]
       resumed.acknowledge(uids: [1], retry_uids: [1])
+      expect(channel.reload.sent_import_progress).to include('retry_uids' => [1], 'retry_since' => retry_since)
     end
 
-    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_attempts' => {}, 'retry_since' => nil)
+    resumed = described_class.new(channel: channel.reload, sent_mailbox: sent_mailbox, interval: 1)
+    resumed.acknowledge(uids: resumed.select(limit: 100), retry_uids: [])
+    expect(channel.reload.sent_import_progress).to include('retry_uids' => [], 'retry_since' => nil)
   end
 
   it 'does not checkpoint a failed search' do
