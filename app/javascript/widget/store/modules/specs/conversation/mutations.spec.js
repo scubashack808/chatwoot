@@ -173,6 +173,7 @@ describe('#mutations', () => {
       const state = {
         lastMessageId: null,
         conversations: { 1: { id: 1 }, temporary: { id: 'temporary' } },
+        uiFlags: { allMessagesLoaded: false },
       };
       mutations.setLastMessageId(state);
       expect(state.lastMessageId).toBe(1);
@@ -203,14 +204,16 @@ describe('#mutations', () => {
   });
 
   describe('#clearConversations', () => {
-    it('clears conversations and pending metadata', () => {
+    it('clears conversations, history pagination and pending metadata', () => {
       const state = {
         conversations: { 1: { id: 1 } },
+        uiFlags: { allMessagesLoaded: true },
         pendingCustomAttributes: { plan: 'enterprise' },
         pendingLabels: ['vip'],
       };
       mutations.clearConversations(state);
       expect(state.conversations).toEqual({});
+      expect(state.uiFlags.allMessagesLoaded).toBe(false);
       expect(state.pendingCustomAttributes).toEqual({});
       expect(state.pendingLabels).toEqual([]);
     });
