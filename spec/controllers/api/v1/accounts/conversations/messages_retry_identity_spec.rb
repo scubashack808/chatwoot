@@ -51,7 +51,7 @@ RSpec.describe 'Conversation message retry identity', type: :request do
     end
 
     it 'stores the provider ID when the queued retry succeeds' do
-      retry_message
+      expect { retry_message }.not_to change(Message, :count)
       success = stub_request(:post, endpoint).to_return(status: 200, body: { message_id: 'synthetic-retry-id' }.to_json,
                                                         headers: { 'Content-Type' => 'application/json' })
       perform_enqueued_jobs(only: SendReplyJob)

@@ -37,6 +37,14 @@ RSpec.describe SendReplyJob do
       expect(ChatwootExceptionTracker).to have_received(:new).with(instance_of(Errno::ECONNREFUSED), anything)
     end
 
+    it 'does not automatically enqueue another send after connection refusal' do
+      stub_request(:post, endpoint).to_raise(Errno::ECONNREFUSED)
+      message
+      clear_enqueued_jobs
+
+      expect { described_class.perform_now(message.id) }.not_to have_enqueued_job(described_class)
+    end
+
     it 'stores the provider ID after a successful send' do
       stub_request(:post, endpoint).to_return(status: 200, body: { message_id: 'synthetic-instagram-id' }.to_json,
                                               headers: { 'Content-Type' => 'application/json' })
