@@ -388,6 +388,48 @@ describe('quotedEmailHelper', () => {
   });
 
   describe('extractQuotedEmailText', () => {
+    it.each([
+      [
+        'leading NBSP',
+        '<p>&nbsp;<b>Indented</b></p>',
+        '\u00a0Indented',
+        '> \u00a0Indented',
+      ],
+      [
+        'NBSP spacer paragraph',
+        '<p>First</p><p>&nbsp;</p><p>Second</p>',
+        'First\n\u00a0\nSecond',
+        '> First\n>\n> Second',
+      ],
+    ])(
+      'preserves %s in extracted text and outgoing quotes',
+      (_, html, expectedText, expectedQuote) => {
+        ['reply', 'full'].forEach(field => {
+          const lastEmail = {
+            message_type: 0,
+            content_attributes: {
+              email: {
+                text_content: {},
+                html_content: { [field]: html },
+              },
+            },
+          };
+          const text = extractQuotedEmailText(lastEmail);
+          const payload = buildCreatePayload({
+            message: appendQuotedTextToMessage(
+              'Confirmed.',
+              text,
+              'Guest wrote:'
+            ),
+          });
+          expect.soft(text).toBe(expectedText);
+          expect
+            .soft(payload.content)
+            .toBe(`Confirmed.\n\n> Guest wrote:\n>\n${expectedQuote}`);
+        });
+      }
+    );
+
     it.each(['reply', 'full'])(
       'preserves HTML %s boundaries in the outgoing payload',
       field => {

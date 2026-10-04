@@ -47,7 +47,7 @@ export const extractPlainTextFromHtml = html => {
   const visit = node => {
     if (node.nodeType === Node.TEXT_NODE) {
       const isLayoutWhitespace =
-        !node.textContent.trim() &&
+        /^[\t\n\f\r ]*$/.test(node.textContent) &&
         (pendingBoundary || !text || text.endsWith('\n')) &&
         !node.parentElement?.closest('pre');
       if (node.textContent && !isLayoutWhitespace) {
