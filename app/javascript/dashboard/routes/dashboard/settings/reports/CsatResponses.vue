@@ -107,6 +107,7 @@ export default {
       this.inbox = selectedInbox?.id;
       this.team = selectedTeam?.id;
       this.rating = selectedRating?.value;
+      this.pageIndex = 0;
 
       this.getAllData();
     },
