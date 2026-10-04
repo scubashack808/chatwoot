@@ -74,6 +74,10 @@ describe('#computeHashForUserData', () => {
     [{ nested: { seats: 1 } }, { nested: { seats: 2 } }],
     [{ nested: { seats: 1 } }, { nested: [{ seats: 1 }] }],
     [{ tags: [{ seats: 1 }] }, { tags: [{ seats: 2 }] }],
+    [
+      { renews_on: new Date('2026-01-01T00:00:00Z') },
+      { renews_on: new Date('2027-01-01T00:00:00Z') },
+    ],
   ])('distinguishes custom attribute payloads %j and %j', (before, after) => {
     expect(
       computeHashForUserData({

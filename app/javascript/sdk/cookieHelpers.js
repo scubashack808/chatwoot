@@ -37,8 +37,11 @@ export const computeHashForUserData = ({ identifier, user }) => {
   if (!customAttributes || !Object.keys(customAttributes).length) {
     return md5(profileString);
   }
+  // Fingerprint the JSON payload the iframe receives, so Date and other
+  // toJSON values compare by their transmitted form.
+  const wireAttributes = JSON.parse(JSON.stringify(customAttributes));
   return md5(
-    JSON.stringify([profileString, sortCustomAttributes(customAttributes)])
+    JSON.stringify([profileString, sortCustomAttributes(wireAttributes)])
   );
 };
 
