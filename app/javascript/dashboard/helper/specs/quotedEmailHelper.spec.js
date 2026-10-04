@@ -39,6 +39,17 @@ describe('quotedEmailHelper', () => {
       ['<p>Certifi<span>cation</span> <a>card</a>.</p>', 'Certification card.'],
       ['<p>  Keep <span> spaces </span> </p>', '  Keep  spaces  '],
       ['<pre>First\n  Second</pre>', 'First\n  Second'],
+      ['<pre><b>First</b>\n  <b>Second</b></pre>', 'First\n  Second'],
+      ['<div>\n  <p>First</p>\n  <p>Second</p>\n</div>', 'First\nSecond'],
+      [
+        '<html><body>\n<div>\n  <p>Meet at 7am.</p>\n  <p>Bring ID.</p>\n</div>\n</body></html>',
+        'Meet at 7am.\nBring ID.',
+      ],
+      ['<div>\r\n<p>First</p>\r\n<p>Second</p>\r\n</div>', 'First\nSecond'],
+      ['<p><b>Inline</b> <i>space</i></p>', 'Inline space'],
+      ['<table><tr><td>A</td></tr><tr><td>C</td></tr></table>', 'A\nC'],
+      ['Top<hr>Bottom', 'Top\nBottom'],
+      ['<ul>\n  <li>One</li>\n  <li>Two</li>\n</ul>', 'One\nTwo'],
       ['<style>bad CSS</style><script>bad()</script><p>Visible</p>', 'Visible'],
       ['', ''],
     ])('preserves semantic boundaries and text in %s', (html, expected) => {
@@ -57,6 +68,10 @@ describe('quotedEmailHelper', () => {
       'h5',
       'h6',
       'pre',
+      'section',
+      'article',
+      'header',
+      'footer',
     ])('separates adjacent %s blocks', tag => {
       expect(
         extractPlainTextFromHtml(

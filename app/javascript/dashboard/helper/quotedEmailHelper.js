@@ -15,11 +15,16 @@ export const extractPlainTextFromHtml = html => {
   }
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = DOMPurify.sanitize(html);
+  // Unlike EmailQuoteExtractor.flattenBlockText, which only needs line starts
+  // for attribution matching, this output is shown to the agent, so it also
+  // honours <br> and drops markup-indentation whitespace between blocks.
   const blockTags = new Set([
     'P',
     'DIV',
     'BLOCKQUOTE',
     'LI',
+    'UL',
+    'OL',
     'H1',
     'H2',
     'H3',
@@ -27,6 +32,13 @@ export const extractPlainTextFromHtml = html => {
     'H5',
     'H6',
     'PRE',
+    'TABLE',
+    'TR',
+    'HR',
+    'SECTION',
+    'ARTICLE',
+    'HEADER',
+    'FOOTER',
   ]);
   let text = '';
   // Defer block separators until text follows, avoiding outer/nested breaks.
@@ -34,7 +46,11 @@ export const extractPlainTextFromHtml = html => {
 
   const visit = node => {
     if (node.nodeType === Node.TEXT_NODE) {
-      if (node.textContent) {
+      const isLayoutWhitespace =
+        !node.textContent.trim() &&
+        (pendingBoundary || !text || text.endsWith('\n')) &&
+        !node.parentElement?.closest('pre');
+      if (node.textContent && !isLayoutWhitespace) {
         if (
           pendingBoundary &&
           text &&
