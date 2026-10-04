@@ -463,7 +463,6 @@ en:
       faq_generation_complete: 'FAQ generation complete. Total FAQs created: %{count}'
       using_paginated_faq: 'Using paginated FAQ generation for document %{document_id}'
       using_standard_faq: 'Using standard FAQ generation for document %{document_id}'
-      response_creation_error: 'Error in creating response document: %{error}'
       missing_openai_file_id: 'Document must have openai_file_id for paginated processing'
       openai_api_error: 'OpenAI API Error: %{error}'
       starting_paginated_faq: 'Starting paginated FAQ generation (%{pages_per_chunk} pages per chunk)'
