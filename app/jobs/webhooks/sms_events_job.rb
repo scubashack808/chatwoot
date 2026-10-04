@@ -6,7 +6,9 @@ class Webhooks::SmsEventsJob < ApplicationJob
   def perform(params = {})
     return unless SUPPORTED_EVENTS.include?(params[:type])
 
-    channel = Channel::Sms.find_by(phone_number: params[:to])
+    # Outbound status events address the customer in `to`; the sending channel is `message.from`.
+    phone_number = delivery_event?(params) ? params[:message][:from] : params[:to]
+    channel = Channel::Sms.find_by(phone_number: phone_number)
     return unless channel
 
     process_event_params(channel, params)
@@ -16,7 +18,7 @@ class Webhooks::SmsEventsJob < ApplicationJob
 
   def process_event_params(channel, params)
     if delivery_event?(params)
-      Sms::DeliveryStatusService.new(channel: channel, params: params[:message].with_indifferent_access).perform
+      Sms::DeliveryStatusService.new(inbox: channel.inbox, params: params.with_indifferent_access).perform
     else
       Sms::IncomingMessageService.new(inbox: channel.inbox, params: params[:message].with_indifferent_access).perform
     end
