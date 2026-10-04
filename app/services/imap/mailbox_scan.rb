@@ -13,7 +13,10 @@ class Imap::MailboxScan
   MESSAGE_ID_HEADER = 'BODY[HEADER.FIELDS (MESSAGE-ID)]'.freeze
   MESSAGE_ID_FETCH = 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]'.freeze
 
-  Result = Struct.new(:index, :mailboxes, keyword_init: true) do
+  # listed holds the UID SEARCH result of every incomplete window, keyed by [mailbox, uidvalidity].
+  # The search runs before the bound check and before any FETCH, so it still enumerates exactly the
+  # windows whose headers could not all be read.
+  Result = Struct.new(:index, :mailboxes, :listed, keyword_init: true) do
     def hits_for(message_id)
       index[message_id] || []
     end
@@ -22,6 +25,12 @@ class Imap::MailboxScan
     # from a conclusive scan.
     def conclusive?
       mailboxes.all? { |mailbox| mailbox[:complete] }
+    end
+
+    # True when a stored location sits in an incomplete window that still lists its exact UID in
+    # the same UIDVALIDITY generation: the copy is there, its header just was not read.
+    def retained?(location)
+      listed.fetch([location['mailbox'], location['uidvalidity'].to_i], nil)&.include?(location['uid'].to_i) || false
     end
   end
 
@@ -33,22 +42,26 @@ class Imap::MailboxScan
 
   def perform
     index = Hash.new { |hash, key| hash[key] = [] }
-    scanned = mailboxes.map { |mailbox, role| scan_mailbox(mailbox, role, index) }
+    listed = {}
+    scanned = mailboxes.map { |mailbox, role| scan_mailbox(mailbox, role, index, listed) }
 
-    Result.new(index: index, mailboxes: scanned)
+    Result.new(index: index, mailboxes: scanned, listed: listed)
   end
 
   private
 
-  def scan_mailbox(mailbox, role, index)
+  def scan_mailbox(mailbox, role, index, listed)
     session.command { |imap| imap.examine(mailbox) }
     context = { mailbox: mailbox, role: role, uidvalidity: Array(client.responses('UIDVALIDITY')).last }
     uids = Array(session.command { |imap| imap.uid_search(['ALL']) })
 
-    return context.merge(message_count: uids.length, complete: false) if over_bound?(uids)
+    complete = !over_bound?(uids) && collect(uids, context, index) == uids.length
+    listed[[mailbox, context[:uidvalidity].to_i]] = Set.new(uids.map(&:to_i)) unless complete
+    context.merge(message_count: uids.length, complete: complete)
+  end
 
-    collected = uids.each_slice(BATCH_SIZE).sum { |batch| collect_batch(batch, context, index) }
-    context.merge(message_count: uids.length, complete: collected == uids.length)
+  def collect(uids, context, index)
+    uids.each_slice(BATCH_SIZE).sum { |batch| collect_batch(batch, context, index) }
   end
 
   def over_bound?(uids)
