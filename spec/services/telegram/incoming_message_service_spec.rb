@@ -192,7 +192,40 @@ describe Telegram::IncomingMessageService do
       end
     end
 
-    context 'when valid sticker attachment params' do
+    context 'when sticker params use the current thumbnail key' do
+      let(:sticker_params) do
+        {
+          'update_id' => 2_342_342_343_242,
+          'message' => {
+            'sticker' => {
+              'emoji' => '👍', 'width' => 512, 'height' => 512, 'type' => 'regular', 'is_animated' => false, 'is_video' => false,
+              'thumbnail' => { 'file_id' => 'thumbnail-file-id', 'file_unique_id' => 'thumbnail-unique', 'width' => 128, 'height' => 128 },
+              'file_id' => 'sticker-file-id',
+              'file_unique_id' => 'sticker-unique'
+            }
+          }.merge(message_params)
+        }.with_indifferent_access
+      end
+
+      it 'stores the supplied thumbnail as an image attachment' do
+        expect(telegram_channel.inbox.channel).to receive(:get_telegram_file_path)
+          .with('thumbnail-file-id').and_return('https://chatwoot-assets.local/sample.png')
+        described_class.new(inbox: telegram_channel.inbox, params: sticker_params).perform
+        message = telegram_channel.inbox.messages.first
+        expect(message.attachments.count).to eq(1)
+        expect(message.attachments.first.file_type).to eq('image')
+      end
+
+      it 'prefers thumbnail over the legacy thumb key when both are present' do
+        sticker_params[:message][:sticker][:thumb] = { 'file_id' => 'legacy-thumb-file-id', 'width' => 128, 'height' => 128 }
+        expect(telegram_channel.inbox.channel).to receive(:get_telegram_file_path)
+          .with('thumbnail-file-id').and_return('https://chatwoot-assets.local/sample.png')
+        described_class.new(inbox: telegram_channel.inbox, params: sticker_params).perform
+        expect(telegram_channel.inbox.messages.first.attachments.count).to eq(1)
+      end
+    end
+
+    context 'when sticker params use the legacy thumb key' do
       it 'creates appropriate conversations, message and contacts' do
         allow(telegram_channel.inbox.channel).to receive(:get_telegram_file_path).and_return('https://chatwoot-assets.local/sample.png')
         params = {
