@@ -1,7 +1,11 @@
 class Agents::AccountUserCleanupService
-  def perform(account, user)
+  # pending_only limits cleanup to a removed membership whose deferred cleanup has not run yet.
+  # Cleanup deletes the notification setting in the same transaction as the other resources,
+  # so a remaining setting marks it as pending; a first-time membership never has one.
+  def perform(account, user, pending_only: false)
     Account.find(account.id).with_lock do
       next if AccountUser.exists?(account_id: account.id, user_id: user.id)
+      next if pending_only && !NotificationSetting.exists?(account_id: account.id, user_id: user.id)
 
       destroy_notification_setting(account, user)
       remove_user_from_teams(account, user)

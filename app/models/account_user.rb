@@ -75,7 +75,7 @@ class AccountUser < ApplicationRecord
 
   def cleanup_previous_membership
     # The account lock stays held until this membership and its settings commit.
-    Agents::AccountUserCleanupService.new.perform(account, user)
+    Agents::AccountUserCleanupService.new.perform(account, user, pending_only: true)
   end
 
   def notify_creation

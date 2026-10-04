@@ -33,6 +33,21 @@ RSpec.describe AccountUser do
       expect(user.inbox_members.where(inbox: inbox)).to be_empty
     end
 
+    it 'keeps resources created before a first-time membership' do
+      account = account_user.account
+      user = create(:user)
+      team = create(:team, account: account)
+      inbox_member = create(:inbox_member, inbox: inbox, user: user)
+      team_member = create(:team_member, team: team, user: user)
+      conversation = create(:conversation, account: account, inbox: inbox, assignee: user)
+
+      described_class.create!(account: account, user: user)
+
+      expect([inbox_member.reload, team_member.reload]).to all(be_persisted)
+      expect(conversation.reload.assignee).to eq(user)
+      expect(user.notification_settings.where(account: account).count).to eq(1)
+    end
+
     it 'rolls back membership and restores stale resources when settings creation fails' do
       account = account_user.account
       user = account_user.user
