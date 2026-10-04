@@ -48,6 +48,34 @@ RSpec.describe 'Api::V1::Accounts::Captain::CopilotMessagesController', type: :r
         expect(CopilotMessage.last.message_type).to eq('user')
         expect(CopilotMessage.last.copilot_thread_id).to eq(copilot_thread.id)
       end
+
+      it 'keeps the URL thread assistant when the submitted assistant conflicts' do
+        original_assistant = copilot_thread.assistant
+        other_assistant = create(:captain_assistant, account: account)
+        conversation = create(:conversation, account: account)
+        message = 'A follow-up question'
+        allow(Captain::Copilot::ResponseJob).to receive(:perform_later)
+
+        expect do
+          post "/api/v1/accounts/#{account.id}/captain/copilot_threads/#{copilot_thread.id}/copilot_messages",
+               params: { message: message, assistant_id: other_assistant.id, conversation_id: conversation.display_id },
+               headers: user.create_new_auth_token,
+               as: :json
+        end.to change(CopilotMessage, :count).by(1)
+           .and not_change(CopilotThread, :count)
+
+        expect(response).to have_http_status(:success)
+        expect(copilot_thread.reload.assistant_id).to eq(original_assistant.id)
+        expect(CopilotMessage.last.copilot_thread_id).to eq(copilot_thread.id)
+        expect(CopilotMessage.last.message).to eq({ 'content' => message })
+        expect(Captain::Copilot::ResponseJob).to have_received(:perform_later).with(
+          assistant: original_assistant,
+          conversation_id: conversation.display_id,
+          user_id: user.id,
+          copilot_thread_id: copilot_thread.id,
+          message: message
+        ).once
+      end
     end
 
     context 'when thread does not exist' do
