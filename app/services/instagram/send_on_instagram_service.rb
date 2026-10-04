@@ -12,11 +12,20 @@ class Instagram::SendOnInstagramService < Instagram::BaseSendService
     query = { access_token: access_token }
     instagram_id = channel.instagram_id.presence || 'me'
 
-    response = HTTParty.post(
-      "https://graph.instagram.com/#{GlobalConfigService.load('INSTAGRAM_API_VERSION', 'v22.0')}/#{instagram_id}/messages",
-      body: message_content,
-      query: query
-    )
+    begin
+      response = HTTParty.post(
+        "https://graph.instagram.com/#{GlobalConfigService.load('INSTAGRAM_API_VERSION', 'v22.0')}/#{instagram_id}/messages",
+        body: message_content,
+        query: query
+      )
+    rescue Errno::ECONNREFUSED => e
+      # An earlier attachment may already have been accepted; do not enable replay.
+      raise if message.attachments.present?
+
+      Messages::StatusUpdateService.new(message, 'failed', 'Instagram connection refused before sending. Please retry.').perform
+      handle_error(e)
+      return
+    end
 
     process_response(response, message_content)
   end
