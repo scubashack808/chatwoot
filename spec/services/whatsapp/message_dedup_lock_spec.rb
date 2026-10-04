@@ -7,6 +7,40 @@ describe Whatsapp::MessageDedupLock do
 
   after { Redis::Alfred.delete(redis_key) }
 
+  describe '#release!' do
+    it 'releases its own claim and allows replay' do
+      expect(lock.acquire!).to be(true)
+      expect(Redis::Alfred.ttl(redis_key)).to be_between(86_000, 86_400)
+      lock.release!
+      expect(Redis::Alfred.exists?(redis_key)).to be(false)
+      expect(described_class.new(source_id).acquire!).to be(true)
+      replacement = Redis::Alfred.get(redis_key)
+      lock.release!
+      expect(Redis::Alfred.get(redis_key)).to eq(replacement)
+    end
+
+    it 'does not release another owner after a denied acquisition' do
+      lock.acquire!
+      token = Redis::Alfred.get(redis_key)
+      contender = described_class.new(source_id)
+      expect(contender.acquire!).to be(false)
+      contender.release!
+      expect(Redis::Alfred.get(redis_key)).to eq(token)
+    end
+
+    it 'does not delete a replacement claim' do
+      lock.acquire!
+      original_token = Redis::Alfred.get(redis_key)
+      Redis::Alfred.delete(redis_key)
+      replacement = described_class.new(source_id)
+      replacement.acquire!
+      replacement_token = Redis::Alfred.get(redis_key)
+      expect(replacement_token).not_to eq(original_token)
+      lock.release!
+      expect(Redis::Alfred.get(redis_key)).to eq(replacement_token)
+    end
+  end
+
   describe '#acquire!' do
     it 'returns truthy on first acquire' do
       expect(lock.acquire!).to be_truthy
