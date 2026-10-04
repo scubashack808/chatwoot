@@ -5,6 +5,7 @@ export const mutations = {
   clearConversations($state) {
     $state.conversations = {};
     $state.lastMessageId = null;
+    $state.uiFlags.allMessagesLoaded = false;
     $state.pendingCustomAttributes = {};
     $state.pendingLabels = [];
   },
