@@ -9,11 +9,7 @@ describe('getHeadingsfromTheArticle with TableOfContents', () => {
     wrappers = [];
     vi.stubGlobal(
       'IntersectionObserver',
-      class {
-        observe() {}
-
-        disconnect() {}
-      }
+      vi.fn(() => ({ observe: vi.fn(), disconnect: vi.fn() }))
     );
   });
 
@@ -82,9 +78,8 @@ describe('getHeadingsfromTheArticle with TableOfContents', () => {
     const { headings } = renderArticle(['Requirements', 'Requirements']);
 
     headings.forEach(heading => {
-      expect(heading.querySelector('a.permalink').getAttribute('href')).toBe(
-        `#${heading.id}`
-      );
+      const href = heading.querySelector('a.permalink').getAttribute('href');
+      expect(document.getElementById(href.slice(1))).toBe(heading);
     });
   });
 
