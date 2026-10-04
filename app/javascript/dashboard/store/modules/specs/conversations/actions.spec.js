@@ -623,6 +623,64 @@ describe('#deleteMessage', () => {
     });
   });
 
+  describe('#applyMailboxOperationUpdate', () => {
+    it.each([{ state: 'archive' }, undefined])(
+      'preserves pending polling for state-only updates and invalidations (%s)',
+      mailboxState => {
+        vi.useFakeTimers();
+        const state = {
+          selectedChatId: 1,
+          allConversations: [
+            { id: 1, mailbox_operation: { id: 90, status: 'running' } },
+          ],
+        };
+        actions.scheduleMailboxOperationRefetch({ dispatch, state }, 1);
+        dispatch.mockClear();
+        actions.applyMailboxOperationUpdate(
+          { commit, dispatch, state },
+          {
+            conversationId: 1,
+            mailboxState,
+            stateOnly: true,
+          }
+        );
+        expect(commit).toHaveBeenCalledWith(types.UPDATE_CONVERSATION_MAILBOX, {
+          conversationId: 1,
+          mailboxState,
+          stateOnly: true,
+        });
+        expect(dispatch).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(2000);
+        expect(dispatch).toHaveBeenCalledWith('refetchMailboxOperation', 1);
+        vi.useRealTimers();
+      }
+    );
+
+    it.each([
+      ['running', 'scheduleMailboxOperationRefetch'],
+      ['succeeded', 'clearMailboxOperationRefetch'],
+    ])('preserves forward %s polling behavior', (status, expectedAction) => {
+      const mailboxOperation = { id: 90, status };
+      const state = {
+        selectedChatId: 1,
+        allConversations: [{ id: 1, mailbox_operation: mailboxOperation }],
+      };
+      actions.applyMailboxOperationUpdate(
+        { commit, dispatch, state },
+        {
+          conversationId: 1,
+          mailboxOperation,
+        }
+      );
+      expect(dispatch).toHaveBeenCalledWith(expectedAction, 1);
+      expect(commit).toHaveBeenCalledWith(types.UPDATE_CONVERSATION_MAILBOX, {
+        conversationId: 1,
+        mailboxOperation,
+        mailboxState: undefined,
+      });
+    });
+  });
+
   describe('#refetchMailboxOperation', () => {
     it('uses the conversation-scoped index to recover a missed event', async () => {
       const mailboxState = {

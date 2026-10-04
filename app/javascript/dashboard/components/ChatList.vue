@@ -1,5 +1,13 @@
 <script setup>
-import { ref, unref, provide, computed, watch, onMounted } from 'vue';
+import {
+  ref,
+  unref,
+  provide,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+} from 'vue';
 import { useStore } from 'vuex';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -847,13 +855,68 @@ useEmitter('fetch_conversation_stats', () => {
   store.dispatch('conversationStats/get', conversationFilters.value);
 });
 
+// Reconciliation publishes one state-only event per touched conversation, so an external bulk
+// move arrives as a burst. Refresh the loaded page range without resetting the view.
+const MAILBOX_STATE_REFRESH_DELAY = 1000;
+let mailboxStateRefreshTimer = null;
+
+function refreshMailboxView() {
+  mailboxStateRefreshTimer = null;
+  if (!showMailboxRoles.value || hasAppliedFiltersOrActiveFolders.value) return;
+  store.dispatch('updateChatListFilters', {
+    ...conversationFilters.value,
+    page: 1,
+  });
+  store
+    .dispatch('fetchAllConversations', {
+      refreshPages: Math.max(currentPage.value, 1),
+    })
+    .then(emitConversationLoaded);
+}
+
+function scheduleMailboxViewRefresh() {
+  clearTimeout(mailboxStateRefreshTimer);
+  mailboxStateRefreshTimer = setTimeout(
+    refreshMailboxView,
+    MAILBOX_STATE_REFRESH_DELAY
+  );
+}
+
+onBeforeUnmount(() => clearTimeout(mailboxStateRefreshTimer));
+
+async function onMailboxStateUpdated(conversationId, mailboxState) {
+  const leftActiveRole =
+    mailboxState &&
+    !mailboxStateIncludesRole(mailboxState, activeMailboxRole.value);
+  if (leftActiveRole) {
+    if (Number(route.params.conversation_id) === Number(conversationId)) {
+      await redirectToConversationList();
+    }
+    if (getConversationById.value(conversationId)) {
+      store.dispatch(
+        'bulkActions/removeSelectedConversationIds',
+        conversationId
+      );
+      store.dispatch('removeConversationFromList', conversationId);
+    }
+  }
+  scheduleMailboxViewRefresh();
+}
+
 useEmitter(
   BUS_EVENTS.MAILBOX_OPERATION_UPDATED,
-  async ({ conversationId, mailboxOperation, mailboxState } = {}) => {
-    if (
-      showMailboxRoles.value &&
-      isMailboxOperationTerminal(mailboxOperation)
-    ) {
+  async ({
+    conversationId,
+    mailboxOperation,
+    mailboxState,
+    stateOnly,
+  } = {}) => {
+    if (!showMailboxRoles.value) return;
+    if (stateOnly) {
+      await onMailboxStateUpdated(conversationId, mailboxState);
+      return;
+    }
+    if (isMailboxOperationTerminal(mailboxOperation)) {
       const isSelectedConversation =
         Number(route.params.conversation_id) === Number(conversationId);
       if (

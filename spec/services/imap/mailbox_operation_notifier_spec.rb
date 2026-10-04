@@ -79,6 +79,70 @@ RSpec.describe Imap::MailboxOperationNotifier do
     )
   end
 
+  describe '.publish_state' do
+    it 'publishes only safe conversation state without creating an operation' do
+      make_publishable
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      described_class.publish_state(conversation: conversation, previous_state: nil)
+
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).with(
+        Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, kind_of(Time),
+        {
+          account_id: account.id, inbox_id: inbox.id, conversation_id: conversation.display_id,
+          state_only: true, mailbox_state: Imap::ConversationMailboxState.new(conversation: conversation).to_h
+        }
+      ).once
+      expect(EmailMailboxOperation.where(conversation: conversation)).to be_empty
+    end
+
+    it 'does not publish unchanged semantic state' do
+      make_publishable
+      previous_state = Imap::ConversationMailboxState.publishable(conversation: conversation).to_h
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      described_class.publish_state(conversation: conversation, previous_state: previous_state)
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'omits the state key when invalidating previously actionable state' do
+      message = make_publishable
+      previous_state = Imap::ConversationMailboxState.publishable(conversation: conversation).to_h
+      message.write_imap_identity!(message.imap_identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_MISSING))
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      described_class.publish_state(conversation: conversation, previous_state: previous_state)
+
+      expect(Rails.configuration.dispatcher).to have_received(:dispatch).with(
+        Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, kind_of(Time),
+        { account_id: account.id, inbox_id: inbox.id, conversation_id: conversation.display_id, state_only: true }
+      ).once
+    end
+
+    it 'stays silent when no publishable state existed or exists' do
+      conversation
+      allow(Rails.configuration.dispatcher).to receive(:dispatch)
+
+      described_class.publish_state(conversation: conversation, previous_state: nil)
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+    end
+
+    it 'logs a failed state dispatch without undoing the persisted identity' do
+      message = make_publishable
+      allow(Rails.configuration.dispatcher).to receive(:dispatch).and_raise(StandardError, 'broadcast unavailable')
+      allow(Rails.logger).to receive(:warn)
+
+      expect { described_class.publish_state(conversation: conversation, previous_state: nil) }.not_to raise_error
+
+      expect(message.reload.imap_identity.sync_state).to eq(Imap::MessageIdentity::SYNC_STATE_VERIFIED)
+      expect(Rails.logger).to have_received(:warn).with(
+        "[IMAP::MAILBOX_OPERATION] State event dispatch failed for conversation #{conversation.id}: StandardError."
+      )
+    end
+  end
+
   it 'swallows a dispatcher failure after durable operation state is written' do
     operation
     allow(Rails.configuration.dispatcher).to receive(:dispatch).and_raise(StandardError, 'broadcast unavailable')
