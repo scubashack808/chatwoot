@@ -4,7 +4,7 @@ import { domPurifyConfig } from '../shared/helpers/HTMLSanitizer';
 import { directive as onClickaway } from 'vue3-click-away';
 import { isSameHost } from '@chatwoot/utils';
 
-import slugifyWithCounter from '@sindresorhus/slugify';
+import { slugifyWithCounter } from '@sindresorhus/slugify';
 import PublicArticleSearch from './components/PublicArticleSearch.vue';
 import TableOfContents from './components/TableOfContents.vue';
 import SidebarThemeToggle from './components/SidebarThemeToggle.vue';
@@ -13,10 +13,11 @@ import { getLanguageDirection } from 'dashboard/components/widgets/conversation/
 
 export const getHeadingsfromTheArticle = () => {
   const rows = [];
+  const slugify = slugifyWithCounter();
   const articleElement = document.getElementById('cw-article-content');
   articleElement.querySelectorAll('h1, h2, h3').forEach(element => {
     const headingText = element.innerText;
-    const slug = slugifyWithCounter(headingText);
+    const slug = slugify(headingText);
     element.id = slug;
     element.className = 'scroll-mt-24 heading';
 
