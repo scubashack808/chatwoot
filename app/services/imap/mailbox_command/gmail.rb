@@ -32,7 +32,8 @@ class Imap::MailboxCommand::Gmail < Imap::MailboxCommand::Standard
     return false unless action == :restore
     return true if Array(source['roles']).include?('archive')
 
-    identity.provider_id.present? && Array(source['roles']).empty? && source['mailbox'] == targets['all']
+    # A roleless source is All Mail or a user label; UID MOVE out of a label would strip it.
+    identity.provider_id.present? && Array(source['roles']).empty?
   end
 
   def relabel(action:, identity:, source:, target:, message_id:)

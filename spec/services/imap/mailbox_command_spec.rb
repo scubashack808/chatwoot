@@ -304,6 +304,24 @@ RSpec.describe Imap::MailboxCommand do
       end
     end
 
+    it 'restores a roleless user-label source by adding Inbox without removing that label' do
+      label = Imap::MessageIdentity.location_for(mailbox: 'Clients', uidvalidity: 42, uid: 61)
+      all_mail = Imap::MessageIdentity.location_for(mailbox: '[Gmail]/All Mail', uidvalidity: 42, uid: 51)
+      labelled_identity = Imap::MessageIdentity.build(mailbox: 'Clients', uidvalidity: 42, uid: 61, roles: [], provider_id: '9001')
+                                               .with_locations([label, all_mail])
+      allow(client).to receive(:uid_search).with(['UID', 61]).and_return([61])
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([44])
+      allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42], [100])
+
+      result = gmail.call(action: :restore, identity: labelled_identity, source: labelled_identity.primary)
+
+      expect(labelled_identity.primary['mailbox']).to eq 'Clients'
+      expect(client).to have_received(:uid_store).once.with(61, '+X-GM-LABELS', ['\\Inbox'])
+      expect(client).not_to have_received(:uid_move)
+      expect(result.status).to eq :moved
+      expect(result.preserve_source).to be true
+    end
+
     it 'restores from Gmail Spam with UID MOVE instead of retaining the Spam label' do
       spam_identity = Imap::MessageIdentity.build(
         mailbox: '[Gmail]/Spam', uidvalidity: 42, uid: 31, roles: ['spam'], provider_id: '9001'

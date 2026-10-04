@@ -202,6 +202,38 @@ RSpec.describe Imap::MailboxReconciliationService do
       expect(result.accepted?).to be true
       expect(result.operation.items.sole.fetch('source')).to eq identity.primary
     end
+
+    it 'admits Restore from a roleless user label that sorts before All Mail' do
+      folders << Net::IMAP::MailboxList.new([], '/', 'Clients')
+      channel.update!(mailbox_sync_config: { 'mode' => 'active', 'sent_mode' => 'provider_managed' })
+      message = create_message('labelled@example.com')
+      message.write_imap_identity!(
+        Imap::MessageIdentity.build(mailbox: 'INBOX', uidvalidity: 777, uid: 11, roles: ['inbox'], provider_id: '9001')
+      )
+      server['[Gmail]/All Mail'] = { uidvalidity: 782, messages: [[51, 'labelled@example.com']] }
+      server['Clients'] = { uidvalidity: 783, messages: [[61, 'labelled@example.com']] }
+      allow(imap).to receive(:capabilities).and_return(['X-GM-EXT-1'])
+      [51, 61].each do |uid|
+        allow(imap).to receive(:uid_fetch).with([uid], anything).and_return(
+          [Net::IMAP::FetchData.new(1, 'UID' => uid, 'X-GM-MSGID' => '9001',
+                                       'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <labelled@example.com>\r\n\r\n")]
+        )
+      end
+
+      reconcile
+      identity = message.reload.imap_identity
+
+      expect(identity.locations.pluck('mailbox')).to eq ['Clients', '[Gmail]/All Mail']
+      expect(identity.locations.pluck('roles')).to all(be_empty)
+
+      result = Imap::MailboxOperationRequest.new(
+        conversation: conversation, user: create(:user, account: account),
+        action: 'restore', idempotency_key: SecureRandom.uuid
+      ).perform
+
+      expect(result.accepted?).to be true
+      expect(result.operation.items.sole.fetch('source')).to include('mailbox' => 'Clients', 'uid' => 61)
+    end
   end
 
   # Exit row 1: a move performed outside Chatwoot is reflected in derived state.
