@@ -22,6 +22,7 @@ const addCampaign = async campaignDetails => {
     });
 
     useAlert(t('CAMPAIGN.SMS.CREATE.FORM.API.SUCCESS_MESSAGE'));
+    emit('close');
   } catch (error) {
     const errorMessage =
       error?.response?.message ||

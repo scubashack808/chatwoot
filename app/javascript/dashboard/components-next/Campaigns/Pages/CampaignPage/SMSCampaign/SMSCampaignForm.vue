@@ -82,10 +82,6 @@ const isSubmitDisabled = computed(() => v$.value.$invalid);
 const formatToUTCString = localDateTime =>
   localDateTime ? new Date(localDateTime).toISOString() : null;
 
-const resetState = () => {
-  Object.assign(state, initialState);
-};
-
 const handleCancel = () => emit('cancel');
 
 const prepareCampaignDetails = () => ({
@@ -104,8 +100,6 @@ const handleSubmit = async () => {
   if (!isFormValid) return;
 
   emit('submit', prepareCampaignDetails());
-  resetState();
-  handleCancel();
 };
 </script>
 

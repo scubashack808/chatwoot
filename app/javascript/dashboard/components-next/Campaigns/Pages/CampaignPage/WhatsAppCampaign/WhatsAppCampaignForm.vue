@@ -115,11 +115,6 @@ const isSubmitDisabled = computed(
 const formatToUTCString = localDateTime =>
   localDateTime ? new Date(localDateTime).toISOString() : null;
 
-const resetState = () => {
-  Object.assign(state, initialState);
-  v$.value.$reset();
-};
-
 const handleCancel = () => emit('cancel');
 
 const prepareCampaignDetails = () => {
@@ -157,8 +152,6 @@ const handleSubmit = async () => {
   if (!isFormValid || !hasRequiredTemplateParams.value) return;
 
   emit('submit', prepareCampaignDetails());
-  resetState();
-  handleCancel();
 };
 
 // Reset template selection when inbox changes
