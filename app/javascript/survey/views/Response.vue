@@ -137,6 +137,7 @@ export default {
           uuid: this.surveyId,
           data,
         });
+        this.errorMessage = null;
         this.surveyDetails = {
           rating: this.selectedRating,
           feedback_message: this.feedbackMessage,
