@@ -14,6 +14,17 @@ class Whatsapp::MessageDedupLock
   # Returns true when the lock is acquired (caller should proceed).
   # Returns false when another worker already holds the lock.
   def acquire!
-    ::Redis::Alfred.set(@key, true, nx: true, ex: @ttl)
+    token = SecureRandom.hex(16)
+    return false unless ::Redis::Alfred.set(@key, token, nx: true, ex: @ttl)
+
+    @token = token
+    true
+  end
+
+  def release!
+    return unless @token
+
+    ::Redis::Alfred.delete_if_equals(@key, @token)
+    @token = nil
   end
 end

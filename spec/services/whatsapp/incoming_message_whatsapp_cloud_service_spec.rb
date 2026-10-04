@@ -60,6 +60,43 @@ describe Whatsapp::IncomingMessageWhatsappCloudService do
       end
     end
 
+    context 'when an attachment download raises before commit' do
+      let(:source_id) { 'wamid.cloud-attachment-replay' }
+      let(:media_url) { whatsapp_channel.media_url('b1c68f38-8734-4ad3-b4a1-ef0c10d683') }
+      let(:download_url) { 'https://chatwoot-assets.local/sample.png' }
+
+      before do
+        params[:entry].first[:changes].first[:value][:messages].first[:id] = source_id
+      end
+
+      it 'rolls back a timeout, accepts the same event once, and deduplicates subsequent replay', :aggregate_failures do
+        stub_media_url_request
+        download = stub_request(:get, download_url).to_raise(Down::TimeoutError)
+
+        expect { described_class.new(inbox: whatsapp_channel.inbox, params: params).perform }
+          .to(raise_error { |error| expect(error.class.name).to eq('Down::TimeoutError') })
+        expect(Message.where(source_id: source_id).count).to eq(0)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(0)
+        expect(whatsapp_channel.inbox.conversations.count).to eq(0)
+
+        remove_request_stub(download)
+        stub_sample_png_request
+        described_class.new(inbox: whatsapp_channel.inbox, params: params).perform
+
+        expect(Message.where(source_id: source_id).count).to eq(1)
+        expect(Message.find_by!(source_id: source_id).attachments.count).to eq(1)
+        expect(a_request(:get, media_url)).to have_been_made.twice
+        expect(a_request(:get, download_url)).to have_been_made.twice
+
+        described_class.new(inbox: whatsapp_channel.inbox, params: params).perform
+
+        expect(Message.where(source_id: source_id).count).to eq(1)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(1)
+        expect(a_request(:get, media_url)).to have_been_made.twice
+        expect(a_request(:get, download_url)).to have_been_made.twice
+      end
+    end
+
     context 'when document attachment includes an accented filename' do
       let(:document_params) do
         {

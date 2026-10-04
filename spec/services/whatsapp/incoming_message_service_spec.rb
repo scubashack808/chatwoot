@@ -358,6 +358,40 @@ describe Whatsapp::IncomingMessageService do
       end
     end
 
+    context 'when an attachment download raises before commit' do
+      let(:source_id) { 'wamid.360dialog-attachment-replay' }
+      let(:media_id) { 'b1c68f38-8734-4ad3-b4a1-ef0c10d683' }
+      let(:media_url) { whatsapp_channel.media_url(media_id) }
+
+      before do
+        params[:messages].first.merge!(id: source_id, type: 'image', image: { id: media_id, mime_type: 'image/png' })
+      end
+
+      it 'rolls back a timeout, accepts the same event once, and deduplicates subsequent replay', :aggregate_failures do
+        download = stub_request(:get, media_url).to_raise(Down::TimeoutError)
+
+        expect { described_class.new(inbox: whatsapp_channel.inbox, params: params).perform }
+          .to(raise_error { |error| expect(error.class.name).to eq('Down::TimeoutError') })
+        expect(Message.where(source_id: source_id).count).to eq(0)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(0)
+        expect(whatsapp_channel.inbox.conversations.count).to eq(0)
+
+        remove_request_stub(download)
+        stub_request(:get, media_url).to_return(status: 200, body: File.read('spec/assets/sample.png'))
+        described_class.new(inbox: whatsapp_channel.inbox, params: params).perform
+
+        expect(Message.where(source_id: source_id).count).to eq(1)
+        expect(Message.find_by!(source_id: source_id).attachments.count).to eq(1)
+        expect(a_request(:get, media_url)).to have_been_made.twice
+
+        described_class.new(inbox: whatsapp_channel.inbox, params: params).perform
+
+        expect(Message.where(source_id: source_id).count).to eq(1)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(1)
+        expect(a_request(:get, media_url)).to have_been_made.twice
+      end
+    end
+
     context 'when valid location message params' do
       it 'creates appropriate conversations, message and contacts' do
         params = {
@@ -549,6 +583,100 @@ describe Whatsapp::IncomingMessageService do
           expect(whatsapp_channel.inbox.messages.first.content).to eq('Test')
           expect(whatsapp_channel.inbox.contact_inboxes.first.source_id).to eq(wa_id)
         end
+      end
+    end
+
+    context 'when preserving the source lock lifecycle' do
+      let(:source_id) { params[:messages].first[:id] }
+      let(:lock_key) { format(Redis::RedisKeys::MESSAGE_SOURCE_KEY, id: source_id) }
+      let(:service) { described_class.new(inbox: whatsapp_channel.inbox, params: params) }
+
+      it 'retains the lock when contact resolution normally returns without a contact' do
+        allow(service).to receive(:set_contact)
+
+        expect { service.perform }.not_to change(Message, :count)
+
+        expect(Redis::Alfred.get(lock_key)).to be_present
+        expect(Whatsapp::MessageDedupLock.new(source_id).acquire!).to be_falsey
+      end
+
+      it 'retains the lock when an inbound contact is blocked' do
+        contact = create(:contact, account: whatsapp_channel.account, blocked: true)
+        create(:contact_inbox, contact: contact, inbox: whatsapp_channel.inbox, source_id: wa_id)
+
+        expect { service.perform }.not_to change(Message, :count)
+
+        expect(Redis::Alfred.get(lock_key)).to be_present
+        expect(Whatsapp::MessageDedupLock.new(source_id).acquire!).to be_falsey
+      end
+
+      it 'retains the lock when an error webhook normally returns without a message' do
+        params[:messages].first[:errors] = [{ code: 131_052, title: 'Media download failed' }]
+
+        expect { service.perform }.not_to change(Message, :count)
+
+        expect(Redis::Alfred.get(lock_key)).to be_present
+        expect(Whatsapp::MessageDedupLock.new(source_id).acquire!).to be_falsey
+      end
+
+      it 'leaves the owning worker token untouched when acquisition is denied' do
+        owner = Whatsapp::MessageDedupLock.new(source_id)
+        expect(owner.acquire!).to be_truthy
+        token = Redis::Alfred.get(lock_key)
+        expect(service).not_to receive(:set_contact)
+
+        expect { service.perform }.not_to change(Message, :count)
+
+        expect(Redis::Alfred.get(lock_key)).to eq(token)
+      end
+
+      it 'rolls back an earlier shared contact message and permits replay of the entire event', :aggregate_failures do
+        params[:messages].first.merge!(type: 'contacts', contacts: [
+                                         { name: { formatted_name: 'First contact' }, phones: [{ phone: '+911800' }] },
+                                         { name: { formatted_name: 'Second contact' }, phones: [{ phone: '+911801' }] }
+                                       ])
+        allow(service).to receive(:attach_contact).and_wrap_original do |original, contact|
+          if contact[:name][:formatted_name] == 'Second contact'
+            expect(Message.where(source_id: source_id).count).to eq(1)
+            raise Down::TimeoutError
+          end
+
+          original.call(contact)
+        end
+
+        expect { service.perform }.to(raise_error { |error| expect(error.class.name).to eq('Down::TimeoutError') })
+        expect(Message.where(source_id: source_id).count).to eq(0)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(0)
+        expect(Redis::Alfred.get(lock_key)).to be_nil
+
+        described_class.new(inbox: whatsapp_channel.inbox, params: params).perform
+        expect(Message.where(source_id: source_id).count).to eq(2)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(2)
+
+        described_class.new(inbox: whatsapp_channel.inbox, params: params).perform
+        expect(Message.where(source_id: source_id).count).to eq(2)
+        expect(Attachment.where(account_id: whatsapp_channel.account_id).count).to eq(2)
+      end
+
+      it 'retains the lock if an error is raised after the message transaction returns' do
+        create(:contact_inbox, inbox: whatsapp_channel.inbox, source_id: wa_id)
+        transaction_depth = 0
+        allow(ActiveRecord::Base).to receive(:transaction).and_wrap_original do |original, *args, &block|
+          transaction_depth += 1
+          result = original.call(*args, &block)
+          raise 'after message transaction' if transaction_depth == 1 && Message.exists?(source_id: source_id)
+
+          result
+        ensure
+          transaction_depth -= 1
+        end
+
+        expect { service.perform }.to raise_error(RuntimeError, 'after message transaction')
+        expect(Message.where(source_id: source_id).count).to eq(1)
+        expect(Redis::Alfred.get(lock_key)).to be_present
+        expect(Whatsapp::MessageDedupLock.new(source_id).acquire!).to be_falsey
+
+        expect { described_class.new(inbox: whatsapp_channel.inbox, params: params).perform }.not_to change(Message, :count)
       end
     end
 
