@@ -120,10 +120,16 @@ class Imap::MailboxOperationRequest
     when 'archive'
       location_for_role(identity, 'inbox')
     when 'restore'
-      %w[trash spam archive].filter_map { |role| location_for_role(identity, role) }.first
+      %w[trash spam archive].filter_map { |role| location_for_role(identity, role) }.first || inferred_archive_source(identity)
     else
       location_for_role(identity, 'inbox') || identity.primary
     end
+  end
+
+  def inferred_archive_source(identity)
+    return if identity.provider_id.blank? || identity.locations.any? { |location| Array(location['roles']).any? }
+
+    identity.primary
   end
 
   def location_for_role(identity, role)

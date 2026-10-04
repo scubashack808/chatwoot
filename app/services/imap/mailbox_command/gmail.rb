@@ -9,7 +9,7 @@ class Imap::MailboxCommand::Gmail < Imap::MailboxCommand::Standard
   private
 
   def perform(action:, identity:, source:, target:, message_id:)
-    return relabel(action: action, identity: identity, source: source, target: target, message_id: message_id) if relabel?(action, source)
+    return relabel(action: action, identity: identity, source: source, target: target, message_id: message_id) if relabel?(action, identity, source)
 
     super
   end
@@ -27,8 +27,13 @@ class Imap::MailboxCommand::Gmail < Imap::MailboxCommand::Standard
     super
   end
 
-  def relabel?(action, source)
-    action == :archive || (action == :restore && Array(source['roles']).include?('archive'))
+  def relabel?(action, identity, source)
+    return true if action == :archive
+    return false unless action == :restore
+    return true if Array(source['roles']).include?('archive')
+
+    # A roleless source is All Mail or a user label; UID MOVE out of a label would strip it.
+    identity.provider_id.present? && Array(source['roles']).empty?
   end
 
   def relabel(action:, identity:, source:, target:, message_id:)
