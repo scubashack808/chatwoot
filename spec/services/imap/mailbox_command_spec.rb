@@ -141,6 +141,12 @@ RSpec.describe Imap::MailboxCommand do
         selected_mailbox == 'INBOX.Archive' && query == ['HEADER', 'MESSAGE-ID', 'abc@example.com'] ? [31] : []
       end
 
+      allow(client).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <abc@example.com>\r\n\r\n" })
+        end
+      end
+
       result = described_class::Standard
                .new(session: session, client: client, targets: { 'archive' => 'INBOX.Archive' })
                .call(action: :archive, identity: identity, message_id: 'abc@example.com')
@@ -159,6 +165,12 @@ RSpec.describe Imap::MailboxCommand do
     it 'confirms one unique target by stable identity' do
       allow(client).to receive(:uid_search).with(['HEADER', 'MESSAGE-ID', 'abc@example.com']).and_return([31])
 
+      allow(client).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <abc@example.com>\r\n\r\n" })
+        end
+      end
+
       result = described_class::Standard
                .new(session: session, client: client, targets: { 'archive' => 'INBOX.Archive' })
                .call(action: :archive, identity: identity, message_id: 'abc@example.com')
@@ -170,11 +182,59 @@ RSpec.describe Imap::MailboxCommand do
     it 'records a conflict when the target cannot be confirmed uniquely' do
       allow(client).to receive(:uid_search).with(['HEADER', 'MESSAGE-ID', 'abc@example.com']).and_return([31, 32])
 
+      allow(client).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <abc@example.com>\r\n\r\n" })
+        end
+      end
+
       result = described_class::Standard
                .new(session: session, client: client, targets: { 'archive' => 'INBOX.Archive' })
                .call(action: :archive, identity: identity, message_id: 'abc@example.com')
 
       expect(result.status).to eq :conflict
+    end
+  end
+
+  describe 'exact Message-ID confirmation' do
+    cases = [
+      [['xabc@example.com'], :conflict, nil],
+      [['xabc@example.com', 'abc@example.com'], :already_in_target, 32],
+      [['abc@example.com', 'abc@example.com'], :conflict, nil]
+    ]
+    [described_class::Standard, described_class::Gmail].each do |dialect|
+      cases.each do |header_ids, status, target_uid|
+        it "verifies #{header_ids.inspect} during #{dialect.name} recovery" do
+          allow(client).to receive(:uid_search).with(['UID', 7]).and_return([])
+          allow(client).to receive(:uid_search).with(['HEADER', 'MESSAGE-ID', 'abc@example.com']).and_return((31...(31 + header_ids.size)).to_a)
+          rows = header_ids.each_with_index.map do |id, index|
+            Net::IMAP::FetchData.new(index + 1, { 'UID' => index + 31, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{id}>\r\n\r\n" })
+          end
+          allow(client).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return(rows)
+
+          result = dialect.new(session: session, client: client, targets: { 'archive' => 'Archive', 'all' => 'Archive' })
+                          .call(action: :archive, identity: identity, message_id: 'abc@example.com')
+
+          expect(result.status).to eq status
+          expect(result.target_uid).to eq target_uid
+          expect(client).not_to have_received(:uid_move)
+        end
+      end
+    end
+
+    it 'filters substring candidates when COPYUID is missing' do
+      allow(client).to receive(:responses).with('COPYUID').and_return([])
+      allow(client).to receive(:uid_search).with(['HEADER', 'MESSAGE-ID', 'abc@example.com']).and_return([31, 32])
+      rows = ['xabc@example.com', 'abc@example.com'].each_with_index.map do |id, index|
+        Net::IMAP::FetchData.new(index + 1, { 'UID' => index + 31, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{id}>\r\n\r\n" })
+      end
+      allow(client).to receive(:uid_fetch).with([31, 32], ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return(rows)
+
+      result = described_class::Standard.new(session: session, client: client, targets: { 'archive' => 'Archive' })
+                                        .call(action: :archive, identity: identity, message_id: 'abc@example.com')
+
+      expect(result.status).to eq :moved
+      expect(result.target_uid).to eq 32
     end
   end
 
@@ -209,7 +269,8 @@ RSpec.describe Imap::MailboxCommand do
       allow(client).to receive(:responses).with('UIDVALIDITY').and_return([42], [99])
       allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]).and_return([31])
 
-      result = gmail.call(action: :archive, identity: gmail_identity)
+      expect(client).not_to receive(:uid_fetch)
+      result = gmail.call(action: :archive, identity: gmail_identity, message_id: 'abc@example.com')
 
       expect(client).to have_received(:uid_store).with(7, '-X-GM-LABELS', ['\\Inbox'])
       expect(client).not_to have_received(:uid_move)

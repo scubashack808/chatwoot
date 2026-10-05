@@ -109,6 +109,7 @@ class Imap::MailboxCommand::Standard
     session.command { |imap| imap.select(target) }
     uidvalidity = Array(client.responses('UIDVALIDITY')).last
     hits = Array(session.command { |imap| imap.uid_search(query) })
+    hits = Imap::MessageIdMatcher.call(session: session, uids: hits, message_id: message_id) if query.first == 'HEADER'
 
     return conflict("target could not be confirmed uniquely, #{hits.length} candidates") unless hits.one?
 

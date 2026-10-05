@@ -91,6 +91,12 @@ RSpec.describe Imap::MailboxOperationExecutor do
         []
       end
     end
+    allow(client).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+      uids.map do |uid|
+        source_id = server.fetch(selected[:mailbox]).fetch(uid)
+        Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{source_id}>\r\n\r\n" })
+      end
+    end
     allow(client).to receive(:uid_move) do |uid, target|
       raise Net::IMAP::NoResponseError, 'simulated provider rejection' if failed_uids.include?(uid)
 
