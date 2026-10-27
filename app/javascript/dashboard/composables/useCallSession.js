@@ -193,31 +193,28 @@ const buildCallActions = ({ callsStore, whatsappSession, t }) => {
   // disappearing while the backend still rings.
   const rejectIncomingCall = async callSid => {
     const call = findCall(callSid);
-    try {
-      if (isWhatsappCall(call) && call?.callId) {
-        if (call.callDirection === VOICE_CALL_DIRECTION.OUTBOUND) {
-          // Outbound calls that are still ringing must be terminated, not
-          // rejected (reject is the inbound-side verb on Meta's API).
-          await whatsappSession.endActiveCall(call.callId);
-        } else {
-          await whatsappSession.rejectIncomingCall(call.callId);
-        }
-      } else if (call?.inboxId && call?.conversationId) {
-        // Twilio incoming reject: agent hasn't joined the Device yet, so
-        // endClientCall is a no-op. End the conference server-side instead
-        // so Twilio hangs up the inbound leg.
-        await VoiceAPI.leaveConference({
-          inboxId: call.inboxId,
-          conversationId: call.conversationId,
-          callSid,
-        });
+    if (isWhatsappCall(call) && call?.callId) {
+      if (call.callDirection === VOICE_CALL_DIRECTION.OUTBOUND) {
+        // Outbound calls that are still ringing must be terminated, not
+        // rejected (reject is the inbound-side verb on Meta's API).
+        await whatsappSession.endActiveCall(call.callId);
       } else {
-        TwilioVoiceClient.endClientCall();
+        await whatsappSession.rejectIncomingCall(call.callId);
       }
-    } finally {
-      markCallDismissed(callSid);
-      callsStore.dismissCall(callSid);
+    } else if (call?.inboxId && call?.conversationId) {
+      // Twilio incoming reject: agent hasn't joined the Device yet, so
+      // endClientCall is a no-op. End the conference server-side instead
+      // so Twilio hangs up the inbound leg.
+      await VoiceAPI.leaveConference({
+        inboxId: call.inboxId,
+        conversationId: call.conversationId,
+        callSid,
+      });
+    } else {
+      TwilioVoiceClient.endClientCall();
     }
+    markCallDismissed(callSid);
+    callsStore.dismissCall(callSid);
   };
 
   const dismissCall = callSid => {
