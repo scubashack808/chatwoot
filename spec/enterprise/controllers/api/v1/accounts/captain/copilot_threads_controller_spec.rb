@@ -136,6 +136,34 @@ RSpec.describe 'Api::V1::Accounts::Captain::CopilotThreads', type: :request do
           )
         end
 
+        it 'creates a separate thread and enqueues the selected assistant after switching assistants' do
+          other_assistant = create(:captain_assistant, account: account)
+          previous_thread = create(:captain_copilot_thread, account: account, user: agent, assistant: assistant)
+          account.update!(limits: { captain_responses: 2 }, custom_attributes: { captain_responses_usage: 0 })
+          allow(Captain::Copilot::ResponseJob).to receive(:perform_later)
+
+          expect do
+            post "/api/v1/accounts/#{account.id}/captain/copilot_threads",
+                 params: valid_params.merge(assistant_id: other_assistant.id),
+                 headers: agent.create_new_auth_token,
+                 as: :json
+          end.to change(CopilotThread, :count).by(1)
+             .and change(CopilotMessage, :count).by(1)
+
+          expect(response).to have_http_status(:success)
+          thread = CopilotThread.find(json_response[:id])
+          expect(thread.assistant_id).to eq(other_assistant.id)
+          expect(thread.user_id).to eq(agent.id)
+          expect(previous_thread.reload.assistant_id).to eq(assistant.id)
+          expect(Captain::Copilot::ResponseJob).to have_received(:perform_later).with(
+            assistant: other_assistant,
+            conversation_id: conversation.display_id,
+            user_id: agent.id,
+            copilot_thread_id: thread.id,
+            message: valid_params[:message]
+          ).once
+        end
+
         it 'enqueues the dedicated reply suggestion job' do
           account.limits = { captain_responses: 2 }
           account.custom_attributes = { captain_responses_usage: 0 }
