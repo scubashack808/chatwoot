@@ -53,26 +53,25 @@ RSpec.describe Webhooks::SmsEventsJob do
       described_class.perform_now(params)
     end
 
-    it 'calls Sms::DeliveryStatusService if the message type is message-delivered' do
-      params[:type] = 'message-delivered'
-      process_service = double
-      allow(Sms::DeliveryStatusService).to receive(:new).and_return(process_service)
-      allow(process_service).to receive(:perform)
-      expect(Sms::DeliveryStatusService).to receive(:new).with(channel: sms_channel,
-                                                               params: params[:message].with_indifferent_access)
-      expect(process_service).to receive(:perform)
-      described_class.perform_now(params)
+    %w[message-delivered message-failed].each do |type|
+      it "calls Sms::DeliveryStatusService with the sending inbox and full event for #{type}" do
+        outbound_params = params.merge(type: type, to: '+14234234234',
+                                       message: params[:message].merge(from: sms_channel.phone_number, to: ['+14234234234'], direction: 'out'))
+        process_service = double
+        allow(Sms::DeliveryStatusService).to receive(:new).and_return(process_service)
+        allow(process_service).to receive(:perform)
+        expect(Sms::DeliveryStatusService).to receive(:new).with(inbox: sms_channel.inbox,
+                                                                 params: outbound_params.with_indifferent_access)
+        expect(process_service).to receive(:perform)
+        described_class.perform_now(outbound_params)
+      end
     end
 
-    it 'calls Sms::DeliveryStatusService if the message type is message-failed' do
-      params[:type] = 'message-failed'
-      process_service = double
-      allow(Sms::DeliveryStatusService).to receive(:new).and_return(process_service)
-      allow(process_service).to receive(:perform)
-      expect(Sms::DeliveryStatusService).to receive(:new).with(channel: sms_channel,
-                                                               params: params[:message].with_indifferent_access)
-      expect(process_service).to receive(:perform)
-      described_class.perform_now(params)
+    it 'does not fall back to the recipient channel when the sending channel is unknown' do
+      outbound_params = params.merge(type: 'message-delivered',
+                                     message: params[:message].merge(from: '+19999999999', direction: 'out'))
+      expect(Sms::DeliveryStatusService).not_to receive(:new)
+      described_class.perform_now(outbound_params)
     end
 
     it 'does not call any service if the message type is not supported' do
