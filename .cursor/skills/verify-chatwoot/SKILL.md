@@ -51,7 +51,7 @@ Read [login](features/login.md) and [email reply](features/email-reply.md). Disc
     release_caller()
     PY
 
-Choose the exact synthetic task tab by target ID, full URL, title and Profile 14; never choose the first URL match. Set CHATWOOT_TARGET_ID to that observed ID. Ambiguity is a stop. If no authorized tab exists, use the installed browser-opening procedure first; never allocate a replacement to evade a mismatch. Permitted entries: login, the synthetic dashboard and fixture conversation. Doctor returns current account/display IDs; reset can change the display ID.
+Choose the exact synthetic task tab by target ID, full URL, title and profile; never choose the first URL match. The profile is Profile 14 (CC01) unless --profile names another governed profile directory, never Profile 7 (A-Team); use another one when something in CC01, such as a password manager's save prompt, interferes with typing. Set CHATWOOT_TARGET_ID to that observed ID. Ambiguity is a stop. If no authorized tab exists, use the installed browser-opening procedure first; never allocate a replacement to evade a mismatch. Permitted entries: login, the synthetic dashboard and fixture conversation. Doctor returns current account/display IDs; reset can change the display ID.
 
 Run the complete pilot from the verification checkout:
 
