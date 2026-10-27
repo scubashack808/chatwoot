@@ -69,52 +69,42 @@ RSpec.describe Captain::Llm::FaqGeneratorService do
       end
     end
 
+    context 'when the model finds no FAQs' do
+      let(:empty_response) { instance_double(RubyLLM::Message, content: '{"faqs": []}') }
+
+      before { allow(mock_chat).to receive(:ask).and_return(empty_response) }
+
+      it 'returns an empty array' do
+        expect(service.generate).to eq([])
+      end
+    end
+
     context 'when LLM API fails' do
       before do
         allow(mock_chat).to receive(:ask).and_raise(RubyLLM::Error.new(nil, 'API Error'))
-        allow(Rails.logger).to receive(:error)
       end
 
-      it 'returns empty array and logs the error' do
-        expect(Rails.logger).to receive(:error).with('LLM API Error: API Error')
-        expect(service.generate).to eq([])
-      end
-    end
-
-    context 'when response content is nil' do
-      let(:nil_response) { instance_double(RubyLLM::Message, content: nil) }
-
-      before do
-        allow(mock_chat).to receive(:ask).and_return(nil_response)
-      end
-
-      it 'returns empty array' do
-        expect(service.generate).to eq([])
+      it 'raises a generation error' do
+        expect { service.generate }.to raise_error do |error|
+          expect(error.class.name).to eq('Captain::Llm::FaqGeneratorService::GenerationError')
+          expect(error.message).to eq('LLM API Error: API Error')
+        end
       end
     end
 
-    context 'when JSON parsing fails' do
-      let(:invalid_response) { instance_double(RubyLLM::Message, content: 'invalid json') }
+    {
+      'response content is nil' => nil,
+      'JSON parsing fails' => 'invalid json',
+      'response is missing faqs key' => '{"data": []}',
+      'faqs is not a list' => '{"faqs": "none"}',
+      'a faq entry is not an object' => '{"faqs": ["question"]}'
+    }.each do |description, content|
+      context "when #{description}" do
+        before { allow(mock_chat).to receive(:ask).and_return(instance_double(RubyLLM::Message, content: content)) }
 
-      before do
-        allow(mock_chat).to receive(:ask).and_return(invalid_response)
-      end
-
-      it 'logs error and returns empty array' do
-        expect(Rails.logger).to receive(:error).with(/Error in parsing GPT processed response:/)
-        expect(service.generate).to eq([])
-      end
-    end
-
-    context 'when response is missing faqs key' do
-      let(:missing_key_response) { instance_double(RubyLLM::Message, content: '{"data": []}') }
-
-      before do
-        allow(mock_chat).to receive(:ask).and_return(missing_key_response)
-      end
-
-      it 'returns empty array via KeyError rescue' do
-        expect(service.generate).to eq([])
+        it 'raises a generation error' do
+          expect { service.generate }.to(raise_error { |error| expect(error.class.name).to eq('Captain::Llm::FaqGeneratorService::GenerationError') })
+        end
       end
     end
   end

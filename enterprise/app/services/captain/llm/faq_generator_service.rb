@@ -1,6 +1,10 @@
 class Captain::Llm::FaqGeneratorService < Llm::BaseAiService
   include Integrations::LlmInstrumentation
 
+  # Raised instead of returning [] so callers can tell a failed generation apart
+  # from a model that legitimately found no FAQs, and keep existing answers.
+  class GenerationError < StandardError; end
+
   def initialize(document:)
     super(feature: 'document_faq_generation', account: document.account)
     @document = document
@@ -19,8 +23,7 @@ class Captain::Llm::FaqGeneratorService < Llm::BaseAiService
 
     parse_response(response.content)
   rescue RubyLLM::Error => e
-    Rails.logger.error "LLM API Error: #{e.message}"
-    []
+    raise GenerationError, "LLM API Error: #{e.message}"
   end
 
   private
@@ -51,11 +54,14 @@ class Captain::Llm::FaqGeneratorService < Llm::BaseAiService
   end
 
   def parse_response(content)
-    return [] if content.nil?
+    raise GenerationError, 'FAQ generation response was empty' if content.nil?
 
-    JSON.parse(sanitize_json_response(content)).fetch('faqs', [])
+    parsed = JSON.parse(sanitize_json_response(content))
+    faqs = parsed['faqs'] if parsed.is_a?(Hash)
+    raise GenerationError, 'FAQ generation response did not contain a faqs list' unless faqs.is_a?(Array) && faqs.all?(Hash)
+
+    faqs
   rescue JSON::ParserError => e
-    Rails.logger.error "Error in parsing GPT processed response: #{e.message}"
-    []
+    raise GenerationError, "Error in parsing GPT processed response: #{e.message}"
   end
 end
