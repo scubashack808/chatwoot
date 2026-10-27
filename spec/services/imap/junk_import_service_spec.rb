@@ -72,12 +72,14 @@ RSpec.describe Imap::JunkImportService do
     expect(inbox_view.count).to eq 0
   end
 
-  it 'imports nothing twice' do
+  it 'imports nothing twice, and fetches no body for mail it already holds' do
     described_class.new(channel: channel).perform
 
     report = nil
     expect { report = described_class.new(channel: channel).perform }.not_to change(Message, :count)
     expect(report).to include(already_present: 2)
+    expect(report[:imported].to_i).to eq 0
+    expect(imap).to have_received(:uid_fetch).with(anything, ['BODY.PEEK[]']).twice
   end
 
   it 'skips what Chatwoot already holds before applying the per-cycle cap, so a busy day still drains' do

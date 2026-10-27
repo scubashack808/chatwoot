@@ -59,7 +59,11 @@ class Imap::JunkImportService
     junk.fetch_headers(uids).filter_map do |data|
       message_id = Mail.read_from_string(data.attr['BODY[HEADER]'].to_s).message_id
       next if message_id.blank?
-      next @counts[:already_present] += 1 if already_present?(message_id)
+
+      if already_present?(message_id)
+        @counts[:already_present] += 1
+        next
+      end
 
       data.attr['UID']
     end

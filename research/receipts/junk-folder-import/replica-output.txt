@@ -1,0 +1,25 @@
+== replica folders: Junk[:Junk] spam[:Junk] Drafts[] Sent[] Trash[] INBOX[]
+== ambiguous run: {status: "skipped", reason: "junk_folder_unavailable", detail: "ambiguous", inbox_id: 1}
+PASS T2 two \Junk folders and no override -> skipped ambiguous, nothing imported
+PASS T8 flag off -> skipped feature_disabled
+PASS T8 mode off -> skipped mailbox_sync_off
+== first run: {status: "completed", reason: nil, inbox_id: 1, mailbox: "spam", examined: 3, imported: 3}
+PASS T1 imports the three spam-folder messages
+PASS T2 decoy unflagged Junk folder never read
+PASS T1 new junk conversations are on the Junk (spam) tab
+PASS T1 new junk conversations are not on the Inbox tab
+PASS T1 identity records the real folder, UIDVALIDITY and spam role
+PASS T3 server untouched: spam count 3->3, seen 0->0
+PASS T5 created conversations are resolved and junk_import after commit
+PASS T5 control: an ordinary conversation did notify the subscribed agent
+PASS T5 no conversation_creation notification for any junk conversation
+PASS T6 junk reply threaded into the real conversation, which reopened and is not junk
+== rerun: {status: "completed", reason: nil, inbox_id: 1, mailbox: "spam", examined: 3, already_present: 3}
+PASS T4 rerun imports nothing
+PASS T4 cap applies after dedup, so new mail behind known mail still imports
+PASS T8 INBOX fetch still creates an open conversation on the Inbox tab
+PASS T6 inbox mail threading into a junk conversation reopens it
+PASS T7 restore operation "succeeded" moved the message to server INBOX
+PASS T7 restored conversation reopened and junk_import cleared
+PASS T7 next INBOX poll does not duplicate the restored message
+== 20/20 checks passed
