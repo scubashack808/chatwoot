@@ -1,4 +1,5 @@
 import { actions } from '../../conversation/actions';
+import { mutations } from '../../conversation/mutations';
 import getUuid from '../../../../helpers/uuid';
 import { API } from 'widget/helpers/axios';
 
@@ -305,6 +306,187 @@ describe('#actions', () => {
     });
   });
 
+  describe('reconnect pagination with real mutations', () => {
+    let state;
+    let context;
+    let missed;
+
+    beforeEach(() => {
+      API.get.mockReset();
+      state = {
+        conversations: { 1: { id: 1, created_at: 1 } },
+        lastMessageId: 1,
+        meta: {},
+        uiFlags: { allMessagesLoaded: false, isFetchingList: false },
+      };
+      context = {
+        state,
+        commit: vi.fn((name, payload) => {
+          mutations[name.replace('conversation/', '')](state, payload);
+        }),
+      };
+      missed = Array.from({ length: 201 }, (_, index) => ({
+        id: index + 2,
+        created_at: index + 2,
+        content_attributes: {},
+      }));
+    });
+
+    it.each([0, 99, 100, 101, 201])(
+      'recovers %i rows with bounded pages',
+      async count => {
+        const messages = missed.slice(0, count);
+        API.get.mockImplementation(async (_, { params: { after } }) => ({
+          data: {
+            payload: messages
+              .filter(message => message.id > after)
+              .slice(0, 100),
+            meta: { contact_last_seen_at: 123 },
+          },
+        }));
+        expect(await actions.syncLatestMessages(context)).toBe(true);
+        expect(
+          Object.values(state.conversations).map(message => message.id)
+        ).toEqual([1, ...messages.map(message => message.id)]);
+        expect(API.get).toHaveBeenCalledTimes(Math.floor(count / 100) + 1);
+        expect(state.lastMessageId).toBeNull();
+        expect(state).not.toHaveProperty('conversation');
+        expect(state.uiFlags).toEqual({
+          allMessagesLoaded: false,
+          isFetchingList: false,
+        });
+        expect(state.meta.userLastSeenAt).toBe(123);
+      }
+    );
+
+    it.each(['duplicate', 'deleted'])(
+      'continues through a full %s-only page',
+      async kind => {
+        const firstPage = missed.slice(0, 100);
+        if (kind === 'duplicate') {
+          firstPage.forEach(message => {
+            state.conversations[message.id] = {
+              ...message,
+              content: 'live version',
+            };
+          });
+        } else {
+          firstPage.forEach(message => {
+            message.content_attributes.deleted = true;
+          });
+        }
+        API.get.mockResolvedValueOnce({
+          data: { payload: firstPage, meta: {} },
+        });
+        API.get.mockResolvedValueOnce({
+          data: { payload: [missed[100]], meta: {} },
+        });
+        expect(await actions.syncLatestMessages(context)).toBe(true);
+        expect(API.get.mock.calls[1][1].params.after).toBe(101);
+        expect(state.conversations[102]).toEqual(missed[100]);
+        expect(Object.keys(state.conversations)).toHaveLength(
+          kind === 'duplicate' ? 102 : 2
+        );
+        if (kind === 'duplicate') {
+          expect(state.conversations[2].content).toBe('live version');
+        }
+      }
+    );
+
+    it.each([1, 2])(
+      'retains the anchor after page %i fails and replays on retry',
+      async failedPage => {
+        if (failedPage === 2) {
+          API.get.mockResolvedValueOnce({
+            data: { payload: missed.slice(0, 100), meta: {} },
+          });
+        }
+        API.get.mockRejectedValueOnce(new Error('offline'));
+        expect(await actions.syncLatestMessages(context)).toBe(false);
+        expect(state.lastMessageId).toBe(1);
+        expect(context.commit).not.toHaveBeenCalledWith('clearLastMessageId');
+        await actions.addOrUpdateMessage(context, { id: 500, created_at: 500 });
+        await actions.setLastMessageId(context);
+        expect(state.lastMessageId).toBe(1);
+        API.get.mockReset();
+        API.get.mockImplementation(async (_, { params: { after } }) => ({
+          data: {
+            payload: missed.filter(message => message.id > after).slice(0, 100),
+            meta: {},
+          },
+        }));
+        expect(await actions.syncLatestMessages(context)).toBe(true);
+        expect(API.get.mock.calls[0][1].params.after).toBe(1);
+        expect(Object.keys(state.conversations)).toHaveLength(203);
+        expect(state.conversations[500]).toEqual({ id: 500, created_at: 500 });
+        expect(state.lastMessageId).toBeNull();
+      }
+    );
+
+    it('keeps recovery pending and preserves live arrivals during a later page', async () => {
+      let resolvePage;
+      API.get.mockResolvedValueOnce({
+        data: { payload: missed.slice(0, 100), meta: {} },
+      });
+      API.get.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            resolvePage = resolve;
+          })
+      );
+      const recovery = actions.syncLatestMessages(context);
+      await vi.waitFor(() => expect(API.get).toHaveBeenCalledTimes(2));
+      expect(state.lastMessageId).toBe(1);
+      expect(context.commit).not.toHaveBeenCalledWith('clearLastMessageId');
+      await actions.addOrUpdateMessage(context, { id: 500, created_at: 500 });
+      resolvePage({ data: { payload: [missed[100]], meta: {} } });
+      expect(await recovery).toBe(true);
+      expect(state.conversations[500]).toEqual({ id: 500, created_at: 500 });
+      expect(state.conversations[102]).toEqual(missed[100]);
+      expect(state.lastMessageId).toBeNull();
+    });
+
+    it('discards a response when the conversation was cleared in flight', async () => {
+      let resolvePage;
+      API.get.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            resolvePage = resolve;
+          })
+      );
+      const recovery = actions.syncLatestMessages(context);
+      actions.clearConversations(context);
+      await actions.addOrUpdateMessage(context, { id: 900, created_at: 900 });
+      resolvePage({ data: { payload: missed.slice(0, 100), meta: {} } });
+      expect(await recovery).toBe(false);
+      expect(state.conversations).toEqual({
+        900: { id: 900, created_at: 900 },
+      });
+      expect(state.lastMessageId).toBeNull();
+      expect(API.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails without clearing the anchor when a page cannot advance', async () => {
+      API.get.mockResolvedValueOnce({
+        data: { payload: [{ id: 1 }], meta: {} },
+      });
+      expect(await actions.syncLatestMessages(context)).toBe(false);
+      expect(state.lastMessageId).toBe(1);
+      expect(context.commit).not.toHaveBeenCalledWith('clearLastMessageId');
+    });
+
+    it('uses one latest-page fetch when there is no saved anchor', async () => {
+      state.lastMessageId = null;
+      API.get.mockResolvedValueOnce({
+        data: { payload: missed.slice(0, 100), meta: {} },
+      });
+      expect(await actions.syncLatestMessages(context)).toBe(true);
+      expect(API.get).toHaveBeenCalledTimes(1);
+      expect(API.get.mock.calls[0][1].params.after).toBeNull();
+      expect(Object.keys(state.conversations)).toHaveLength(101);
+    });
+  });
+
   describe('#syncLatestMessages', () => {
     it('latest message should append to end of list', async () => {
       const state = {
@@ -385,6 +567,7 @@ describe('#actions', () => {
             },
           },
         ],
+        ['clearLastMessageId'],
       ]);
     });
 
@@ -417,7 +600,7 @@ describe('#actions', () => {
         data: {
           payload: [
             {
-              id: 460,
+              id: 465,
               content: 'Hi how are you',
               message_type: 0,
               content_type: 'text',
@@ -448,8 +631,8 @@ describe('#actions', () => {
               created_at: 1682244355,
               conversation_id: 20,
             },
-            460: {
-              id: 460,
+            465: {
+              id: 465,
               content: 'Hi how are you',
               message_type: 0,
               content_type: 'text',
@@ -468,13 +651,14 @@ describe('#actions', () => {
             },
           },
         ],
+        ['clearLastMessageId'],
       ]);
     });
 
-    it('abort syncing if there is no missing messages ', async () => {
+    it('finishes syncing when there are no missing messages', async () => {
       const state = {
         uiFlags: { allMessagesLoaded: false },
-        conversation: {
+        conversations: {
           454: {
             id: 454,
             content: 'hi',
@@ -506,7 +690,11 @@ describe('#actions', () => {
       });
       await actions.syncLatestMessages({ state, commit }, {});
 
-      expect(commit.mock.calls).toEqual([]);
+      expect(commit.mock.calls).toEqual([
+        ['conversation/setMetaUserLastSeenAt', 14664223490, { root: true }],
+        ['setMissingMessagesInConversation', state.conversations],
+        ['clearLastMessageId'],
+      ]);
     });
   });
 });

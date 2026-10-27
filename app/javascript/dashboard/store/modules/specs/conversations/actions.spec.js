@@ -3,6 +3,7 @@ import actions, {
   hasMessageFailedWithExternalError,
 } from '../../conversations/actions';
 import types from '../../../mutation-types';
+import { mutations } from '../../conversations';
 const dataToSend = {
   payload: [
     {
@@ -829,6 +830,265 @@ describe('#addMentions', () => {
         { conversationId: 1, messageId: null },
       ],
     ]);
+  });
+
+  describe('#syncActiveConversationMessages pagination', () => {
+    let state;
+    let context;
+    let missedMessages;
+
+    beforeEach(() => {
+      state = {
+        allConversations: [
+          {
+            id: 1,
+            messages: [{ id: 1, created_at: 1 }],
+            allMessagesLoaded: false,
+          },
+        ],
+        syncConversationsMessages: { 1: 1 },
+      };
+      context = {
+        state,
+        dispatch: vi.fn(),
+        commit: vi.fn((type, payload) => {
+          if (mutations[type]) mutations[type](state, payload);
+        }),
+      };
+      missedMessages = Array.from({ length: 201 }, (_, index) => ({
+        id: index + 2,
+        created_at: index + 2,
+      }));
+      axios.get.mockReset();
+    });
+
+    it.each([
+      [0, 1],
+      [99, 1],
+      [100, 2],
+      [101, 2],
+      [201, 3],
+    ])(
+      'recovers %i missed rows in %i bounded requests',
+      async (count, requests) => {
+        const rows = missedMessages.slice(0, count);
+        axios.get.mockImplementation((_url, { params }) =>
+          Promise.resolve({
+            data: {
+              meta: {},
+              payload: rows
+                .filter(message => message.id > params.after)
+                .slice(0, 100),
+            },
+          })
+        );
+
+        expect(
+          await actions.syncActiveConversationMessages(context, {
+            conversationId: 1,
+          })
+        ).toBe(true);
+
+        expect(
+          state.allConversations[0].messages.map(message => message.id)
+        ).toEqual([1, ...rows.map(message => message.id)]);
+        expect(axios.get).toHaveBeenCalledTimes(requests);
+        expect(
+          axios.get.mock.calls.map(([, { params }]) => params.after)
+        ).toEqual(
+          Array.from({ length: requests }, (_, index) => 1 + index * 100)
+        );
+        expect(state.syncConversationsMessages[1]).toBeNull();
+        expect(context.dispatch).toHaveBeenCalledExactlyOnceWith(
+          'markMessagesRead',
+          { id: 1 },
+          { root: true }
+        );
+        expect(state.allConversations[0].allMessagesLoaded).toBe(false);
+      }
+    );
+
+    it('advances a duplicate-only page and preserves live rows and updates during continuation', async () => {
+      state.allConversations[0].messages.push(...missedMessages.slice(0, 100));
+      let finishPage;
+      axios.get.mockResolvedValueOnce({
+        data: { meta: {}, payload: missedMessages.slice(0, 100) },
+      });
+      axios.get.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishPage = resolve;
+          })
+      );
+      const recovery = actions.syncActiveConversationMessages(context, {
+        conversationId: 1,
+      });
+      await vi.waitFor(() => expect(axios.get).toHaveBeenCalledTimes(2));
+
+      expect(state.syncConversationsMessages[1]).toBe(1);
+      expect(context.dispatch).not.toHaveBeenCalled();
+      expect(context.commit).not.toHaveBeenCalledWith(
+        types.SET_LAST_MESSAGE_ID_IN_SYNC_CONVERSATION,
+        expect.anything()
+      );
+      // Replace the message array as other store updates do while HTTP is pending.
+      state.allConversations[0].messages = [
+        ...state.allConversations[0].messages,
+        { id: 102, created_at: 102, content: 'newer live content' },
+        { id: 500, created_at: 500 },
+      ];
+      finishPage({
+        data: { meta: {}, payload: missedMessages.slice(100, 101) },
+      });
+      expect(await recovery).toBe(true);
+      expect(state.allConversations[0].messages).toHaveLength(103);
+      expect(
+        state.allConversations[0].messages.find(message => message.id === 102)
+          .content
+      ).toBe('newer live content');
+      expect(state.allConversations[0].messages.at(-1).id).toBe(500);
+      expect(axios.get.mock.calls[1][1].params.after).toBe(101);
+    });
+
+    it.each([0, 1])(
+      'retains the anchor and suppresses read on page %i failure, then replays safely',
+      async successfulPages => {
+        if (successfulPages) {
+          axios.get.mockResolvedValueOnce({
+            data: { meta: {}, payload: missedMessages.slice(0, 100) },
+          });
+        }
+        let failPage;
+        axios.get.mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              failPage = reject;
+            })
+        );
+        const recovery = actions.syncActiveConversationMessages(context, {
+          conversationId: 1,
+        });
+        await vi.waitFor(() => expect(failPage).toBeDefined());
+        expect(state.syncConversationsMessages[1]).toBe(1);
+        expect(context.dispatch).not.toHaveBeenCalled();
+        expect(context.commit).not.toHaveBeenCalledWith(
+          types.SET_LAST_MESSAGE_ID_IN_SYNC_CONVERSATION,
+          expect.anything()
+        );
+        failPage(new Error('offline'));
+        expect(await recovery).toBe(false);
+        expect(state.syncConversationsMessages[1]).toBe(1);
+        expect(context.dispatch).not.toHaveBeenCalled();
+        expect(context.commit).not.toHaveBeenCalledWith(
+          types.SET_LAST_MESSAGE_ID_IN_SYNC_CONVERSATION,
+          expect.anything()
+        );
+
+        state.allConversations[0].messages.push({ id: 500, created_at: 500 });
+        await actions.setConversationLastMessageId(context, {
+          conversationId: 1,
+        });
+        expect(state.syncConversationsMessages[1]).toBe(1);
+        axios.get.mockReset();
+        axios.get.mockImplementation((_url, { params }) =>
+          Promise.resolve({
+            data: {
+              meta: {},
+              payload: missedMessages
+                .filter(message => message.id > params.after)
+                .slice(0, 100),
+            },
+          })
+        );
+        expect(
+          await actions.syncActiveConversationMessages(context, {
+            conversationId: 1,
+          })
+        ).toBe(true);
+        expect(axios.get.mock.calls[0][1].params.after).toBe(1);
+        expect(
+          state.allConversations[0].messages.map(message => message.id)
+        ).toEqual([1, ...missedMessages.map(message => message.id), 500]);
+        expect(context.dispatch).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it('does not read or clear recovery if the target is removed during a request', async () => {
+      let finishPage;
+      axios.get.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishPage = resolve;
+          })
+      );
+      const recovery = actions.syncActiveConversationMessages(context, {
+        conversationId: 1,
+      });
+      mutations[types.EMPTY_ALL_CONVERSATION](state);
+      finishPage({ data: { meta: {}, payload: missedMessages.slice(0, 100) } });
+      expect(await recovery).toBe(false);
+      expect(context.commit).not.toHaveBeenCalled();
+      expect(context.dispatch).not.toHaveBeenCalled();
+      expect(state.syncConversationsMessages[1]).toBe(1);
+    });
+
+    it('does not acknowledge a page that fails to advance the cursor', async () => {
+      axios.get.mockResolvedValue({
+        data: { meta: {}, payload: [{ id: 1, created_at: 1 }] },
+      });
+      expect(
+        await actions.syncActiveConversationMessages(context, {
+          conversationId: 1,
+        })
+      ).toBe(false);
+      expect(axios.get).toHaveBeenCalledTimes(1);
+      expect(state.syncConversationsMessages[1]).toBe(1);
+      expect(context.commit).not.toHaveBeenCalled();
+      expect(context.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('ignores a response after the recovery state has been reset', async () => {
+      let finishPage;
+      axios.get.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishPage = resolve;
+          })
+      );
+      const recovery = actions.syncActiveConversationMessages(context, {
+        conversationId: 1,
+      });
+      state.syncConversationsMessages = {};
+      finishPage({ data: { meta: {}, payload: missedMessages.slice(0, 100) } });
+      expect(await recovery).toBe(false);
+      expect(context.commit).not.toHaveBeenCalled();
+      expect(context.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('does not request an absent conversation', async () => {
+      state.allConversations = [];
+      expect(
+        await actions.syncActiveConversationMessages(context, {
+          conversationId: 1,
+        })
+      ).toBe(false);
+      expect(axios.get).not.toHaveBeenCalled();
+      expect(context.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('keeps the no-cursor latest-page path separate from after pagination', async () => {
+      state.syncConversationsMessages = {};
+      axios.get.mockResolvedValueOnce({
+        data: { meta: {}, payload: missedMessages.slice(0, 100) },
+      });
+      expect(
+        await actions.syncActiveConversationMessages(context, {
+          conversationId: 1,
+        })
+      ).toBe(true);
+      expect(axios.get).toHaveBeenCalledTimes(1);
+      expect(axios.get.mock.calls[0][1].params.after).toBeUndefined();
+    });
   });
 
   describe('#fetchAllAttachments', () => {

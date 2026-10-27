@@ -142,45 +142,62 @@ const actions = {
     { commit, state, dispatch },
     { conversationId }
   ) => {
-    const { allConversations, syncConversationsMessages } = state;
-    const lastMessageId = syncConversationsMessages[conversationId];
-    const selectedChat = allConversations.find(
-      conversation => conversation.id === conversationId
-    );
-    if (!selectedChat) return;
+    const lastMessageId = state.syncConversationsMessages[conversationId];
+    if (!state.allConversations.some(chat => chat.id === conversationId)) {
+      return false;
+    }
+    let after = lastMessageId;
+    let hasMore;
     try {
-      const { messages } = selectedChat;
-      // Fetch all the messages after the last message id
-      const {
-        data: { meta, payload },
-      } = await MessageApi.getPreviousMessages({
-        conversationId,
-        after: lastMessageId,
-      });
-      commit(`conversationMetadata/${types.SET_CONVERSATION_METADATA}`, {
-        id: conversationId,
-        data: meta,
-      });
-      // Find the messages that are not already present in the store
-      const missingMessages = payload.filter(
-        message => !messages.find(item => item.id === message.id)
-      );
-      selectedChat.messages.push(...missingMessages);
-      // Sort the messages by created_at
-      const sortedMessages = selectedChat.messages.sort((a, b) => {
-        return new Date(a.created_at) - new Date(b.created_at);
-      });
-      commit(types.SET_MISSING_MESSAGES, {
-        id: conversationId,
-        data: sortedMessages,
-      });
+      do {
+        // Each cursor comes from the raw page, never from concurrent live messages.
+        const {
+          data: { meta, payload },
+          // eslint-disable-next-line no-await-in-loop
+        } = await MessageApi.getPreviousMessages({ conversationId, after });
+        const selectedChat = state.allConversations.find(
+          conversation => conversation.id === conversationId
+        );
+        if (
+          !selectedChat ||
+          state.syncConversationsMessages[conversationId] !== lastMessageId
+        ) {
+          return false;
+        }
+        const nextCursor = payload[payload.length - 1]?.id;
+        if (lastMessageId != null && payload.length && !(nextCursor > after)) {
+          return false;
+        }
+
+        commit(`conversationMetadata/${types.SET_CONVERSATION_METADATA}`, {
+          id: conversationId,
+          data: meta,
+        });
+        const messages = new Map(
+          selectedChat.messages.map(message => [message.id, message])
+        );
+        payload.forEach(message => {
+          if (!messages.has(message.id)) messages.set(message.id, message);
+        });
+        commit(types.SET_MISSING_MESSAGES, {
+          id: conversationId,
+          data: [...messages.values()].sort(
+            (a, b) => new Date(a.created_at) - new Date(b.created_at)
+          ),
+        });
+        // Without a disconnect cursor this is a latest-page fetch, not catch-up.
+        hasMore = lastMessageId != null && payload.length === 100;
+        if (hasMore) after = payload[payload.length - 1].id;
+      } while (hasMore);
       commit(types.SET_LAST_MESSAGE_ID_IN_SYNC_CONVERSATION, {
         conversationId,
         messageId: null,
       });
       dispatch('markMessagesRead', { id: conversationId }, { root: true });
+      return true;
     } catch (error) {
-      // Handle error
+      // Keep the disconnect anchor so a later reconnect replays the missing range.
+      return false;
     }
   },
 
@@ -188,7 +205,8 @@ const actions = {
     { commit, state },
     { conversationId }
   ) => {
-    const { allConversations } = state;
+    const { allConversations, syncConversationsMessages } = state;
+    if (syncConversationsMessages[conversationId] != null) return;
     const selectedChat = allConversations.find(
       conversation => conversation.id === conversationId
     );
