@@ -153,6 +153,8 @@ en:
         verification_failed: 'Could not verify Cloudflare RealtimeKit credentials right now. Please try again.'
     slack:
       invalid_channel_id: 'Invalid slack channel. Please try again'
+    line:
+      text_too_long: 'Message not sent because LINE text messages are limited to %{limit} characters. Shorten the reply or send it as several messages.'
     whatsapp:
       token_exchange_failed: 'Failed to exchange code for access token. Please try again.'
       invalid_token_permissions: 'The access token does not have the required permissions for WhatsApp.'

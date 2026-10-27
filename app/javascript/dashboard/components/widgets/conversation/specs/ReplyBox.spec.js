@@ -293,6 +293,49 @@ describe('ReplyBox', () => {
     expect(topPanel(wrapper).isReplyRestricted).toBe(false);
   });
 
+  describe('LINE text limit', () => {
+    const mountLine = async () => {
+      const { wrapper } = mountWith({
+        inbox: { channel_type: 'Channel::Line' },
+      });
+      await nextTick();
+      return wrapper;
+    };
+
+    it.each([
+      { label: '5,000 ASCII characters', text: 'a'.repeat(5000), off: false },
+      { label: '5,001 ASCII characters', text: 'a'.repeat(5001), off: true },
+      { label: '6,000 ASCII characters', text: 'a'.repeat(6000), off: true },
+      { label: '2,500 emoji', text: '😀'.repeat(2500), off: false },
+      {
+        label: '2,500 emoji plus one',
+        text: `${'😀'.repeat(2500)}a`,
+        off: true,
+      },
+    ])(
+      'public reply with $label: Send disabled is $off',
+      async ({ text, off }) => {
+        const wrapper = await mountLine();
+        await wrapper.setData({ message: text });
+
+        expect(wrapper.vm.maxLength).toBe(5000);
+        expect(wrapper.vm.isReplyButtonDisabled).toBe(off);
+      }
+    );
+
+    it('keeps the general limit for a private note', async () => {
+      const wrapper = await mountLine();
+      await wrapper.setData({
+        message: 'a'.repeat(6000),
+        replyType: REPLY_EDITOR_MODES.NOTE,
+      });
+
+      expect(wrapper.vm.isPrivate).toBe(true);
+      expect(wrapper.vm.maxLength).toBe(10000);
+      expect(wrapper.vm.isReplyButtonDisabled).toBe(false);
+    });
+  });
+
   describe('drafts', () => {
     const DRAFTS = {
       'draft-1-REPLY': 'half typed reply',

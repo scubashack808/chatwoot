@@ -1,4 +1,7 @@
 class Line::SendOnLineService < Base::SendOnChannelService
+  # https://developers.line.biz/en/reference/messaging-api/#text-message
+  MAX_TEXT_LENGTH = 5000
+
   private
 
   def channel_class
@@ -6,6 +9,8 @@ class Line::SendOnLineService < Base::SendOnChannelService
   end
 
   def perform_reply
+    return message.update!(status: :failed, external_error: I18n.t('errors.line.text_too_long', limit: MAX_TEXT_LENGTH)) if text_too_long?
+
     response = channel.client.push_message(message.conversation.contact_inbox.source_id, build_payload)
 
     return if response.blank?
@@ -19,6 +24,14 @@ class Line::SendOnLineService < Base::SendOnChannelService
       # If the request is not successful, update the message status to failed and save the external error
       Messages::StatusUpdateService.new(message, 'failed', external_error(parsed_json)).perform
     end
+  end
+
+  # LINE counts text length in UTF-16 code units
+  def text_too_long?
+    return false if message.content_type == 'input_select'
+
+    text = message.outgoing_content
+    text.present? && text.encode('UTF-16LE').bytesize / 2 > MAX_TEXT_LENGTH
   end
 
   def build_payload
