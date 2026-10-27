@@ -109,10 +109,10 @@ export default {
         this.selectedRating = this.surveyDetails?.rating;
         this.feedbackMessage = this.surveyDetails?.feedback_message || '';
         this.displayType = result.data.display_type || CSAT_DISPLAY_TYPES.EMOJI;
+        this.setLocale(result.data.locale);
         this.messageContent =
           result.data.content ||
           this.$t('SURVEY.DESCRIPTION', { inboxName: this.inboxName });
-        this.setLocale(result.data.locale);
       } catch (error) {
         const errorMessage = error?.response?.data?.message;
         this.errorMessage = errorMessage || this.$t('SURVEY.API.ERROR_MESSAGE');
@@ -137,6 +137,7 @@ export default {
           uuid: this.surveyId,
           data,
         });
+        this.errorMessage = null;
         this.surveyDetails = {
           rating: this.selectedRating,
           feedback_message: this.feedbackMessage,
