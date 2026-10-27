@@ -55,6 +55,9 @@ class Imap::ImapMailbox
     return if in_reply_to.blank?
 
     message = @inbox.messages.find_by(source_id: in_reply_to)
+    # A reply to a forward comes from someone outside the conversation; it starts its own.
+    return if message&.email_forward?
+
     if message.nil?
       @inbox.conversations.find_by("additional_attributes->>'in_reply_to' = ?", in_reply_to)
     else
@@ -93,7 +96,7 @@ class Imap::ImapMailbox
 
     references.each do |message_id|
       message = @inbox.messages.find_by(source_id: message_id)
-      message_to_return = message if message.present?
+      message_to_return = message if message.present? && !message.email_forward?
     end
     message_to_return
   end

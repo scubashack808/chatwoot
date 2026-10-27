@@ -344,6 +344,32 @@ RSpec.describe 'Conversation Messages API', type: :request do
       end
     end
 
+    context 'when the failed message is a forward' do
+      let(:agent) { create(:user, account: account, role: :agent) }
+      let(:forward_attributes) do
+        { forwarded_message_id: 1, to_emails: ['rachel@example.com'], cc_emails: ['ops@example.com'], bcc_emails: [],
+          email: { subject: 'Fwd: Invoice 42' }, external_error: 'error' }
+      end
+      let(:message) { create(:message, account: account, status: :failed, content_attributes: forward_attributes) }
+
+      before do
+        create(:inbox_member, inbox: message.conversation.inbox, user: agent)
+      end
+
+      it 'keeps the forward recipients and body for the retry' do
+        post "/api/v1/accounts/#{account.id}/conversations/#{message.conversation.display_id}/messages/#{message.id}/retry",
+             headers: agent.create_new_auth_token,
+             as: :json
+
+        expect(response).to have_http_status(:success)
+        attributes = message.reload.content_attributes
+        expect(attributes['to_emails']).to eq(['rachel@example.com'])
+        expect(attributes['cc_emails']).to eq(['ops@example.com'])
+        expect(attributes.dig('email', 'subject')).to eq('Fwd: Invoice 42')
+        expect(attributes['external_error']).to be_nil
+      end
+    end
+
     context 'when the message id is invalid' do
       let(:agent) { create(:user, account: account, role: :agent) }
 

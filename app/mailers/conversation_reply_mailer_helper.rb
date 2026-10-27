@@ -5,12 +5,8 @@ module ConversationReplyMailerHelper
     @options = {
       to: to_emails,
       from: email_from,
-      reply_to: email_reply_to,
-      subject: mail_subject,
-      message_id: custom_message_id,
-      in_reply_to: in_reply_to_email,
-      references: references_header
-    }
+      reply_to: email_reply_to
+    }.merge(forward? ? forward_headers : thread_headers)
 
     if cc_bcc_enabled
       @options[:cc] = cc_bcc_emails[0]
@@ -30,6 +26,20 @@ module ConversationReplyMailerHelper
   end
 
   private
+
+  def thread_headers
+    { subject: mail_subject, message_id: custom_message_id, in_reply_to: in_reply_to_email, references: references_header }
+  end
+
+  # A forward starts a new thread for its recipients: its stored Fwd: subject, no In-Reply-To or
+  # References, and a Message-ID that matches none of the patterns inbound mail is threaded by.
+  def forward_headers
+    { subject: @message.content_attributes.dig(:email, :subject), message_id: "<forward/#{@message.id}@#{channel_email_domain}>" }
+  end
+
+  def forward?
+    @message.present? && @message.email_forward?
+  end
 
   def oauth_smtp_settings
     return unless @inbox.email? && @channel.imap_enabled

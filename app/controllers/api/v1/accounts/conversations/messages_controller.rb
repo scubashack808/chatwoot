@@ -1,6 +1,9 @@
 class Api::V1::Accounts::Conversations::MessagesController < Api::V1::Accounts::Conversations::BaseController
   before_action :ensure_api_inbox, only: :update
 
+  RETRY_KEPT_ATTRIBUTES = %i[from_email].freeze
+  FORWARD_RETRY_KEPT_ATTRIBUTES = %i[forwarded_message_id to_emails cc_emails bcc_emails email].freeze
+
   def index
     @messages = message_finder.perform
   end
@@ -78,12 +81,18 @@ class Api::V1::Accounts::Conversations::MessagesController < Api::V1::Accounts::
     previous_source_id = message.source_id
     # Clear prior failure state while preserving the agent-selected From address. Retrying from a
     # different owned alias would be customer-visible and would contradict the original send.
-    retry_attributes = { content_attributes: message.content_attributes.to_h.with_indifferent_access.slice(:from_email) }
+    retry_attributes = { content_attributes: message.content_attributes.to_h.with_indifferent_access.slice(*retained_retry_attributes) }
     retry_attributes[:source_id] = nil unless @conversation.inbox.api? || @conversation.inbox.web_widget?
     message.update!(retry_attributes)
     return unless retry_attributes.key?(:source_id) && previous_source_id.present?
 
     Rails.logger.info "Cleared older source ID #{previous_source_id} for message #{message.id}"
+  end
+
+  # A forward keeps everything it was sent with: its recipients, its body and its source. Without
+  # them a retried forward would be mailed to the conversation's contact instead.
+  def retained_retry_attributes
+    message.email_forward? ? RETRY_KEPT_ATTRIBUTES + FORWARD_RETRY_KEPT_ATTRIBUTES : RETRY_KEPT_ATTRIBUTES
   end
 
   def permitted_params

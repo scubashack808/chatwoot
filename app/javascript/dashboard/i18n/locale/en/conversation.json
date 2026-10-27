@@ -383,6 +383,7 @@
     "CONTEXT_MENU": {
       "COPY": "Copy",
       "REPLY_TO": "Reply to this message",
+      "FORWARD_EMAIL": "Forward",
       "DELETE": "Delete",
       "CREATE_A_CANNED_RESPONSE": "Add to canned responses",
       "TRANSLATE": "Translate",
@@ -451,6 +452,32 @@
         "ERROR": "Please enter a valid email address"
       }
     }
+  },
+  "FORWARD_EMAIL": {
+    "TITLE": "Forward email",
+    "DESCRIPTION": "Send this email on to someone else, with its attachments and a note.",
+    "SEND": "Forward",
+    "CANCEL": "Cancel",
+    "TO": {
+      "LABEL": "To",
+      "PLACEHOLDER": "Email addresses, separated by commas",
+      "ERROR": "Add at least one valid email address"
+    },
+    "CC": {
+      "LABEL": "Cc",
+      "PLACEHOLDER": "Email addresses, separated by commas",
+      "ERROR": "Enter valid email addresses"
+    },
+    "NOTE": {
+      "LABEL": "Note",
+      "PLACEHOLDER": "Add a note above the forwarded email"
+    },
+    "FORWARDED_MESSAGE": "Forwarded message",
+    "FROM": "From: {value}",
+    "DATE": "Date: {value}",
+    "SUBJECT": "Subject: {value}",
+    "SUCCESS_MESSAGE": "Email forwarded",
+    "ERROR_MESSAGE": "Could not forward this email. Please try again."
   },
   "ONBOARDING": {
     "TITLE": "Hey 👋, Welcome to {installationName}!",

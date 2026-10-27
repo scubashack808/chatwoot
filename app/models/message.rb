@@ -281,6 +281,11 @@ class Message < ApplicationRecord
     true
   end
 
+  # A message an agent forwarded onward to new recipients (see Messages::ForwardEmailService).
+  def email_forward?
+    content_attributes[:forwarded_message_id].present?
+  end
+
   def auto_reply_email?
     return false unless incoming_email? || inbox.email?
 
