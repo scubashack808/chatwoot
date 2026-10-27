@@ -590,6 +590,10 @@ RSpec.describe ConversationReplyMailer do
         expect(mail.to + mail.cc).not_to include('customer@example.com')
       end
 
+      it 'asks for replies at the inbox address, not the conversation reply address' do
+        expect(mail.reply_to).to eq([email_channel.email])
+      end
+
       it 'starts a new thread' do
         expect(mail.in_reply_to).to be_nil
         expect(mail.references).to be_nil

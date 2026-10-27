@@ -32,9 +32,11 @@ module ConversationReplyMailerHelper
   end
 
   # A forward starts a new thread for its recipients: its stored Fwd: subject, no In-Reply-To or
-  # References, and a Message-ID that matches none of the patterns inbound mail is threaded by.
+  # References, a Message-ID that matches none of the patterns inbound mail is threaded by, and a
+  # Reply-To of the inbox's own address rather than the conversation's reply+uuid address.
   def forward_headers
-    { subject: @message.content_attributes.dig(:email, :subject), message_id: "<forward/#{@message.id}@#{channel_email_domain}>" }
+    { subject: @message.content_attributes.dig(:email, :subject), message_id: "<forward/#{@message.id}@#{channel_email_domain}>",
+      reply_to: @channel.outbound_address_for(@conversation, message: @message) }
   end
 
   def forward?

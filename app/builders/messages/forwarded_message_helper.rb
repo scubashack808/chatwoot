@@ -7,9 +7,16 @@ module Messages::ForwardedMessageHelper
     content_attributes&.dig(:forwarded_message_id)
   end
 
-  # Looked up inside this conversation only, so an id from anywhere else is not found.
+  # Looked up inside this conversation only, so an id from anywhere else is not found. Only an
+  # email that was actually received or sent can be forwarded.
   def forwarded_message
-    @forwarded_message ||= @conversation.messages.where(private: false).find(forwarded_message_id)
+    @forwarded_message ||= begin
+      message = @conversation.messages.where(private: false, message_type: %i[incoming outgoing])
+                             .where.not(status: :failed).find(forwarded_message_id)
+      raise ActiveRecord::RecordNotFound, "Couldn't find Message with 'id'=#{forwarded_message_id}" if message.content_attributes[:deleted]
+
+      message
+    end
   end
 
   def process_forwarded_email

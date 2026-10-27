@@ -362,6 +362,27 @@ describe Messages::MessageBuilder do
       expect(conversation.first_reply_created_at).to be_nil
     end
 
+    it 'leaves the first reply to the customer counted as the first reply' do
+      message_builder
+      reply = described_class.new(user, conversation, ActionController::Parameters.new({ content: 'Paid, thanks' })).perform
+
+      expect(conversation.reload.first_reply_created_at).to eq(reply.created_at)
+    end
+
+    it 'attributes a forwarded agent reply to the inbox address, not the agent login' do
+      reply = described_class.new(user, conversation, ActionController::Parameters.new({ content: 'Our answer' })).perform
+      params[:content_attributes] = { forwarded_message_id: reply.id }
+
+      expect(message_builder.content).to include("<#{channel_email.email}>")
+      expect(message_builder.content).not_to include(user.email)
+    end
+
+    it 'refuses a failed source message' do
+      source.update!(status: :failed)
+
+      expect { message_builder }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+
     it 'does not double the forward prefix' do
       source.update!(content_attributes: source.content_attributes.merge(email: { subject: 'Fwd: Invoice 42' }))
 

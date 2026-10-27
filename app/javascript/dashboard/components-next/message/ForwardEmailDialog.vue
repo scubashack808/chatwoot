@@ -33,10 +33,16 @@ const note = ref('');
 const showErrors = ref(false);
 const isSending = ref(false);
 
-const isToValid = computed(
-  () => !!toEmails.value.trim() && validEmailsByComma(toEmails.value)
+// Every comma-separated item must be a real address; ",," is not a list of recipients.
+const isAddressList = value =>
+  value
+    .split(',')
+    .map(address => address.trim())
+    .every(address => !!address && validEmailsByComma(address));
+const isToValid = computed(() => isAddressList(toEmails.value));
+const isCcValid = computed(
+  () => !ccEmails.value.trim() || isAddressList(ccEmails.value)
 );
-const isCcValid = computed(() => validEmailsByComma(ccEmails.value));
 
 const originalFrom = computed(() => [props.email?.from].flat().join(', '));
 const originalSubject = computed(() => props.email?.subject || '');

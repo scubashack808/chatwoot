@@ -411,6 +411,7 @@ const contextMenuEnabledOptions = computed(() => {
       props.inboxSupportsReplyTo.outgoing &&
       !isFailedOrProcessing,
     forwardEmail:
+      props.isEmailInbox &&
       variant.value === MESSAGE_VARIANTS.EMAIL &&
       !isFailedOrProcessing &&
       !isMessageDeleted.value,

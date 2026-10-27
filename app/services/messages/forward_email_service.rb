@@ -30,7 +30,7 @@ class Messages::ForwardEmailService
   private
 
   def subject
-    original = header_subject
+    original = header_subject.strip
     original.match?(FORWARDED_SUBJECT_PATTERN) ? original : "#{SUBJECT_PREFIX} #{original}"
   end
 
@@ -71,12 +71,20 @@ class Messages::ForwardEmailService
     source_email.dig(:text_content, :full).presence || source.content.to_s
   end
 
+  # An agent's reply went out from the inbox, so it is attributed to the inbox's address, never to
+  # the agent's own login.
   def header_from
-    address = Array(source_email[:from]).first || source.sender.try(:email)
+    address = Array(source_email[:from]).first || sent_from_address
     name = source.sender.try(:available_name) || source.sender.try(:name)
     return address.to_s if name.blank? || name == address
 
     "#{name} <#{address}>"
+  end
+
+  def sent_from_address
+    return source.inbox.channel.outbound_address_for(source.conversation, message: source) if source.outgoing?
+
+    source.sender.try(:email)
   end
 
   def header_date
