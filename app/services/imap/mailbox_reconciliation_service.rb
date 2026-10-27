@@ -189,13 +189,17 @@ class Imap::MailboxReconciliationService
     return report[:untracked] += 1 if identity.nil?
 
     hits = scan.hits_for(message.source_id)
-    return record_presence(message, identity, hits, report) if hits.present?
+    return record_presence(message, identity, hits, scan, report) if hits.present?
 
     record_absence(message, identity, scan, report, tombstones)
   end
 
-  def record_presence(message, identity, hits, report)
-    locations = ordered_locations(hits)
+  # A stored location the scan did not see is kept when its window was incomplete but still lists
+  # the exact UID: an unread header is not a departure. Otherwise the hits replace the stored set,
+  # which is how a move observed through an untrustworthy window is still followed.
+  def record_presence(message, identity, hits, scan, report)
+    retained = identity.locations.select { |location| scan.retained?(location) }
+    locations = sort_locations(hits.map { |hit| location_for(hit) } + retained)
     return record_unchanged_locations(message, identity, report) if identity.locations == locations
 
     message.write_imap_identity!(identity.with_locations(locations, provider_id: shared_provider_id(hits)))
@@ -228,10 +232,9 @@ class Imap::MailboxReconciliationService
     end
   end
 
-  def ordered_locations(hits)
-    hits.map { |hit| location_for(hit) }
-        .uniq { |location| [location['mailbox'], location['uid']] }
-        .sort_by { |location| [ROLE_ORDER.index(location['roles'].first) || ROLE_ORDER.length, location['mailbox'], location['uid']] }
+  def sort_locations(locations)
+    locations.uniq { |location| [location['mailbox'], location['uid']] }
+             .sort_by { |location| [ROLE_ORDER.index(location['roles'].first) || ROLE_ORDER.length, location['mailbox'], location['uid']] }
   end
 
   def location_for(hit)

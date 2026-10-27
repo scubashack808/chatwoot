@@ -390,6 +390,112 @@ RSpec.describe Imap::MailboxReconciliationService do
     end
   end
 
+  # A copy whose header could not be read is still listed by UID SEARCH. That listing, in the same
+  # UIDVALIDITY generation, is what separates a retained copy from one that genuinely left.
+  describe 'retained copy behind an incomplete window' do
+    def location_names(message)
+      message.reload.imap_identity.locations.pluck('mailbox')
+    end
+
+    def in_role?(role)
+      Imap::MailboxRoleFilter.new(conversations: Conversation.where(id: conversation.id), role: role, account: account).perform.exists?
+    end
+
+    it 'keeps the Inbox copy when its fetch response is dropped and an Archive copy is seen' do
+      message = tracked_message('copy@example.com')
+      place('INBOX', 11, 'copy@example.com')
+      place('INBOX.Archive', 5, 'copy@example.com')
+      dropped_fetch_responses['INBOX'] = 1
+
+      report = reconcile
+
+      expect(report[:conclusive]).to be false
+      expect(location_names(message)).to eq %w[INBOX INBOX.Archive]
+      expect(message.imap_identity.locations.pluck('uid')).to eq [11, 5]
+      expect(in_role?('inbox')).to be true
+      expect(in_role?('archive')).to be true
+    end
+
+    it 'keeps the Inbox copy when the Inbox is larger than the scan bound' do
+      stub_const("#{described_class}::MAX_MESSAGES_PER_MAILBOX", 2)
+      message = tracked_message('copy@example.com')
+      place('INBOX', 11, 'copy@example.com')
+      place('INBOX', 12, 'noise-1@example.com')
+      place('INBOX', 13, 'noise-2@example.com')
+      place('INBOX.Archive', 5, 'copy@example.com')
+
+      report = reconcile
+
+      expect(report[:conclusive]).to be false
+      expect(location_names(message)).to eq %w[INBOX INBOX.Archive]
+      expect(in_role?('inbox')).to be true
+    end
+
+    it 'does not keep a stored UID from an older UIDVALIDITY generation' do
+      message = tracked_message('copy@example.com', uidvalidity: 776)
+      place('INBOX', 11, 'other@example.com')
+      place('INBOX.Archive', 5, 'copy@example.com')
+      dropped_fetch_responses['INBOX'] = 1
+
+      reconcile
+
+      expect(location_names(message)).to eq %w[INBOX.Archive]
+      expect(in_role?('inbox')).to be false
+    end
+
+    it 'settles instead of rewriting the identity on every incomplete cycle' do
+      message = tracked_message('copy@example.com')
+      place('INBOX', 11, 'copy@example.com')
+      place('INBOX.Archive', 5, 'copy@example.com')
+      dropped_fetch_responses['INBOX'] = 1
+
+      reconcile
+      first = message.reload.imap_identity.to_h
+      Redis::Alfred.delete(full_scan_key)
+      report = reconcile
+
+      expect(message.reload.imap_identity.to_h).to eq first
+      expect(report[:unchanged]).to eq 1
+    end
+
+    it 'converges on the clean complete-scan identity once the window can be read' do
+      message = tracked_message('copy@example.com')
+      place('INBOX', 11, 'copy@example.com')
+      place('INBOX.Archive', 5, 'copy@example.com')
+      dropped_fetch_responses['INBOX'] = 1
+      reconcile
+
+      dropped_fetch_responses['INBOX'] = 0
+      Redis::Alfred.delete(full_scan_key)
+      report = reconcile
+
+      identity = message.reload.imap_identity
+      expect(report[:conclusive]).to be true
+      expect(identity.locations.map { |location| location.slice('mailbox', 'uidvalidity', 'uid', 'roles') }).to eq [
+        { 'mailbox' => 'INBOX', 'uidvalidity' => 777, 'uid' => 11, 'roles' => ['inbox'] },
+        { 'mailbox' => 'INBOX.Archive', 'uidvalidity' => 778, 'uid' => 5, 'roles' => ['archive'] }
+      ]
+      expect(identity.sync_state).to eq 'verified'
+    end
+
+    it 'drops the Inbox copy once a complete scan shows it left' do
+      message = tracked_message('copy@example.com')
+      place('INBOX', 11, 'copy@example.com')
+      place('INBOX.Archive', 5, 'copy@example.com')
+      dropped_fetch_responses['INBOX'] = 1
+      reconcile
+
+      dropped_fetch_responses['INBOX'] = 0
+      server['INBOX'][:messages] = []
+      Redis::Alfred.delete(full_scan_key)
+      reconcile
+
+      expect(location_names(message)).to eq %w[INBOX.Archive]
+      expect(in_role?('inbox')).to be false
+      expect(in_role?('archive')).to be true
+    end
+  end
+
   # Exit row 5: external deletion lands in the derived state vocabulary that already exists.
   describe 'external deletion' do
     it 'reports the message through the existing missing vocabulary' do
