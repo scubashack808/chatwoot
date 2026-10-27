@@ -13,6 +13,7 @@ import {
   truncatePreviewText,
   appendQuotedTextToMessage,
 } from '../quotedEmailHelper';
+import { buildCreatePayload } from 'dashboard/api/inbox/message';
 import { PRODUCTION_LEGACY_QUOTE_CSS_HTML } from './fixtures/legacyQuoteCssFixtures';
 
 describe('quotedEmailHelper', () => {
@@ -26,6 +27,57 @@ describe('quotedEmailHelper', () => {
       const html = '<p>Hello <strong>world</strong></p>';
       const result = extractPlainTextFromHtml(html);
       expect(result).toBe('Hello world');
+    });
+
+    it.each([
+      ['<div><p>First</p><p>Second</p></div>', 'First\nSecond'],
+      ['Before<div>Middle</div>After', 'Before\nMiddle\nAfter'],
+      ['<div><div>Only</div></div>', 'Only'],
+      ['<p>First<br><br>Second</p>', 'First\n\nSecond'],
+      ['<br>First<br>', '\nFirst\n'],
+      ['<p>First</p><br>Second', 'First\nSecond'],
+      ['<p>Certifi<span>cation</span> <a>card</a>.</p>', 'Certification card.'],
+      ['<p>  Keep <span> spaces </span> </p>', '  Keep  spaces  '],
+      ['<pre>First\n  Second</pre>', 'First\n  Second'],
+      ['<pre><b>First</b>\n  <b>Second</b></pre>', 'First\n  Second'],
+      ['<div>\n  <p>First</p>\n  <p>Second</p>\n</div>', 'First\nSecond'],
+      [
+        '<html><body>\n<div>\n  <p>Meet at 7am.</p>\n  <p>Bring ID.</p>\n</div>\n</body></html>',
+        'Meet at 7am.\nBring ID.',
+      ],
+      ['<div>\r\n<p>First</p>\r\n<p>Second</p>\r\n</div>', 'First\nSecond'],
+      ['<p><b>Inline</b> <i>space</i></p>', 'Inline space'],
+      ['<table><tr><td>A</td></tr><tr><td>C</td></tr></table>', 'A\nC'],
+      ['Top<hr>Bottom', 'Top\nBottom'],
+      ['<ul>\n  <li>One</li>\n  <li>Two</li>\n</ul>', 'One\nTwo'],
+      ['<style>bad CSS</style><script>bad()</script><p>Visible</p>', 'Visible'],
+      ['', ''],
+    ])('preserves semantic boundaries and text in %s', (html, expected) => {
+      expect(extractPlainTextFromHtml(html)).toBe(expected);
+    });
+
+    it.each([
+      'p',
+      'div',
+      'blockquote',
+      'li',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'pre',
+      'section',
+      'article',
+      'header',
+      'footer',
+    ])('separates adjacent %s blocks', tag => {
+      expect(
+        extractPlainTextFromHtml(
+          `<${tag}>First</${tag}><${tag}>Second</${tag}>`
+        )
+      ).toBe('First\nSecond');
     });
 
     it('handles complex HTML structure', () => {
@@ -336,6 +388,97 @@ describe('quotedEmailHelper', () => {
   });
 
   describe('extractQuotedEmailText', () => {
+    it.each([
+      [
+        'leading NBSP',
+        '<p>&nbsp;<b>Indented</b></p>',
+        '\u00a0Indented',
+        '> \u00a0Indented',
+      ],
+      [
+        'NBSP spacer paragraph',
+        '<p>First</p><p>&nbsp;</p><p>Second</p>',
+        'First\n\u00a0\nSecond',
+        '> First\n>\n> Second',
+      ],
+    ])(
+      'preserves %s in extracted text and outgoing quotes',
+      (_, html, expectedText, expectedQuote) => {
+        ['reply', 'full'].forEach(field => {
+          const lastEmail = {
+            message_type: 0,
+            content_attributes: {
+              email: {
+                text_content: {},
+                html_content: { [field]: html },
+              },
+            },
+          };
+          const text = extractQuotedEmailText(lastEmail);
+          const payload = buildCreatePayload({
+            message: appendQuotedTextToMessage(
+              'Confirmed.',
+              text,
+              'Guest wrote:'
+            ),
+          });
+          expect.soft(text).toBe(expectedText);
+          expect
+            .soft(payload.content)
+            .toBe(`Confirmed.\n\n> Guest wrote:\n>\n${expectedQuote}`);
+        });
+      }
+    );
+
+    it.each(['reply', 'full'])(
+      'preserves HTML %s boundaries in the outgoing payload',
+      field => {
+        const lastEmail = {
+          message_type: 0,
+          content_attributes: {
+            email: {
+              text_content: {},
+              html_content: {
+                [field]:
+                  '<p>Meet at 7am.</p><p>Bring ID.<br>Bring certification.</p>',
+              },
+            },
+          },
+        };
+        const text = extractQuotedEmailText(lastEmail);
+        const payload = buildCreatePayload({
+          message: appendQuotedTextToMessage(
+            'Confirmed.',
+            text,
+            'Guest wrote:'
+          ),
+        });
+        expect.soft(text).toBe('Meet at 7am.\nBring ID.\nBring certification.');
+        expect(payload.content).toBe(
+          'Confirmed.\n\n> Guest wrote:\n>\n> Meet at 7am.\n> Bring ID.\n> Bring certification.'
+        );
+      }
+    );
+
+    it.each(['reply', 'full'])(
+      'prefers plain MIME %s and preserves its newlines',
+      field => {
+        const lastEmail = {
+          content_attributes: {
+            email: {
+              text_content: { [field]: 'First line\nSecond line' },
+              html_content: { reply: '<p>HTML alternative</p>' },
+            },
+          },
+        };
+        const text = extractQuotedEmailText(lastEmail);
+        expect(text).toBe('First line\nSecond line');
+        expect(
+          appendQuotedTextToMessage('Reply', text, 'Guest wrote:')
+        ).toContain('> First line\n> Second line');
+      }
+    );
+
     it('extracts text from textContent.reply', () => {
       const lastEmail = {
         contentAttributes: {
