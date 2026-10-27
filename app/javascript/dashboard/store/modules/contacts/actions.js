@@ -52,16 +52,23 @@ export const handleContactOperationErrors = error => {
   }
 };
 
+// All list actions share records, metadata and loading state. Only the newest
+// request may update them, even when navigation changes the action being used.
+let listRequestToken = 0;
+
 export const actions = {
   search: async (
     { commit },
     { search, page, sortAttr, label, append = false }
   ) => {
+    listRequestToken += 1;
+    const requestToken = listRequestToken;
     commit(types.SET_CONTACT_UI_FLAG, { isFetching: true });
     try {
       const {
         data: { payload, meta },
       } = await ContactAPI.search(search, page, sortAttr, label);
+      if (requestToken !== listRequestToken) return;
       if (!append) {
         commit(types.CLEAR_CONTACTS);
       }
@@ -69,36 +76,45 @@ export const actions = {
       commit(types.SET_CONTACT_META, meta);
       commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
     } catch (error) {
+      if (requestToken !== listRequestToken) return;
       commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
     }
   },
 
   get: async ({ commit }, { page = 1, sortAttr, label } = {}) => {
+    listRequestToken += 1;
+    const requestToken = listRequestToken;
     commit(types.SET_CONTACT_UI_FLAG, { isFetching: true });
     try {
       const {
         data: { payload, meta },
       } = await ContactAPI.get(page, sortAttr, label);
+      if (requestToken !== listRequestToken) return;
       commit(types.CLEAR_CONTACTS);
       commit(types.SET_CONTACTS, payload);
       commit(types.SET_CONTACT_META, meta);
       commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
     } catch (error) {
+      if (requestToken !== listRequestToken) return;
       commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
     }
   },
 
   active: async ({ commit }, { page = 1, sortAttr } = {}) => {
+    listRequestToken += 1;
+    const requestToken = listRequestToken;
     commit(types.SET_CONTACT_UI_FLAG, { isFetching: true });
     try {
       const {
         data: { payload, meta },
       } = await ContactAPI.active(page, sortAttr);
+      if (requestToken !== listRequestToken) return;
       commit(types.CLEAR_CONTACTS);
       commit(types.SET_CONTACTS, payload);
       commit(types.SET_CONTACT_META, meta);
       commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
     } catch (error) {
+      if (requestToken !== listRequestToken) return;
       commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
     }
   },
@@ -303,12 +319,14 @@ export const actions = {
     { commit },
     { page = 1, sortAttr, queryPayload, resetState = true } = {}
   ) => {
-    commit(types.SET_CONTACT_UI_FLAG, { isFetching: true });
+    // Read-only lookups must not invalidate a list request or change its flags.
+    const requestToken = resetState ? (listRequestToken += 1) : null;
+    if (resetState) commit(types.SET_CONTACT_UI_FLAG, { isFetching: true });
     try {
       const {
         data: { payload, meta },
       } = await ContactAPI.filter(page, sortAttr, queryPayload);
-      if (resetState) {
+      if (resetState && requestToken === listRequestToken) {
         commit(types.CLEAR_CONTACTS);
         commit(types.SET_CONTACTS, payload);
         commit(types.SET_CONTACT_META, meta);
@@ -316,7 +334,9 @@ export const actions = {
       }
       return payload;
     } catch (error) {
-      commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
+      if (resetState && requestToken === listRequestToken) {
+        commit(types.SET_CONTACT_UI_FLAG, { isFetching: false });
+      }
     }
     return [];
   },
