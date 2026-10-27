@@ -91,25 +91,36 @@ const stageDraftFields = values => {
   return staged;
 };
 
-const saveArticle = async ({ ...values }) => {
+let pendingValues = null;
+
+const saveArticle = async values => {
+  // Keep the newest text snapshot without dropping queued metadata changes.
+  pendingValues = { ...pendingValues, ...values };
+  isSaved.value = false;
+  if (isUpdating.value) return;
+
   isUpdating.value = true;
-  try {
-    await store.dispatch('articles/update', {
-      portalSlug,
-      articleId: articleSlug,
-      ...stageDraftFields(values),
-    });
-    isSaved.value = true;
-  } catch (error) {
-    const errorMessage =
-      error?.message || t('HELP_CENTER.EDIT_ARTICLE_PAGE.API.ERROR');
-    useAlert(errorMessage);
-  } finally {
-    setTimeout(() => {
-      isUpdating.value = false;
-      isSaved.value = true;
-    }, 1500);
+  while (pendingValues) {
+    const nextValues = pendingValues;
+    pendingValues = null;
+    try {
+      // Normalize against the preceding successful save, not the enqueue state.
+      // Serial writes prevent an older snapshot from overwriting newer text.
+      // eslint-disable-next-line no-await-in-loop
+      await store.dispatch('articles/update', {
+        portalSlug,
+        articleId: articleSlug,
+        ...stageDraftFields(nextValues),
+      });
+      isSaved.value = !pendingValues;
+    } catch (error) {
+      isSaved.value = false;
+      const errorMessage =
+        error?.message || t('HELP_CENTER.EDIT_ARTICLE_PAGE.API.ERROR');
+      useAlert(errorMessage);
+    }
   }
+  isUpdating.value = false;
 };
 
 const isCategoryArticles = computed(() => {
