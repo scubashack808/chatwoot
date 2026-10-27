@@ -56,6 +56,7 @@ FORWARD_RECIPIENTS = {'F1_to': ['forward-to-1@chatwoot-dummy.test', 'forward-to-
 FORWARD_REPLIER = 'forward-to-1@chatwoot-dummy.test'
 FORWARD_REPLY_TEXT = 'Synthetic reply to a forward.'
 INVALID_FORWARD_ADDRESS = 'not-an-email'
+AGENT_LOGIN = 'agent@chatwoot-dummy.test'
 RUNTIME_FILES = ('Procfile.worktree', '.env', '.codex/dummy/manage.py', '.codex/dummy/local_http.rb',
                  '.codex/dummy/redis.conf', '.codex/dummy/sidekiq.yml')
 
@@ -554,6 +555,9 @@ def forward_run(args):
                            FORWARD_SUBJECT_PREFIX + html['subject'], html['attachments'], fixture['html_marker'], markers['F1'])
             judge_delivery(results, 'F2', captured[markers['F2']], fixture, FORWARD_RECIPIENTS['F2_to'], [],
                            FORWARD_SUBJECT_PREFIX + 'Synthetic invoice 42', [], marker=markers['F2'])
+            f2_body = captured[markers['F2']].get('HTML', '')
+            check(results, "F2 forwarded agent reply attributed to the inbox", f"&lt;{fixture['sender_email']}&gt;" in f2_body
+                  and AGENT_LOGIN not in f2_body, {'length': len(f2_body)})
             judge_delivery(results, 'F3', captured[markers['F3']], fixture, FORWARD_RECIPIENTS['F3_to'], [],
                            FORWARD_SUBJECT_PREFIX + plain['subject'], [], marker=markers['F3'])
             stored = forward_runner('inspect', tag, *markers.values())
@@ -592,6 +596,8 @@ def forward_run(args):
             save(directory, 'receipt.json', receipt)
             reply_result = forward_runner('reply', tag, str(f1['id']))
             save(directory, 'forward-reply.json', reply_result)
+            check(results, 'F7 reply goes to the inbox address', reply_result['reply_address'] == fixture['sender_email'], reply_result)
+            check(results, 'F7 ActionMailbox threading does not claim it', reply_result['action_mailbox_conversation_id'] is None, reply_result)
             check(results, 'F7 reply opens a new conversation',
                   reply_result['after']['conversations'] == reply_result['before']['conversations'] + 1
                   and reply_result['after']['source_messages'] == reply_result['before']['source_messages']
@@ -612,6 +618,7 @@ def forward_run(args):
             save(directory, 'forward-scope.json', scope)
             time.sleep(POLL_SECONDS)
             check(results, 'F9 foreign source refused', scope['status'] == UNPROCESSABLE and scope['messages_created'] == 0
+                  and "Couldn't find Message" in (scope.get('error') or '')
                   and mail_ids() == before_scope, scope)
             receipt['ok'] = all(result['pass'] for result in results.values())
         except BaseException as error:

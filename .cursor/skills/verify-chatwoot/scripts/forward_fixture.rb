@@ -143,9 +143,11 @@ result = case action
 
            source_conversation = forward.conversation
            before = { conversations: inbox.conversations.count, source_messages: source_conversation.messages.count }
+           # Reply where the forward asked for replies: its own Reply-To, as delivered.
+           reply_address = ConversationReplyMailer.email_reply(forward).message.reply_to.first
            mail = Mail.new do
              from replier_email
-             to sender_email
+             to reply_address
              subject "Re: #{forward.content_attributes.dig(:email, :subject)}"
              message_id "<verify-forward-reply-#{forward.id}@chatwoot-dummy.test>"
              in_reply_to "<#{forward.source_id}>"
@@ -153,17 +155,24 @@ result = case action
              content_type 'text/plain; charset=UTF-8'
              body 'Synthetic reply to a forward.'
            end
+           # The ActionMailbox threading strategies (forwarded-mail inboxes) must not claim it either;
+           # NewConversationStrategy is left out because it creates records.
+           threading = [Mailbox::ConversationFinderStrategies::ReceiverUuidStrategy,
+                        Mailbox::ConversationFinderStrategies::InReplyToStrategy,
+                        Mailbox::ConversationFinderStrategies::ReferencesStrategy]
+           action_mailbox_match = Mailbox::ConversationFinder.new(mail, strategies: threading).find
            Imap::ImapMailbox.new.process(mail, channel)
            reply = inbox.messages.where(source_id: "verify-forward-reply-#{forward.id}@chatwoot-dummy.test").last
            { before: before,
              after: { conversations: inbox.conversations.count, source_messages: source_conversation.messages.count },
+             reply_address: reply_address, action_mailbox_conversation_id: action_mailbox_match&.id,
              reply_message_id: reply&.id, reply_conversation_id: reply&.conversation_id, reply_content: reply&.content,
              reply_contact_email: reply&.conversation&.contact&.email, source_conversation_id: source_conversation.id }
          when 'rerender'
            forward = inbox.messages.find(args.first)
            mail = ConversationReplyMailer.email_reply(forward).message
            html = mail.html_part&.decoded || mail.body.decoded
-           { id: forward.id, subject: mail.subject, to: mail.to, cc: mail.cc, message_id: mail.message_id,
+           { id: forward.id, subject: mail.subject, to: mail.to, cc: mail.cc, reply_to: mail.reply_to, message_id: mail.message_id,
              in_reply_to: mail.in_reply_to, references: mail.references,
              html: html, attachments: mail.attachments.map(&:filename) }
          when 'scope'
@@ -177,7 +186,8 @@ result = case action
                         params: { content: 'Synthetic cross-conversation forward', to_emails: replier_email,
                                   content_attributes: { forwarded_message_id: foreign_message.id } },
                         headers: { 'api_access_token' => user.access_token.token }, as: :json)
-           { status: session.response.status, foreign_message_id: foreign_message.id, messages_created: Message.count - before }
+           { status: session.response.status, error: session.response.parsed_body['error'], foreign_message_id: foreign_message.id,
+             messages_created: Message.count - before }
          else
            raise 'Unknown action'
          end
