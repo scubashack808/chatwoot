@@ -152,6 +152,89 @@ RSpec.describe 'CSAT Survey Responses API', type: :request do
     end
   end
 
+  describe 'GET /api/v1/accounts/{account.id}/csat_survey_responses/metrics with sent surveys' do
+    let(:csat_survey_response) { nil }
+    let(:inbox_a) { create(:inbox, account: account) }
+    let(:inbox_b) { create(:inbox, account: account) }
+    let(:since_time) { Time.utc(2026, 9, 17) }
+    let(:until_time) { Time.utc(2026, 9, 18) }
+    let(:date_params) { { since: since_time.to_i.to_s, until: until_time.to_i.to_s, timezone_offset: 0 } }
+
+    before do
+      [inbox_a, inbox_b].each do |inbox|
+        conversation = create(:conversation, account: account, inbox: inbox)
+        message = create(:message, account: account, inbox: inbox, conversation: conversation,
+                                   message_type: :template, content_type: :input_csat, created_at: since_time + 12.hours)
+        create(:csat_survey_response, account: account, conversation: conversation, contact: conversation.contact,
+                                      message: message, rating: 5, created_at: since_time + 13.hours)
+      end
+    end
+
+    [:inbox_a, :inbox_b].each do |inbox_name|
+      it "counts only sent surveys in #{inbox_name}" do
+        get "/api/v1/accounts/#{account.id}/csat_survey_responses/metrics",
+            params: date_params.merge(inbox_id: public_send(inbox_name).id), headers: administrator.create_new_auth_token, as: :json
+
+        expect(response).to have_http_status(:success)
+        expect(response.parsed_body).to include('total_count' => 1, 'total_sent_messages_count' => 1)
+      end
+    end
+
+    it 'counts both inboxes when no inbox is selected' do
+      get "/api/v1/accounts/#{account.id}/csat_survey_responses/metrics",
+          params: date_params, headers: administrator.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('total_count' => 2, 'total_sent_messages_count' => 2)
+    end
+
+    it 'counts both inboxes when the inbox is blank' do
+      get "/api/v1/accounts/#{account.id}/csat_survey_responses/metrics",
+          params: date_params.merge(inbox_id: ''), headers: administrator.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('total_count' => 2, 'total_sent_messages_count' => 2)
+    end
+
+    it 'filters by inbox without a date range' do
+      get "/api/v1/accounts/#{account.id}/csat_survey_responses/metrics",
+          params: { inbox_id: inbox_a.id }, headers: administrator.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('total_count' => 1, 'total_sent_messages_count' => 1)
+    end
+
+    it 'excludes surveys belonging to another account' do
+      other_conversation = create(:conversation)
+      message = create(:message, account: other_conversation.account, inbox: other_conversation.inbox, conversation: other_conversation,
+                                 message_type: :template, content_type: :input_csat, created_at: since_time + 12.hours)
+      create(:csat_survey_response, account: other_conversation.account, conversation: other_conversation,
+                                    contact: other_conversation.contact, message: message, created_at: since_time + 13.hours)
+
+      get "/api/v1/accounts/#{account.id}/csat_survey_responses/metrics",
+          params: date_params, headers: administrator.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('total_count' => 2, 'total_sent_messages_count' => 2)
+    end
+
+    it 'includes the start boundary but excludes the end boundary and earlier surveys' do
+      [since_time - 1.second, since_time, until_time].each do |created_at|
+        conversation = create(:conversation, account: account, inbox: inbox_a)
+        message = create(:message, account: account, inbox: inbox_a, conversation: conversation,
+                                   message_type: :template, content_type: :input_csat, created_at: created_at)
+        create(:csat_survey_response, account: account, conversation: conversation, contact: conversation.contact,
+                                      message: message, rating: 5, created_at: created_at)
+      end
+
+      get "/api/v1/accounts/#{account.id}/csat_survey_responses/metrics",
+          params: date_params.merge(inbox_id: inbox_a.id), headers: administrator.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('total_count' => 2, 'total_sent_messages_count' => 2)
+    end
+  end
+
   describe 'GET /api/v1/accounts/{account.id}/csat_survey_responses/download' do
     context 'when it is an unauthenticated user' do
       it 'returns unauthorized' do

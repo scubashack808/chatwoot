@@ -30,6 +30,7 @@ class Api::V1::Accounts::CsatSurveyResponsesController < Api::V1::Accounts::Base
   def set_total_sent_messages_count
     @csat_messages = Current.account.messages.input_csat
     @csat_messages = @csat_messages.where(created_at: range) if range.present?
+    @csat_messages = @csat_messages.where(inbox_id: params[:inbox_id]) if params[:inbox_id].present?
     @total_sent_messages_count = @csat_messages.count
   end
 
