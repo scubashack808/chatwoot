@@ -98,9 +98,19 @@ module Whatsapp::IncomingMessageServiceHelpers
     @message = Message.find_by(source_id: source_id)
   end
 
-  def lock_message_source_id!
-    return false if messages_data.blank?
+  def with_message_source_lock
+    source_id = messages_data.first[:id]
+    return if find_message_by_source_id(source_id)
 
-    Whatsapp::MessageDedupLock.new(messages_data.first[:id]).acquire!
+    lock = Whatsapp::MessageDedupLock.new(source_id)
+    return unless lock.acquire!
+
+    begin
+      yield
+    rescue StandardError
+      # The transaction has unwound; a post-commit error must not clear successful deduplication.
+      lock.release! unless Message.exists?(source_id: source_id)
+      raise
+    end
   end
 end
