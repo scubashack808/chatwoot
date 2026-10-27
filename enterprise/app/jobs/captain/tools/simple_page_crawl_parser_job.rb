@@ -7,17 +7,16 @@ class Captain::Tools::SimplePageCrawlParserJob < ApplicationJob
 
   def perform(assistant_id:, page_link:)
     assistant = Captain::Assistant.find(assistant_id)
-    account = assistant.account
+    normalized_link = normalize_link(page_link)
+    document = assistant.documents.find_or_initialize_by(external_link: normalized_link)
 
-    if limit_exceeded?(account)
+    # Existing documents already hold their quota slot; only new ones consume capacity.
+    if document.new_record? && limit_exceeded?(assistant.account)
       Rails.logger.info("Document limit exceeded for #{assistant_id}")
       return
     end
 
     crawler = Captain::Tools::SimplePageCrawlService.new(page_link)
-    normalized_link = normalize_link(page_link)
-    document = assistant.documents.find_or_initialize_by(external_link: normalized_link)
-
     handle_failed_fetch!(document, crawler.status_code, page_link) unless crawler.success?
 
     persist_document!(document, normalized_link, crawler)
