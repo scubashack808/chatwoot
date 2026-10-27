@@ -35,10 +35,11 @@ class Imap::SentMailbox
     self
   end
 
-  # Exact-header search. This is what runs BEFORE any append, and it is also the whole of
-  # provider-managed mode: find the copy the provider already saved and attach to it.
+  # HEADER search returns substring candidates; verify their parsed Message-IDs before
+  # attaching a provider copy or deciding whether to append.
   def search_message_id(message_id)
-    Array(session.command { client.uid_search(['HEADER', 'Message-ID', message_id]) })
+    uids = Array(session.command { client.uid_search(['HEADER', 'Message-ID', message_id]) })
+    Imap::MessageIdMatcher.call(session: session, uids: uids, message_id: message_id)
   end
 
   def search_since(date)

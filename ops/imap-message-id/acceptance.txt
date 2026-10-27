@@ -1,0 +1,644 @@
+sha256:723e3392fe16c6fad8ddc605ea767cc01b4bad9cd9f13eb1dbac15e79c89b2d4 ["dovecot/dovecot@sha256:723e3392fe16c6fad8ddc605ea767cc01b4bad9cd9f13eb1dbac15e79c89b2d4"]
+sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a ["pgvector/pgvector@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a"]
+sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0 ["redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0"]
+Mon Oct  5 01:11:49 AM UTC 2026
+mre-build
+Linux 6.8.0-138-generic
+7a5771bbdc77912f167f59a91351a875fce3e903
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -
+b9efc099d923d19a20c74a1c6d292afb009bc31d9495bf12a63a4debe2b66359  Gemfile.lock
+a19f5cb2aecb9af1c0ed78cca3bfc0f8a954f1e680cc51bde6d3d7f7b965a79f  .ruby-version
+4fdde7e78b148999d3e3a0c42962d807ec63713c5269c683c44a5650abc1dea7  ops/imap-message-id/dovecot.conf
+dde84cad74f5b0841c340ed22de1f556558b4f7d505aacb4f7eba8befba64f62  ops/imap-message-id/run.sh
+9e451ca4262385f39edce708063774b4d70b5a8d25f177d856c47e6eda8ee4ee  ops/imap-message-id/imap/message_id_matcher_real_spec.rb
+9decc15a61fa19554a540a93f22a75582c31f42bbb9fa5763e0332d1f0092ae7  app/services/imap/message_id_matcher.rb
+92e3c248fe4cb2ff204a4e678fcf9b05e9962408d6afcf74726ae53a8e842bb1  app/services/imap/mailbox_command/standard.rb
+e15ddccb1412c2091b6e2a300c3c5e1174511b595b5bd2cb9ab1cc0872328b6a  app/services/imap/sent_mailbox.rb
+ruby 3.4.4 (2025-05-14 revision a38531fd3f) +PRISM [x86_64-linux]
+The Gemfile's dependencies are satisfied
+rails=7.2.3.1
+rspec-core=3.13.0
+net-imap=0.6.4.1
+mail=2.9.1
+5d6e4dc1525707225af0bfe30a92416205ccf35484af69e63d5679f0952fddc0
+c0f73c06b2d3340c129ffe5db5faf02f6afca17825eea57cc1b779253cccdccf
+01502c15332681dcc587d40b5d6fc8aae785d124e99663d557635405efeb0422
+/var/run/postgresql:5432 - no response
+/var/run/postgresql:5432 - accepting connections
+PONG
+2.4.4 (8b687aa65c)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :message_type, {incoming: 0, outgoing: 1, activity: 2, template: 3}
+ (called from <class:Message> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/message.rb:88)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :content_type, {text: 0, input_text: 1, input_textarea: 2, input_email: 3, input_select: 4, cards: 5, form: 6, article: 7, incoming_email: 8, input_csat: 9, integrations: 10, sticker: 11, voice_call: 12}
+ (called from <class:Message> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/message.rb:89)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {sent: 0, delivered: 1, read: 2, failed: 3}
+ (called from <class:Message> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/message.rb:104)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :message_type, {incoming: 0, outgoing: 1, activity: 2, template: 3}
+ (called from <class:Message> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/message.rb:88)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :content_type, {text: 0, input_text: 1, input_textarea: 2, input_email: 3, input_select: 4, cards: 5, form: 6, article: 7, incoming_email: 8, input_csat: 9, integrations: 10, sticker: 11, voice_call: 12}
+ (called from <class:Message> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/message.rb:89)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {sent: 0, delivered: 1, read: 2, failed: 3}
+ (called from <class:Message> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/message.rb:104)
+
+Imap::MessageIdMatcher
+{"case":"longer_only","path":"move","candidates":[1],"headers":[[1,"x123@example.test"]],"result":{"status":"conflict","target_mailbox":null,"target_uidvalidity":null,"target_uid":null,"target_roles":null,"detail":"uid is no longer present and the requested target could not be confirmed uniquely","preserve_source":null}}
+  move recovery: longer_only
+{"case":"exact_only","path":"move","candidates":[1],"headers":[[1,"123@example.test"]],"result":{"status":"already_in_target","target_mailbox":"Archive","target_uidvalidity":1791162722,"target_uid":1,"target_roles":["archive"],"detail":null,"preserve_source":null}}
+  move recovery: exact_only
+{"case":"both","path":"move","candidates":[1,2],"headers":[[1,"123@example.test"],[2,"x123@example.test"]],"result":{"status":"already_in_target","target_mailbox":"Archive","target_uidvalidity":1791162722,"target_uid":1,"target_roles":["archive"],"detail":null,"preserve_source":null}}
+  move recovery: both
+{"case":"unrelated_only","path":"move","candidates":[],"headers":[[1,"456@example.test"]],"result":{"status":"conflict","target_mailbox":null,"target_uidvalidity":null,"target_uid":null,"target_roles":null,"detail":"uid is no longer present and the requested target could not be confirmed uniquely","preserve_source":null}}
+  move recovery: unrelated_only
+{"case":"duplicate_exact","path":"move","candidates":[1,2],"headers":[[1,"123@example.test"],[2,"123@example.test"]],"result":{"status":"conflict","target_mailbox":null,"target_uidvalidity":null,"target_uid":null,"target_roles":null,"detail":"uid is no longer present and the requested target could not be confirmed uniquely","preserve_source":null}}
+  move recovery: duplicate_exact
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :sender_name_type, {friendly: 0, professional: 1}
+ (called from <class:Inbox> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/inbox.rb:81)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :role, {agent: 0, administrator: 1}
+ (called from <class:AccountUser> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/account_user.rb:34)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :availability, {online: 0, offline: 1, busy: 2}
+ (called from <class:AccountUser> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/account_user.rb:35)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :contact_type, {visitor: 0, lead: 1, customer: 2}
+ (called from <class:Contact> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/contact.rb:71)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {open: 0, resolved: 1, pending: 2, snoozed: 3}
+ (called from <class:Conversation> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/conversation.rb:85)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :priority, {low: 0, medium: 1, high: 2, urgent: 3}
+ (called from <class:Conversation> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/conversation.rb:86)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :campaign_type, {ongoing: 0, one_off: 1}
+ (called from <class:Campaign> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/campaign.rb:50)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :campaign_status, {active: 0, completed: 1, processing: 2}
+ (called from <class:Campaign> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/campaign.rb:52)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {active: 0, inactive: 1}
+ (called from <class:AgentBotInbox> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/agent_bot_inbox.rb:22)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {disabled: 0, enabled: 1}
+ (called from <class:Hook> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/integrations/hook.rb:38)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :hook_type, {account: 0, inbox: 1}
+ (called from <class:Hook> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/integrations/hook.rb:44)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :bot_type, {webhook: 0}
+ (called from <class:AgentBot> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/agent_bot.rb:41)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :notification_type, {conversation_creation: 1, conversation_assignment: 2, assigned_conversation_new_message: 3, conversation_mention: 4, participating_conversation_new_message: 5, sla_missed_first_response: 6, sla_missed_next_response: 7, sla_missed_resolution: 8}
+ (called from <class:Notification> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/notification.rb:49)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :file_type, {image: 0, audio: 1, video: 2, file: 3, location: 4, fallback: 5, share: 6, story_mention: 7, contact: 8, ig_reel: 9, ig_post: 10, ig_story: 11, embed: 12}
+ (called from <class:Attachment> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/attachment.rb:47)
+{"case":"longer_only","path":"sent","candidates":[1],"headers":[[1,"xconversation/3535706b-5655-4f3d-9a6a-db1ab75c4e29/messages/1@test.com"]],"report":{"awaiting_provider_copy":1,"candidates":1},"state":"awaiting_provider_copy"}
+  provider-managed Sent: longer_only
+{"case":"exact_only","path":"sent","candidates":[1],"headers":[[1,"conversation/bf660810-6bfb-404f-a262-e85e78f02094/messages/2@test.com"]],"report":{"attached":1,"candidates":1},"state":"synced"}
+  provider-managed Sent: exact_only
+{"case":"both","path":"sent","candidates":[1,2],"headers":[[1,"xconversation/7672bc71-730d-40e6-89d5-422c32aa614d/messages/3@test.com"],[2,"conversation/7672bc71-730d-40e6-89d5-422c32aa614d/messages/3@test.com"]],"report":{"attached":1,"candidates":1},"state":"synced"}
+  provider-managed Sent: both
+{"case":"unrelated_only","path":"sent","candidates":[],"headers":[[1,"unrelated@example.test"]],"report":{"awaiting_provider_copy":1,"candidates":1},"state":"awaiting_provider_copy"}
+  provider-managed Sent: unrelated_only
+{"case":"empty","path":"sent","candidates":[],"headers":[],"report":{"awaiting_provider_copy":1,"candidates":1},"state":"awaiting_provider_copy"}
+  provider-managed Sent: empty
+{"case":"duplicate_exact","path":"sent","candidates":[1,2],"headers":[[1,"conversation/0005b6af-b426-4f67-a941-7ee5d2411214/messages/6@test.com"],[2,"conversation/0005b6af-b426-4f67-a941-7ee5d2411214/messages/6@test.com"]],"report":{"conflict":1,"candidates":1},"state":"conflict"}
+  provider-managed Sent: duplicate_exact
+  confirms the exact moved UID when COPYUID metadata is unavailable
+  post-APPEND fallback without APPENDUID: longer_only
+  post-APPEND fallback without APPENDUID: both
+  post-APPEND fallback without APPENDUID: duplicate_exact
+
+Imap::ConversationMailboxData
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :action, {archive: 0, trash: 1, spam: 2, restore: 3}
+ (called from <class:EmailMailboxOperation> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/email_mailbox_operation.rb:38)
+DEPRECATION WARNING: Defining enums with keyword arguments is deprecated and will be removed
+in Rails 8.0. Positional arguments should be used instead:
+
+enum :status, {pending: 0, running: 1, succeeded: 2, partially_succeeded: 3, failed: 4, conflict: 5}
+ (called from <class:EmailMailboxOperation> at /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/app/models/email_mailbox_operation.rb:39)
+  bulk derives state and the latest operation for each conversation
+  keeps mailbox read query count constant as the conversation list grows
+  the gate
+    publishes nothing while the inbox is below mode active
+    publishes nothing for an inbox that is off
+    omits a conversation whose incoming mail has no tracked identity
+    omits a conversation with no incoming messages at all
+    publishes the tracked conversation and omits the untracked one on the same page
+    publishes only the active inbox when the page mixes inboxes
+
+Imap::ConversationMailboxState
+  derives one role without writing a conversation projection
+  reports mixed locations, untracked mail, provider absence, and the latest operation conflicts
+  never counts outgoing Sent copies in conversation mailbox state
+  uses Gmail system-role precedence while preserving unrelated multi-location labels
+
+Imap::FetchEmailService
+  #perform
+    when using CRAM-MD5 authentication
+      uses CRAM-MD5 authentication
+    when using LOGIN authentication
+      uses LOGIN authentication
+    when new emails are available in the mailbox
+      fetches the emails and returns the emails that are not present in the db
+      fetches the emails and returns the mail objects that are not present in the db
+      does not return recently deleted emails
+      does not count emails without message ids toward the sync limit
+  connection lifetime and lease
+    closes the socket after a successful fetch instead of leaving it open on logout
+    closes the socket when authentication fails after the connection was established
+    closes the socket when mailbox selection fails
+    closes the socket when the search fails
+    releases the lease after a successful fetch
+    releases the lease when the fetch fails
+    never opens a second connection while another worker holds the lease
+  UID based ingestion
+    searches and fetches by UID, never by sequence number
+    returns fetched messages carrying the server coordinates
+    builds an identity from the fetched message
+    does not request the Gmail extension on a server that does not advertise it
+    when the server advertises the Gmail extension
+      captures the provider stable id
+
+Imap::FetchedMessage
+  the parsed mail
+    carries the parsed mail through
+    delegates message_id so it can stand in for the mail object
+    delegates from
+  the server coordinates
+    carries the exact mailbox name, uidvalidity and uid
+    carries the special use roles of the mailbox
+    carries a provider stable id when the server offered one
+    has no provider id when the server offered none
+    exposes no sequence number at all
+  #to_identity
+    builds the identity that gets persisted with the message
+    carries the provider id into the identity
+
+Imap::FolderDiscoveryService
+  #perform
+    returns every listed folder with its exact name, delimiter and attributes
+    closes the connection after discovery
+    releases the lease after discovery
+    defers instead of opening a second connection when the lease is held
+  exactly one match
+    resolves each role deterministically
+    normalises special use attributes case insensitively
+  zero matches
+    marks the role unavailable rather than guessing a folder by name
+    never falls back to an alphabetical or provider-name guess
+  multiple matches
+    marks the role ambiguous and selects nothing
+    reports both candidates so an administrator can choose one
+    leaves the unambiguous roles resolved
+  administrator overrides
+    uses a valid override to resolve an otherwise ambiguous role
+    accepts an override onto a folder with no special use attribute
+    rejects an override that no longer exists on the server and leaves the role unavailable
+    rejects an override onto a folder that cannot be selected
+    matches the override exactly and is not fooled by a case variant
+  gmail shaped server
+    preserves exact folder names containing spaces and brackets
+    does not treat the All Mail folder as an Archive folder
+  #to_h
+    renders a payload with no credentials in it
+
+Imap::IdentityBackfillService
+  #dry_run
+    never fetches a message body
+    opens mailboxes read only so a dry run cannot mutate the server
+    reports an exact match when exactly one server message carries the message id
+    reports missing when the server has no message with that message id
+    reports ambiguous when the same message id appears in more than one place
+    writes nothing at all
+    reports which mailboxes it scanned with their uidvalidity
+    only considers incoming messages that carry a source id
+  #apply
+    records the identity for an exact match
+    reports how many identities it recorded
+    is idempotent: a second apply changes nothing
+    never records an ambiguous match
+    never records a missing match
+    does not broadcast the identity it recorded
+  a UIDVALIDITY change
+    reports a stored identity from a previous generation as stale
+    re-anchors a stale identity onto the current generation on apply
+    never reuses the stale uid against the new generation
+    treats an identity already on the current generation as already recorded
+  lease behaviour
+    defers instead of opening a second connection when the mailbox is busy
+    releases the lease afterwards
+
+Imap::Lease
+  #initialize
+    derives the per-inbox key and mints a unique owner token
+    defaults to the mailbox-local 120 second lease
+    accepts an injected ttl so tests can use shorter values
+  #acquire
+    acquires an unheld lease and records the owner token with a ttl
+    refuses to acquire while another owner holds the lease
+    never opens a second lease for the same inbox
+    allows a new owner once the previous lease has expired
+  #held?
+    is true only for the owner token
+    is false once the lease is gone
+  #renew
+    extends the lease while the owner token still matches
+    refuses to renew a lease owned by a newer worker
+    refuses to renew an expired lease and does not resurrect the key
+  #release
+    releases a lease it still owns
+    never deletes a newer worker lease after its own expiry
+    is safe to call when the lease was never acquired
+  #ensure_held!
+    renews and returns true while the lease is owned
+    raises LeaseLostError when the lease expired, stopping work before the next command
+    raises LeaseLostError when a newer worker has taken the lease
+  .with_lease
+    yields the lease and releases it afterwards
+    releases the lease when the block raises and preserves the original error
+    raises LeaseNotAcquiredError without yielding when another worker holds the lease
+    does not release a lease held by another worker when acquisition fails
+  .retry_delay
+    returns a bounded, jittered delay that grows with the attempt
+    never exceeds the bound even for large attempt counts
+    uses the injected random source so the jitter is testable
+
+Imap::MailboxCommand
+  standard IMAP dialect
+    moves by UID to the configured archive mailbox
+    consumes COPYUID to learn the confirmed target identity
+    moves to the trash mailbox for trash
+    moves to the spam mailbox for spam
+    restores to INBOX, which is never guessed from attributes
+    selects the mailbox the message currently lives in, not a guess
+    clears stale COPYUID before issuing the move so it cannot read another command result
+    never issues a sequence number command
+    refuses a server without MOVE and never falls back to COPY, STORE, or EXPUNGE
+  refusing to act on a stale identity
+    refuses when the mailbox UIDVALIDITY no longer matches the stored identity
+    refuses when the UID is no longer present, meaning another client already moved it
+  idempotence
+    treats a message already in the target as success without moving it again
+    treats a concurrent same-target move as idempotent success without moving twice
+  a server that advertises UIDPLUS but omits COPYUID
+    confirms one unique target by stable identity
+    records a conflict when the target cannot be confirmed uniquely
+  exact Message-ID confirmation
+    verifies ["xabc@example.com"] during Imap::MailboxCommand::Standard recovery
+    verifies ["xabc@example.com", "abc@example.com"] during Imap::MailboxCommand::Standard recovery
+    verifies ["abc@example.com", "abc@example.com"] during Imap::MailboxCommand::Standard recovery
+    verifies ["xabc@example.com"] during Imap::MailboxCommand::Gmail recovery
+    verifies ["xabc@example.com", "abc@example.com"] during Imap::MailboxCommand::Gmail recovery
+    verifies ["abc@example.com", "abc@example.com"] during Imap::MailboxCommand::Gmail recovery
+    filters substring candidates when COPYUID is missing
+  an unconfigured target role
+    refuses rather than guessing a folder
+  gmail dialect
+    archives by removing only the Inbox label
+    preserves unrelated labels by touching only the Inbox label
+    archives from the frozen Inbox location when All Mail is the identity primary
+    reports the message as still present but no longer in Inbox
+    restores by adding the Inbox label back and confirms the new Inbox identity
+    restores from Gmail Trash with UID MOVE instead of retaining the Trash label
+    refuses archive before mutation when Gmail All Mail cannot be resolved
+    still uses an ordinary UID move for trash
+    still uses an ordinary UID move for spam
+    refuses a stale identity exactly like the standard dialect
+  .dialect_for
+    selects the Gmail dialect from the advertised capability, never from the provider field
+    selects the standard dialect otherwise
+
+Imap::MailboxOperationExecutor
+  moves through the leased connection wrapper, records success, and bumps the identity once
+  moves tracked incoming messages to trash and keeps the conversation restorable
+  moves tracked incoming messages to spam and keeps the conversation restorable
+  restores a tracked Trash message to Inbox with the server-confirmed target identity
+  restores Gmail by adding Inbox while retaining the existing All Mail location
+  archives Gmail from the frozen Inbox location when All Mail is the identity primary
+  records a frozen untracked item as conflict instead of hiding it from a partial result
+  rechecks active mode immediately before mutation and leaves provider state untouched when it closes
+  reauthorizes the actor in the worker before opening a provider connection
+  records exact per-message partial failure and changes only the confirmed identity
+  retries only unresolved items and replaces their prior failure result
+  converges after the server move succeeds and the process dies before any database write
+  leaves the operation pending when another inbox worker owns the lease
+
+Imap::MailboxOperationNotifier
+  dispatches only the safe summary and derived state under the dedicated event
+  omits mailbox state entirely when the inbox cannot mutate the provider
+  omits mailbox state when the conversation has no tracked identity
+  swallows a dispatcher failure after durable operation state is written
+
+Imap::MailboxReconciliationService
+  reading the server
+    opens every scanned mailbox read only so reconciliation cannot mutate the provider
+    never fetches a message body
+    skips folders the server marks as not selectable
+    writes identities while still holding the lease, so a mailbox operation cannot interleave
+    scans folders that carry no mailbox role, so a move outside the four roles is still found
+  external move
+    follows a message an external client moved into the archive folder
+    reports the moved conversation in the existing derived state vocabulary
+    bumps the identity version so an operation frozen against the old location conflicts
+    writes nothing when the server still agrees with the stored identity
+    keeps a message moved into a folder with no mailbox role out of the missing vocabulary
+  uidvalidity change
+    reresolves the uid by message id when the mailbox uidvalidity changed
+    never treats a uidvalidity bump as deletion, even across two cycles
+  duplicate message id
+    records every copy the server holds
+    settles after one cycle instead of flapping between the two folders
+    orders locations by role rather than by the order the server was scanned in
+    derives one coherent state for a duplicated message
+  two cycle absence
+    takes no action on a single cycle of absence
+    marks the identity missing on the second consecutive confirmed absence
+    restarts the streak when the message reappears between cycles
+    refuses to conclude absence when a mailbox window could not be fully read
+    refuses to conclude absence when a mailbox is larger than the scan bound
+    still follows moves it can see while a different mailbox window is untrustworthy
+  external deletion
+    reports the message through the existing missing vocabulary
+    drops the conversation out of every server side mailbox role list
+    refuses a new mailbox operation against a message the provider no longer holds
+  no recreate
+    records the provider tombstone when it concludes the message is gone
+    refreshes the tombstone on later cycles so it cannot lapse while the message stays gone
+    never deletes the chatwoot message or its conversation
+    refuses re-ingestion on a later fetch cycle even after the chatwoot row is gone
+  feature gate
+    runs no reconciliation work when the account feature is disabled
+    runs no reconciliation work when the inbox mailbox sync mode is off
+    runs no reconciliation work when imap is disabled on the channel
+    runs in observe mode, which never mutates the provider
+  query count
+    keeps a no-op cycle flat as the tracked message count grows
+    leaves the bulk read surface at its constant query count when identities carry reconciled state
+  the probe gate
+    when the server still agrees with every stored identity (row 9)
+      enumerates on the very first cycle and not on the next one
+      never enumerates the server once the inbox has been enumerated recently
+      reports that it did not scan, and stays conclusive
+      reads only the mailboxes that hold tracked identities, not every folder
+      enumerates again once the interval has elapsed, so a new copy cannot hide forever
+      leaves every stored identity exactly as it was
+    when something has actually moved (row 10)
+      escalates and resolves a move into a role folder
+      resolves a move into a custom folder without ever tombstoning it
+      escalates on a UIDVALIDITY change rather than reading it as mass deletion
+      still needs two cycles to conclude a deletion
+    when a message has already been concluded missing
+      settles instead of escalating forever
+      still refreshes the tombstone, because that TTL is shorter than the absence
+
+Imap::MailboxSyncConfig
+  .parse
+    treats nil as the default off configuration
+    treats an empty hash as the default off configuration
+    accepts string keys as stored in jsonb
+    accepts symbol keys
+    rejects a non-hash payload
+    mode
+      accepts every supported mode
+      rejects an unsupported mode
+      rejects a blank mode rather than silently defaulting
+    sent_mode
+      accepts every supported sent mode
+      rejects an unsupported sent mode
+    unknown keys
+      rejects an unknown top level key
+      rejects an unknown folder role
+    folder overrides
+      accepts every supported role
+      rejects a non-hash folder_overrides
+      rejects a non-string folder name
+      drops a blank override so the role stays unconfigured rather than guessed
+      preserves exact server folder names including spaces and non-ascii
+  mode predicates
+    reports off
+    allows observation but never provider mutation in observe mode
+    allows provider mutation only in active mode
+  #restore_target
+    is always INBOX and is never taken from an override or a special-use attribute
+    is INBOX even when the configuration is otherwise empty
+  #to_h
+    round trips through parse
+    always emits string keys so it stores cleanly as jsonb
+    never carries a credential or token field
+  .default
+    is off with no overrides, matching the stored column default
+
+Imap::MailboxTargets
+  a standard IMAP server
+    resolves every action to its special-use folder
+    reports archive unavailable when two folders both claim the role
+    resolves an ambiguous role once an override names the folder
+  Gmail
+    resolves archive through All Mail and reports the inbox usable
+    reports archive unavailable when All Mail is hidden from IMAP
+    still resolves trash and spam when archive cannot resolve
+    would call the same inbox unusable if the dialect were ignored
+  #to_h
+    keeps the shape Imap::MailboxCommand consumes, including the all key
+    ignores a noselect folder when picking All Mail
+
+Imap::MessageIdMatcher
+  does not fetch an empty candidate set
+  matches parsed identities exactly for ["xabc@example.com"]
+  matches parsed identities exactly for ["abc@example.com"]
+  matches parsed identities exactly for ["xabc@example.com", "abc@example.com"]
+  matches parsed identities exactly for ["abc@example.com", "abc@example.com"]
+  matches parsed identities exactly for ["ABC@example.com"]
+  ignores vanished candidates and headers without a Message-ID
+
+Imap::MessageIdentity
+  .build
+    records the exact mailbox, uidvalidity and uid
+    starts at identity version 1
+    records the special use roles for the mailbox
+    records a provider stable id when the server offers one
+    seeds locations from the primary location
+    marks the identity verified at build time
+    coerces uid and uidvalidity to integers
+  the serialised payload
+    uses string keys so it stores cleanly as jsonb
+    never contains a sequence number
+    keeps the flat primary fields consistent with the first location
+    round trips through parse
+  .parse
+    returns nil for a blank payload
+    reads a stored payload back
+  #stale_for?
+    is stale when the mailbox uidvalidity has changed
+    is not stale when the uidvalidity still matches
+    is not stale for a different mailbox it does not claim
+  #with_location
+    adds a second location, because one Gmail message can appear in more than one mailbox
+    increments the identity version
+    replaces a location for the same mailbox rather than duplicating it
+    replaces the source mailbox for a MOVE while retaining one version bump
+    keeps the flat primary fields pointing at the first location
+  #version
+    increases monotonically as the identity is updated
+
+Imap::MicrosoftFetchEmailService
+  #perform
+    when new emails are available in the mailbox
+      fetches the emails and returns the emails that are not present in the db
+    when the interval is passed during an IMAP Sync
+      fetches the emails based on the interval specified in the job
+
+Imap::SentSyncService
+  folder resolution: no guessing, ever
+    uses the exact folder the server advertises with the \Sent special-use attribute
+    refuses to run when the server advertises no Sent folder, rather than guessing a name
+    refuses to run when two folders claim \Sent and no administrator override picks one
+    uses an exact administrator override when discovery is ambiguous
+  append mode (M05)
+    searches Sent by Message-ID before it appends anything
+    captures APPENDUID and persists it as the message identity with the sent role
+    records the message as synced so a later cycle does not consider it again
+    reads APPENDUID from a server that returns it as a raw string
+    confirms the copy by search when the server returns no APPENDUID
+  substring candidates in append mode
+    does not suppress APPEND when only a longer ID exists
+    verifies the post-APPEND search with exact copy present: false
+    verifies the post-APPEND search with exact copy present: true
+  rerun deduplicates (M05)
+    attaches the existing copy instead of appending a second one
+    records a conflict rather than appending when the server already holds two copies
+  provider-managed mode (M05)
+    never issues an APPEND, and attaches the copy the provider made
+    never issues an APPEND even when the provider copy is not there yet
+    rejects a longer ID, then attaches the exact provider copy on a fresh cycle
+    retains genuine duplicate exact-ID ambiguity without appending
+  Gmail is selected by capability, never by the provider field
+    never APPENDs on a server advertising X-GM-EXT-1 even when append mode is configured
+    attaches the copy Gmail SMTP already saved
+  modes that do no work at all
+    does nothing when sent_mode is disabled
+    does nothing when the inbox mailbox sync mode is off
+    runs in observe mode, because attaching an existing copy mutates nothing on the server
+    never APPENDs in observe mode, because APPEND is a provider mutation
+  failure honesty (M05)
+    records an APPEND failure as visible state and retries it on the next cycle
+    never marks the Chatwoot message itself as failed to deliver
+    defers instead of opening a second connection when another worker holds the lease
+  importing external Sent replies (M06)
+    imports the reply into the conversation it references, as an outgoing message
+    records the Sent identity so the message is tracked by UID, not by Message-ID alone
+    imports it exactly once across repeated cycles
+    creates no contact and no conversation for an unthreaded external message
+    reports the unthreaded message rather than silently dropping it
+    does not re-import a Chatwoot send that is already in the conversation
+    lets a lost lease propagate out of the import pass rather than counting it as a failure
+  the email_mailbox_actions account gate (F1)
+    does no Sent work at all when the account feature flag is off
+    checks the account flag before the per-inbox mode, matching reconciliation ordering
+  idempotency backstop (F3)
+    never APPENDs when the re-rendered source carries a different Message-ID
+    does not retry a mismatched message on the next cycle
+    stops appending after five consecutive failures rather than retrying for seven days
+    still retries a message that has failed fewer times than the cap
+    treats a mail that could not be rendered as a transient failure, not a permanent abandonment
+    recovers an unrenderable message once the inbox can send again
+  lease loss propagates (F4)
+    raises out of the outbound pass instead of recording a per-message Sent failure
+  capabilities are read inside the session (F6)
+    passes the session-read capabilities to the dialect selector instead of re-fetching them
+
+Imap::SentThreadResolver
+  exact reference to an existing conversation
+    resolves through In-Reply-To pointing at a stored message source_id
+    resolves through References pointing at a stored message source_id
+    resolves through the conversation UUID address Chatwoot puts in its own replies
+  anything less than unambiguous
+    refuses a message with no In-Reply-To and no References
+    refuses a message whose references match nothing in Chatwoot
+    refuses when references point at two different conversations rather than guessing one
+    refuses a reference that belongs to a different inbox
+
+Imap::Session
+  .run
+    returns the value of the block
+    disconnects a connected client on the success path
+    does nothing when no client was ever established
+  cleanup fault matrix
+    disconnects and preserves the original error when the connect itself fails
+    disconnects the established socket when authentication fails afterwards
+    disconnects when select fails
+    disconnects when a fetch fails
+    still disconnects when logout raises, and does not mask the original error
+    does not mask a successful result when logout raises
+    never lets a disconnect failure replace the original error
+    never lets a disconnect failure escape on the success path
+    skips logout and disconnect when the client is already disconnected
+    closes only once even when close is called explicitly inside the block
+  timeouts
+    bounds the connect with the injected connect timeout
+    bounds each command with the injected command timeout and still disconnects
+    defaults to the mailbox-local 15 second connect and 45 second command bounds
+  lease integration
+    renews the lease before each command
+    renews the lease before connecting
+    stops before running the command when the lease was lost, and still disconnects
+    works without a lease
+  #connected?
+    is false before connecting and true afterwards
+    is false after close
+
+Finished in 28.67 seconds (files took 3.9 seconds to load)
+357 examples, 0 failures
+
+Receipt: /srv/factory-sandboxes/842c3e38-8ada-42c0-b3b2-2ed34ef3569c/chatwoot/.artifacts/woot59-protocol.2r8LtJ (exit 0)

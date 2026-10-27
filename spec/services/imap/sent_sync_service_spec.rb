@@ -173,6 +173,11 @@ RSpec.describe Imap::SentSyncService do
       outgoing_message
       allow(imap).to receive(:append).and_return(tagged_response(nil, nil))
       allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([], [99])
+      allow(imap).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+        end
+      end
 
       described_class.new(channel: channel).perform
 
@@ -180,10 +185,49 @@ RSpec.describe Imap::SentSyncService do
     end
   end
 
+  describe 'substring candidates in append mode' do
+    it 'does not suppress APPEND when only a longer ID exists' do
+      outgoing_message
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([31])
+      row = Net::IMAP::FetchData.new(1, { 'UID' => 31, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <x#{sent_message_id}>\r\n\r\n" })
+      allow(imap).to receive(:uid_fetch).with([31], ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return([row])
+
+      report = described_class.new(channel: channel).perform
+
+      expect(report[:outbound][:appended]).to eq 1
+      expect(outgoing_message.reload.imap_identity.uid).to eq 42
+    end
+
+    [false, true].each do |exact_present|
+      it "verifies the post-APPEND search with exact copy present: #{exact_present}" do
+        outgoing_message
+        allow(imap).to receive(:append).and_return(tagged_response(nil, nil))
+        ids = ["x#{sent_message_id}"]
+        ids << sent_message_id if exact_present
+        uids = (31...(31 + ids.size)).to_a
+        rows = ids.each_with_index.map do |id, index|
+          Net::IMAP::FetchData.new(index + 1, { 'UID' => index + 31, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{id}>\r\n\r\n" })
+        end
+        allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([], uids)
+        allow(imap).to receive(:uid_fetch).with(uids, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return(rows)
+
+        described_class.new(channel: channel).perform
+
+        expect(outgoing_message.reload.imap_sent_sync.state).to eq(exact_present ? 'synced' : 'failed')
+        expect(outgoing_message.imap_identity&.uid).to eq(exact_present ? 32 : nil)
+      end
+    end
+  end
+
   describe 'rerun deduplicates (M05)' do
     it 'attaches the existing copy instead of appending a second one' do
       outgoing_message
       allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([55])
+      allow(imap).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+        end
+      end
 
       report = described_class.new(channel: channel).perform
 
@@ -196,6 +240,11 @@ RSpec.describe Imap::SentSyncService do
     it 'records a conflict rather than appending when the server already holds two copies' do
       outgoing_message
       allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([55, 56])
+      allow(imap).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+        end
+      end
 
       report = described_class.new(channel: channel).perform
 
@@ -211,6 +260,11 @@ RSpec.describe Imap::SentSyncService do
     it 'never issues an APPEND, and attaches the copy the provider made' do
       outgoing_message
       allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([31])
+      allow(imap).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+        end
+      end
 
       report = described_class.new(channel: channel).perform
 
@@ -228,11 +282,42 @@ RSpec.describe Imap::SentSyncService do
       expect(outgoing_message.reload.imap_sent_sync.state).to eq 'awaiting_provider_copy'
     end
 
-    it 'retries the same message on the next cycle rather than abandoning it' do
+    it 'rejects a longer ID, then attaches the exact provider copy on a fresh cycle' do
       outgoing_message
-      described_class.new(channel: channel).perform
+      longer = Net::IMAP::FetchData.new(1, { 'UID' => 31, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <x#{sent_message_id}>\r\n\r\n" })
+      exact = Net::IMAP::FetchData.new(2, { 'UID' => 32, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([31], [31, 32])
+      allow(imap).to receive(:uid_fetch).with([31], ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return([longer])
+      allow(imap).to receive(:uid_fetch).with([31, 32], ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return([longer, exact])
 
-      expect(described_class.new(channel: channel).perform[:outbound][:candidates]).to eq 1
+      first = described_class.new(channel: channel).perform
+
+      expect(first[:outbound][:awaiting_provider_copy]).to eq 1
+      outgoing_message.reload
+      expect(outgoing_message.imap_identity).to be_nil
+
+      second = described_class.new(channel: channel).perform
+
+      expect(second[:outbound][:candidates]).to eq 1
+      expect(second[:outbound][:attached]).to eq 1
+      expect(outgoing_message.reload.imap_identity.uid).to eq 32
+      expect(described_class.new(channel: channel).perform[:outbound][:candidates]).to eq 0
+      expect(imap).not_to have_received(:append)
+    end
+
+    it 'retains genuine duplicate exact-ID ambiguity without appending' do
+      outgoing_message
+      allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([31, 32])
+      rows = [31, 32].map do |uid|
+        Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+      end
+      allow(imap).to receive(:uid_fetch).with([31, 32], ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']).and_return(rows)
+
+      report = described_class.new(channel: channel).perform
+
+      expect(report[:outbound][:conflict]).to eq 1
+      expect(outgoing_message.reload.imap_identity).to be_nil
+      expect(imap).not_to have_received(:append)
     end
   end
 
@@ -259,6 +344,11 @@ RSpec.describe Imap::SentSyncService do
     it 'attaches the copy Gmail SMTP already saved' do
       outgoing_message
       allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([12])
+      allow(imap).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+        end
+      end
 
       described_class.new(channel: channel).perform
 
@@ -295,6 +385,11 @@ RSpec.describe Imap::SentSyncService do
       outgoing_message
       channel.update!(mailbox_sync_config: config.merge('mode' => 'observe'))
       allow(imap).to receive(:uid_search).with(['HEADER', 'Message-ID', sent_message_id]).and_return([55])
+      allow(imap).to receive(:uid_fetch).with(anything, ['UID', 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]']) do |uids|
+        uids.map do |uid|
+          Net::IMAP::FetchData.new(1, { 'UID' => uid, 'BODY[HEADER.FIELDS (MESSAGE-ID)]' => "Message-ID: <#{sent_message_id}>\r\n\r\n" })
+        end
+      end
 
       report = described_class.new(channel: channel).perform
 
