@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { effectScope, ref } from 'vue';
 import { useAvailability } from '../useAvailability';
 
 const mockIsOnline = vi.fn();
@@ -18,6 +18,7 @@ describe('useAvailability', () => {
   const originalWindow = window.chatwootWebChannel;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
 
     // Reset mocks to return true by default
@@ -35,7 +36,27 @@ describe('useAvailability', () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
     window.chatwootWebChannel = originalWindow;
+  });
+
+  it('samples wall-clock time after a suspended timer and disposes with its scope', () => {
+    vi.setSystemTime(new Date('2026-09-18T08:59:00Z'));
+    const timersBeforeScope = vi.getTimerCount();
+    const scope = effectScope();
+    const { currentTime } = scope.run(() => useAvailability());
+    expect(currentTime.value).toEqual(new Date('2026-09-18T08:59:00Z'));
+    expect(vi.getTimerCount()).toBe(timersBeforeScope + 1);
+
+    vi.setSystemTime(new Date('2026-09-18T17:01:00Z'));
+    vi.advanceTimersByTime(1000);
+    expect(currentTime.value).toEqual(new Date('2026-09-18T17:01:01Z'));
+
+    scope.stop();
+    expect(vi.getTimerCount()).toBe(timersBeforeScope);
+    vi.advanceTimersByTime(1000);
+    expect(currentTime.value).toEqual(new Date('2026-09-18T17:01:01Z'));
   });
 
   describe('initial state', () => {
