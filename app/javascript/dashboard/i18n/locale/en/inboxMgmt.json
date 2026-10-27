@@ -1264,7 +1264,7 @@
         "ROLES": {
           "ARCHIVE": "Archive",
           "TRASH": "Trash",
-          "SPAM": "Spam",
+          "SPAM": "Junk",
           "SENT": "Sent"
         },
         "STATUS": {

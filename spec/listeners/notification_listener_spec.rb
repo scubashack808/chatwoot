@@ -41,6 +41,18 @@ describe NotificationListener do
         listener.conversation_created(event)
         expect(notification_setting.user.notifications.count).to eq(0)
       end
+
+      it 'does not notify anyone about a conversation imported from the Junk folder' do
+        notification_setting = first_agent.notification_settings.first
+        notification_setting.selected_email_flags = [:email_conversation_creation]
+        notification_setting.save!
+        create(:inbox_member, user: first_agent, inbox: inbox)
+        conversation.update!(additional_attributes: { Conversation::JUNK_IMPORT_KEY => true })
+
+        listener.conversation_created(Events::Base.new(event_name, Time.zone.now, conversation: conversation.reload))
+
+        expect(first_agent.notifications.count).to eq(0)
+      end
     end
   end
 

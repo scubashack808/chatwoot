@@ -59,4 +59,39 @@ RSpec.describe Imap::ImapMailbox do
       expect(channel.inbox.messages.last.imap_identity).to be_nil
     end
   end
+
+  describe 'importing from the Junk folder' do
+    let(:junk) { fetched(mailbox: 'INBOX.spam', roles: ['spam']) }
+
+    it 'creates a resolved, junk-marked conversation that stays resolved after its message commits' do
+      described_class.new.process(junk, channel, junk: true)
+
+      conversation = channel.inbox.conversations.last
+      expect(conversation.reload).to be_resolved
+      expect(conversation).to be_junk_import
+      expect(conversation.messages.last.imap_identity.roles).to eq ['spam']
+    end
+
+    it 'adds junk that threads into an existing conversation without marking it junk, and reopens it' do
+      existing = create(:conversation, account: account, inbox: channel.inbox, status: :resolved)
+      create(:message, conversation: existing, account: account, inbox: channel.inbox, source_id: 'thread@example.com')
+      mail.in_reply_to = 'thread@example.com'
+
+      expect { described_class.new.process(junk, channel, junk: true) }.not_to change(Conversation, :count)
+
+      expect(existing.reload).to be_open
+      expect(existing).not_to be_junk_import
+    end
+
+    it 'reopens a junk conversation when ordinary inbox mail threads into it' do
+      described_class.new.process(junk, channel, junk: true)
+      conversation = channel.inbox.conversations.last
+      reply = Mail.new(from: 'text@example.com', to: 'care@example.com', subject: 'Re', body: 'real reply',
+                       message_id: '<reply@example.com>', in_reply_to: mail.message_id)
+
+      described_class.new.process(reply, channel)
+
+      expect(conversation.reload).to be_open
+    end
+  end
 end
