@@ -51,6 +51,25 @@ RSpec.describe 'Platform Account Users API', type: :request do
         expect(data['user_id']).to eq(user.id)
       end
 
+      it 're-adds a removed user without inheriting stale settings' do
+        user = create(:user)
+        create(:platform_app_permissible, platform_app: platform_app, permissible: account)
+        membership = create(:account_user, account: account, user: user)
+        old_setting = user.notification_settings.find_by!(account: account)
+        membership.destroy!
+
+        post "/platform/api/v1/accounts/#{account.id}/account_users",
+             params: { user_id: user.id, role: 'agent' },
+             headers: { api_access_token: platform_app.access_token.token }, as: :json
+
+        expect(response).to have_http_status(:success)
+        expect(AccountUser.where(account: account, user: user).count).to eq(1)
+        expect(NotificationSetting.exists?(old_setting.id)).to be(false)
+        setting = user.notification_settings.find_by!(account: account)
+        Agents::DestroyJob.perform_now(account, user)
+        expect(setting.reload).to be_persisted
+      end
+
       it 'updates the new account user for the account' do
         create(:platform_app_permissible, platform_app: platform_app, permissible: account)
         account_user = create(:account_user, account: account, role: 'agent')

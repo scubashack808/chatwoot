@@ -22,7 +22,18 @@ RSpec.describe Agents::DestroyJob do
   end
 
   describe '#perform' do
-    it 'remove inboxes, teams, and conversations when removed from account' do
+    it 'preserves resources while a current membership exists' do
+      described_class.perform_now(account, user)
+
+      expect(user.teams).to contain_exactly(team1)
+      expect(user.inboxes).to contain_exactly(inbox)
+      expect(user.notification_settings.where(account: account).count).to eq(1)
+      expect(user.assigned_conversations.where(account: account).count).to eq(1)
+    end
+
+    it 'removes inboxes, teams, and conversations when removed from account' do
+      account.account_users.find_by!(user: user).destroy!
+      described_class.perform_now(account, user)
       described_class.perform_now(account, user)
 
       user.reload
@@ -34,6 +45,7 @@ RSpec.describe Agents::DestroyJob do
 
     it 'invalidates saved filter snapshots when assigned conversations are unassigned' do
       account.enable_features!(:unread_count_for_filters)
+      account.account_users.find_by!(user: user).destroy!
 
       expect do
         described_class.perform_now(account, user)
