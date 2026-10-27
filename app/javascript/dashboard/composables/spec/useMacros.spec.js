@@ -171,6 +171,46 @@ describe('useMacros', () => {
     expect(getMacroDropdownValues('change_priority')).toEqual(expectedPriority);
   });
 
+  it.each([
+    ['open', 0, 'OPEN'],
+    ['resolved', 1, 'RESOLVED'],
+    ['pending', 2, 'PENDING'],
+    ['snoozed', 3, 'SNOOZED'],
+  ])(
+    'provides typed status options and readable previews for %s',
+    (name, value, label) => {
+      const { getMacroDropdownValues, resolveMacroActions } = useMacros();
+      [name, value].forEach(id => {
+        const options = getMacroDropdownValues('change_status', id);
+        expect(options).toHaveLength(4);
+        expect(options.every(option => typeof option.id === typeof id)).toBe(
+          true
+        );
+        expect(options).toContainEqual({
+          id,
+          name: `MACROS.STATUS_TYPES.${label}`,
+        });
+        expect(
+          resolveMacroActions({
+            actions: [{ action_name: 'change_status', action_params: [id] }],
+          })
+        ).toEqual([
+          {
+            actionName: 'CHANGE_STATUS',
+            actionValue: `MACROS.STATUS_TYPES.${label}`,
+          },
+        ]);
+      });
+    }
+  );
+
+  it('defaults new status selections to string IDs', () => {
+    const { getMacroDropdownValues } = useMacros();
+    expect(
+      getMacroDropdownValues('change_status').map(option => option.id)
+    ).toEqual(['open', 'resolved', 'pending', 'snoozed']);
+  });
+
   it('returns an empty array for unknown types', () => {
     const { getMacroDropdownValues } = useMacros();
     expect(getMacroDropdownValues('unknown_type')).toEqual([]);
@@ -205,17 +245,6 @@ describe('useMacros', () => {
       { actionName: 'SEND_ATTACHMENT', actionValue: 'invoice.pdf' },
       { actionName: 'SEND_MESSAGE', actionValue: 'Hello there' },
       { actionName: 'RESOLVE_CONVERSATION', actionValue: '' },
-    ]);
-  });
-
-  it('resolves actions the macro builder does not offer', () => {
-    const { resolveMacroActions } = useMacros();
-    const macro = {
-      actions: [{ action_name: 'change_status', action_params: ['resolved'] }],
-    };
-
-    expect(resolveMacroActions(macro)).toEqual([
-      { actionName: 'CHANGE_STATUS', actionValue: 'resolved' },
     ]);
   });
 

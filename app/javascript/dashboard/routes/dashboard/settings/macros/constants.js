@@ -1,3 +1,11 @@
+// Keep integer IDs aligned with Conversation.statuses.
+export const MACRO_STATUS_VALUES = [
+  { id: 'open', value: 0 },
+  { id: 'resolved', value: 1 },
+  { id: 'pending', value: 2 },
+  { id: 'snoozed', value: 3 },
+];
+
 export const MACRO_ACTION_TYPES = [
   {
     key: 'assign_team',
@@ -48,6 +56,11 @@ export const MACRO_ACTION_TYPES = [
     key: 'resolve_conversation',
     label: 'RESOLVE_CONVERSATION',
     inputType: null,
+  },
+  {
+    key: 'change_status',
+    label: 'CHANGE_STATUS',
+    inputType: 'search_select',
   },
   {
     key: 'send_attachment',

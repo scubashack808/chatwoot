@@ -56,9 +56,10 @@ const formatMacro = macroData => {
         item => item.key === action.action_name
       ).inputType;
       if (inputType === 'multi_select' || inputType === 'search_select') {
-        actionParams = getMacroDropdownValues(action.action_name).filter(item =>
-          [...action.action_params].includes(item.id)
-        );
+        actionParams = getMacroDropdownValues(
+          action.action_name,
+          action.action_params[0]
+        ).filter(item => action.action_params.includes(item.id));
       } else actionParams = [...action.action_params];
     }
     return {
