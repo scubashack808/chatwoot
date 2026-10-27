@@ -22,6 +22,7 @@ const addCampaign = async campaignDetails => {
     });
 
     useAlert(t('CAMPAIGN.LIVE_CHAT.CREATE.FORM.API.SUCCESS_MESSAGE'));
+    emit('close');
   } catch (error) {
     const errorMessage =
       error?.response?.message ||
@@ -31,11 +32,6 @@ const addCampaign = async campaignDetails => {
 };
 
 const handleClose = () => emit('close');
-
-const handleSubmit = campaignDetails => {
-  addCampaign(campaignDetails);
-  handleClose();
-};
 </script>
 
 <template>
@@ -47,7 +43,7 @@ const handleSubmit = campaignDetails => {
     </h3>
     <LiveChatCampaignForm
       mode="create"
-      @submit="handleSubmit"
+      @submit="addCampaign"
       @cancel="handleClose"
     />
   </div>
