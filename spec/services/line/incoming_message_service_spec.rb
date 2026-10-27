@@ -294,6 +294,43 @@ describe Line::IncomingMessageService do
         expect(line_channel.inbox.messages.first.content).to eq('Hello, world 1')
         expect(line_channel.inbox.messages.last.content).to eq('Hello, world 2')
       end
+
+      context 'when the same message event is delivered again' do
+        let(:redelivery_params) do
+          params.deep_dup.tap { |payload| payload[:events][0][:deliveryContext] = { isRedelivery: true } }
+        end
+
+        it 'persists one incoming message and skips the profile fetch for the redelivery' do
+          described_class.new(inbox: line_channel.inbox, params: params).perform
+          described_class.new(inbox: line_channel.inbox, params: redelivery_params).perform
+
+          expect(line_channel.inbox.messages.incoming.where(source_id: '325708').count).to eq(1)
+          expect(line_channel.inbox.conversations.count).to eq(1)
+          expect(line_bot).to have_received(:get_profile).once
+        end
+
+        it 'persists distinct message ids with identical text' do
+          second_params = params.deep_dup.tap { |payload| payload[:events][0][:message][:id] = '325709' }
+
+          described_class.new(inbox: line_channel.inbox, params: params).perform
+          described_class.new(inbox: line_channel.inbox, params: second_params).perform
+
+          expect(line_channel.inbox.messages.incoming.pluck(:source_id)).to contain_exactly('325708', '325709')
+          expect(line_channel.inbox.conversations.count).to eq(1)
+        end
+
+        it 'persists the message on redelivery when the earlier attempt failed before saving' do
+          failing_service = described_class.new(inbox: line_channel.inbox, params: params)
+          allow(failing_service).to receive(:attach_files).and_raise(StandardError, 'download failed')
+
+          expect { failing_service.perform }.to raise_error(StandardError, 'download failed')
+          expect(line_channel.inbox.messages.count).to eq(0)
+
+          described_class.new(inbox: line_channel.inbox, params: redelivery_params).perform
+
+          expect(line_channel.inbox.messages.incoming.where(source_id: '325708').count).to eq(1)
+        end
+      end
     end
 
     context 'when valid sticker message params' do
