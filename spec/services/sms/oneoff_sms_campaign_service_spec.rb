@@ -13,6 +13,23 @@ describe Sms::OneoffSmsCampaignService do
                       audience: [{ type: 'Label', id: label1.id }, { type: 'Label', id: label2.id }])
   end
 
+  describe 'prepare_audience' do
+    it 'resolves labels once without delivering, including an empty result' do
+      [[], [label1.title]].each do |titles|
+        service = described_class.new(campaign: campaign)
+        labels = campaign.account.labels.where(id: [label1.id, label2.id])
+        allow(campaign.account.labels).to receive(:where).with(id: [label1.id, label2.id]).and_return(labels)
+        expect(labels).to receive(:pluck).with(:title).once.and_return(titles)
+        expect(service).not_to receive(:send_message)
+
+        expect(service.prepare_audience).to eq(titles)
+        service.perform
+        expect(campaign.reload).to be_completed
+        campaign.update!(campaign_status: :active)
+      end
+    end
+  end
+
   describe 'perform' do
     before do
       stub_request(:post, 'https://messaging.bandwidth.com/api/v2/users/1/messages').to_return(

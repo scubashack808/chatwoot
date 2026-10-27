@@ -114,7 +114,7 @@ RSpec.describe Campaign do
       end
 
       it 'calls twilio service on trigger!' do
-        sms_service = double
+        sms_service = instance_double(Twilio::OneoffSmsCampaignService, prepare_audience: [])
         expect(Twilio::OneoffSmsCampaignService).to receive(:new).with(campaign: campaign).and_return(sms_service)
         expect(sms_service).to receive(:perform)
         campaign.save!
@@ -123,7 +123,7 @@ RSpec.describe Campaign do
 
       it 'marks the campaign as processing before triggering the service' do
         campaign.save!
-        sms_service = double
+        sms_service = instance_double(Twilio::OneoffSmsCampaignService, prepare_audience: [])
 
         expect(Twilio::OneoffSmsCampaignService).to receive(:new).with(campaign: campaign).and_return(sms_service)
         expect(sms_service).to receive(:perform) do
@@ -144,7 +144,7 @@ RSpec.describe Campaign do
 
       it 'keeps the campaign processing when triggering fails' do
         campaign.save!
-        sms_service = double
+        sms_service = instance_double(Twilio::OneoffSmsCampaignService, prepare_audience: [])
 
         expect(Twilio::OneoffSmsCampaignService).to receive(:new).with(campaign: campaign).and_return(sms_service)
         expect(sms_service).to receive(:perform).and_raise(StandardError, 'provider error')
@@ -168,7 +168,7 @@ RSpec.describe Campaign do
       end
 
       it 'calls sms service on trigger!' do
-        sms_service = double
+        sms_service = instance_double(Sms::OneoffSmsCampaignService, prepare_audience: [])
         expect(Sms::OneoffSmsCampaignService).to receive(:new).with(campaign: campaign).and_return(sms_service)
         expect(sms_service).to receive(:perform)
         campaign.save!

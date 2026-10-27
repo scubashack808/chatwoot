@@ -61,9 +61,9 @@ class Campaign < ApplicationRecord
   def trigger!
     return unless one_off?
     return unless feature_enabled?
-    return unless mark_processing!
 
-    execute_campaign
+    service = mark_processing!
+    service&.perform
   end
 
   private
@@ -77,7 +77,10 @@ class Campaign < ApplicationRecord
     with_lock do
       next if completed? || processing?
 
+      service = campaign_service
+      service.prepare_audience if ['Twilio SMS', 'Sms'].include?(inbox.inbox_type)
       update!(campaign_status: :processing, started_at: Time.current)
+      service
     end
   end
 
@@ -89,14 +92,14 @@ class Campaign < ApplicationRecord
     self.completed_at ||= Time.current
   end
 
-  def execute_campaign
+  def campaign_service
     case inbox.inbox_type
     when 'Twilio SMS'
-      Twilio::OneoffSmsCampaignService.new(campaign: self).perform
+      Twilio::OneoffSmsCampaignService.new(campaign: self)
     when 'Sms'
-      Sms::OneoffSmsCampaignService.new(campaign: self).perform
+      Sms::OneoffSmsCampaignService.new(campaign: self)
     when 'Whatsapp'
-      Whatsapp::OneoffCampaignService.new(campaign: self).perform
+      Whatsapp::OneoffCampaignService.new(campaign: self)
     end
   end
 
