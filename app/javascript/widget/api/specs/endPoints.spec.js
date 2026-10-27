@@ -1,5 +1,86 @@
 import endPoints from '../endPoints';
 
+describe('#sendAttachment', () => {
+  beforeEach(() => {
+    vi.stubGlobal('WOOT_WIDGET', { $root: { $i18n: { locale: 'es' } } });
+    vi.stubGlobal('referrerURL', '/synthetic-page');
+    vi.spyOn(window, 'location', 'get').mockReturnValue({
+      search: '?website_token=synthetic',
+    });
+    vi.spyOn(Date.prototype, 'toString').mockReturnValue('mock date');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('includes the runtime locale and preserves the file and pending metadata', () => {
+    const file = new File(['synthetic'], 'synthetic.png', {
+      type: 'image/png',
+    });
+    const { url, params } = endPoints.sendAttachment(
+      { attachment: { file }, replyTo: 42 },
+      { customAttributes: { plan: 'enterprise' }, labels: ['vip', 'customer'] }
+    );
+
+    expect(url).toBe(
+      '/api/v1/widget/messages?website_token=synthetic&locale=es'
+    );
+    expect(params.get('message[attachments][]')).toMatchObject({
+      name: 'synthetic.png',
+      type: 'image/png',
+      size: file.size,
+    });
+    expect([...params.entries()].slice(1)).toEqual([
+      ['message[referer_url]', '/synthetic-page'],
+      ['message[timestamp]', 'mock date'],
+      ['message[reply_to]', '42'],
+      ['custom_attributes[plan]', 'enterprise'],
+      ['labels[]', 'vip'],
+      ['labels[]', 'customer'],
+    ]);
+  });
+
+  it('includes the runtime locale for upload IDs without optional metadata', () => {
+    const { url, params } = endPoints.sendAttachment({
+      attachment: { file: 'synthetic-upload-id' },
+    });
+
+    expect(url).toBe(
+      '/api/v1/widget/messages?website_token=synthetic&locale=es'
+    );
+    expect([...params.entries()]).toEqual([
+      ['message[attachments][]', 'synthetic-upload-id'],
+      ['message[referer_url]', '/synthetic-page'],
+      ['message[timestamp]', 'mock date'],
+    ]);
+  });
+
+  it('preserves the explicit popout locale', () => {
+    vi.spyOn(window, 'location', 'get').mockReturnValue({
+      search: '?website_token=synthetic&locale=es',
+    });
+    const { url } = endPoints.sendAttachment({
+      attachment: { file: 'synthetic-upload-id' },
+    });
+    const search = new URLSearchParams(url.split('?')[1]);
+
+    expect(search.get('website_token')).toBe('synthetic');
+    expect(search.getAll('locale').every(locale => locale === 'es')).toBe(true);
+    expect(search.get('locale')).toBe('es');
+  });
+
+  it('keeps Spanish locale propagation for text and conversation creation', () => {
+    expect(endPoints.sendMessage('hola').url).toBe(
+      '/api/v1/widget/messages?website_token=synthetic&locale=es'
+    );
+    expect(endPoints.createConversation({ message: 'hola' }).url).toBe(
+      '/api/v1/widget/conversations?website_token=synthetic&locale=es'
+    );
+  });
+});
+
 describe('#sendMessage', () => {
   it('returns correct payload', () => {
     const spy = vi.spyOn(global, 'Date').mockImplementation(() => ({

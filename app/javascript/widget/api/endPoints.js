@@ -73,8 +73,9 @@ const sendAttachment = (
       formData.append('labels[]', label);
     });
   }
+  const search = buildSearchParamsWithLocale(window.location.search);
   return {
-    url: `/api/v1/widget/messages${window.location.search}`,
+    url: `/api/v1/widget/messages${search}`,
     params: formData,
   };
 };

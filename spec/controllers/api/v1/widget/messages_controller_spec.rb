@@ -42,6 +42,35 @@ RSpec.describe '/api/v1/widget/messages', type: :request do
   end
 
   describe 'POST /api/v1/widget/messages' do
+    context 'when an attachment starts the conversation', :skip_before do
+      let(:account) { create(:account, locale: 'en') }
+
+      before do
+        web_widget.inbox.update!(enable_email_collect: true)
+      end
+
+      { 'locale=es' => :es, 'locale=es&locale=es' => :es, '' => :en }.each do |query, expected_locale|
+        it "persists the #{expected_locale} email prompt for query #{query.inspect}" do
+          attachment = fixture_file_upload(Rails.root.join('spec/assets/avatar.png'), 'image/png')
+
+          with_modified_env DEFAULT_LOCALE: 'en' do
+            post "#{api_v1_widget_messages_url}?website_token=#{web_widget.website_token}&#{query}",
+                 params: { message: { attachments: [attachment] } },
+                 headers: { 'X-Auth-Token' => token }
+          end
+
+          expect(response).to have_http_status(:success)
+          new_conversation = contact.conversations.sole
+          incoming_message = new_conversation.messages.incoming.sole
+          expect(incoming_message.attachments.sole).to have_attributes(file_type: 'image')
+          prompt = new_conversation.messages.where(content_type: :input_email).sole
+          expect(prompt.content).to eq(
+            I18n.t('conversations.templates.email_input_box_message_body', account_name: account.name, locale: expected_locale)
+          )
+        end
+      end
+    end
+
     context 'when the conversation is resolved and the inbox does not allow messages after resolved' do
       before do
         web_widget.inbox.update!(allow_messages_after_resolved: false)
