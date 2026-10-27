@@ -224,7 +224,7 @@
     "MAILBOX": {
       "ACTIONS": {
         "ARCHIVE": "Archive",
-        "SPAM": "Move to spam",
+        "SPAM": "Move to Junk",
         "TRASH": "Move to Trash",
         "RESTORE": "Restore to inbox"
       },

@@ -179,6 +179,30 @@ RSpec.describe Imap::MailboxReconciliationService do
       expect(report[:moved]).to eq 1
     end
 
+    it 'turns a Junk import back into ordinary mail when another client marks it not spam' do
+      tracked_message('a@example.com', mailbox: 'INBOX.Junk', uidvalidity: 780, uid: 4, roles: ['spam'])
+      # After the message: creating an incoming message would itself reopen a resolved conversation.
+      conversation.update!(status: :resolved, additional_attributes: { Conversation::JUNK_IMPORT_KEY => true })
+      place('INBOX', 12, 'a@example.com')
+
+      reconcile
+
+      expect(conversation.reload).to be_open
+      expect(conversation).not_to be_junk_import
+    end
+
+    it 'leaves a Junk import alone when another client moves it anywhere other than Inbox' do
+      tracked_message('a@example.com', mailbox: 'INBOX.Junk', uidvalidity: 780, uid: 4, roles: ['spam'])
+      # After the message: creating an incoming message would itself reopen a resolved conversation.
+      conversation.update!(status: :resolved, additional_attributes: { Conversation::JUNK_IMPORT_KEY => true })
+      place('INBOX.Trash', 6, 'a@example.com')
+
+      reconcile
+
+      expect(conversation.reload).to be_resolved
+      expect(conversation).to be_junk_import
+    end
+
     it 'reports the moved conversation in the existing derived state vocabulary' do
       tracked_message('a@example.com', mailbox: 'INBOX', uid: 11)
       place('INBOX.Trash', 3, 'a@example.com')

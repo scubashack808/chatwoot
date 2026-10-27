@@ -160,6 +160,53 @@ RSpec.describe Imap::MailboxOperationExecutor do
     expect(operation.reload.status).to eq 'succeeded'
   end
 
+  it 'reopens a resolved Junk import when it is restored to Inbox and makes it ordinary mail' do
+    junk_identity = Imap::MessageIdentity.build(mailbox: 'INBOX.spam', uidvalidity: 101, uid: 31, roles: ['spam'])
+    message.write_imap_identity!(junk_identity)
+    conversation.update!(status: :resolved, additional_attributes: { Conversation::JUNK_IMPORT_KEY => true })
+    server['INBOX'].delete(7)
+    server['INBOX.spam'][31] = 'first@example.com'
+    operation.update!(
+      action: :restore,
+      items: [
+        {
+          'message_id' => message.id,
+          'identity_version' => junk_identity.version,
+          'source' => junk_identity.primary,
+          'provider_id' => nil,
+          'message_source_id' => message.source_id
+        }
+      ]
+    )
+
+    described_class.new(operation: operation).perform
+
+    expect(operation.reload.status).to eq 'succeeded'
+    expect(conversation.reload).to be_open
+    expect(conversation).not_to be_junk_import
+  end
+
+  it 'reopens a Junk import on a partial restore, since part of it is back in Inbox' do
+    junk_identity = Imap::MessageIdentity.build(mailbox: 'INBOX.spam', uidvalidity: 101, uid: 31, roles: ['spam'])
+    message.write_imap_identity!(junk_identity)
+    conversation.update!(status: :resolved, additional_attributes: { Conversation::JUNK_IMPORT_KEY => true })
+    server['INBOX'].delete(7)
+    server['INBOX.spam'][31] = 'first@example.com'
+    operation.update!(
+      action: :restore,
+      items: [
+        { 'message_id' => message.id, 'identity_version' => junk_identity.version, 'source' => junk_identity.primary,
+          'provider_id' => nil, 'message_source_id' => message.source_id },
+        { 'message_id' => 0, 'message_source_id' => 'gone@example.com', 'preflight_error' => 'identity_missing' }
+      ]
+    )
+
+    described_class.new(operation: operation).perform
+
+    expect(operation.reload.status).to eq 'partially_succeeded'
+    expect(conversation.reload).to be_open
+  end
+
   it 'restores Gmail by adding Inbox while retaining the existing All Mail location' do
     archived_identity = Imap::MessageIdentity.build(
       mailbox: '[Gmail]/All Mail', uidvalidity: 102, uid: 31, roles: ['archive']

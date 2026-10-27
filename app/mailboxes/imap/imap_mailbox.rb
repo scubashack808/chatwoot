@@ -7,8 +7,12 @@ class Imap::ImapMailbox
 
   # Accepts either an Imap::FetchedMessage, which carries the server coordinates alongside the
   # parsed mail, or a bare Mail object for callers that have no identity to record.
-  def process(mail, channel)
+  #
+  # junk: true comes from Imap::JunkImportService. A conversation it creates starts resolved and
+  # stays quiet; junk that threads into an existing conversation is added like any other reply.
+  def process(mail, channel, junk: false)
     @fetched_message = mail.is_a?(Imap::FetchedMessage) ? mail : nil
+    @junk = junk
     @inbound_mail = @fetched_message&.mail || mail
     @channel = channel
     load_account
@@ -24,12 +28,21 @@ class Imap::ImapMailbox
       find_or_create_contact
       find_or_create_conversation
       create_message
+      keep_junk_conversation_resolved
       add_attachments_to_message
       persist_imap_identity
     end
   end
 
   private
+
+  # Message#reopen_conversation would reopen the resolved junk conversation the moment its first
+  # message commits, so the junk message is told not to.
+  def keep_junk_conversation_resolved
+    return unless @junk && @message.present? && @conversation.junk_import?
+
+    @message.skip_conversation_reopen = true
+  end
 
   # Records where the server says this message lives, so a later move can be tracked by UID
   # rather than by the sequence-independent Message-ID alone.
@@ -99,23 +112,29 @@ class Imap::ImapMailbox
   end
 
   def find_or_create_conversation
-    @conversation = find_conversation_by_in_reply_to || find_conversation_by_reference_ids || ::Conversation.create!(
-      {
-        account_id: @account.id,
-        inbox_id: @inbox.id,
-        contact_id: @contact.id,
-        contact_inbox_id: @contact_inbox.id,
-        additional_attributes: {
-          source: 'email',
-          in_reply_to: in_reply_to,
-          auto_reply: @processed_mail.auto_reply?,
-          mail_subject: sanitize_mailbox_value(@processed_mail.subject),
-          initiated_at: {
-            timestamp: Time.now.utc
-          }
+    @conversation = find_conversation_by_in_reply_to || find_conversation_by_reference_ids || ::Conversation.create!(new_conversation_attributes)
+  end
+
+  def new_conversation_attributes
+    attributes = {
+      account_id: @account.id,
+      inbox_id: @inbox.id,
+      contact_id: @contact.id,
+      contact_inbox_id: @contact_inbox.id,
+      additional_attributes: {
+        source: 'email',
+        in_reply_to: in_reply_to,
+        auto_reply: @processed_mail.auto_reply?,
+        mail_subject: sanitize_mailbox_value(@processed_mail.subject),
+        initiated_at: {
+          timestamp: Time.now.utc
         }
       }
-    )
+    }
+    return attributes unless @junk
+
+    attributes[:additional_attributes][Conversation::JUNK_IMPORT_KEY] = true
+    attributes.merge(status: :resolved)
   end
 
   def find_or_create_contact

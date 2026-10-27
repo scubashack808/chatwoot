@@ -10,7 +10,7 @@ class Imap::MailboxOperationExecutor
     notify
     ensure_execution_allowed!
     execute_with_connection
-    operation.complete!
+    complete_operation
     notify
     operation
   rescue Imap::Lease::LeaseNotAcquiredError, Imap::Lease::LeaseLostError => e
@@ -28,6 +28,12 @@ class Imap::MailboxOperationExecutor
   end
 
   private
+
+  # A Junk import was created resolved so it stayed quiet; once it is restored to the inbox it is mail.
+  def complete_operation
+    operation.complete!
+    operation.reopen_restored_junk!
+  end
 
   def execute_with_connection
     Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|

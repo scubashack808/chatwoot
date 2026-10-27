@@ -200,6 +200,16 @@ class Imap::MailboxReconciliationService
 
     message.write_imap_identity!(identity.with_locations(locations, provider_id: shared_provider_id(hits)))
     report[change_kind(identity, locations)] += 1
+    restore_rescued_junk(message, locations)
+  end
+
+  # Marking a junk message "Not spam" in another client moves it back to INBOX on the server. The
+  # conversation the Junk import created resolved then becomes ordinary mail, as a restore would.
+  def restore_rescued_junk(message, locations)
+    roles = locations.flat_map { |location| location['roles'] }
+    return if roles.include?('spam') || roles.exclude?('inbox')
+
+    message.conversation.restore_from_junk!
   end
 
   # The server agrees with what is stored, so the coordinates are left completely alone. Only a

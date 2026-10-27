@@ -28,7 +28,7 @@
       "INBOX": "Inbox",
       "SENT": "Sent",
       "ARCHIVE": "Archive",
-      "SPAM": "Spam",
+      "SPAM": "Junk",
       "TRASH": "Trash"
     },
     "ASSIGNEE_TYPE_TABS": {

@@ -84,6 +84,8 @@ class Message < ApplicationRecord
   attr_accessor :echo_id
   # Transient flag used to skip waiting_since clearing for specific bot/system messages.
   attr_accessor :preserve_waiting_since
+  # Transient flag that keeps an imported junk message from reopening its resolved junk conversation.
+  attr_accessor :skip_conversation_reopen
 
   enum message_type: { incoming: 0, outgoing: 1, activity: 2, template: 3 }
   enum content_type: {
@@ -469,6 +471,7 @@ class Message < ApplicationRecord
   def reopen_conversation
     return if conversation.muted?
     return unless incoming?
+    return if skip_conversation_reopen
 
     conversation.open! if conversation.snoozed?
 

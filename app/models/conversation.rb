@@ -65,6 +65,8 @@ class Conversation < ApplicationRecord
   include ConversationMuteHelpers
 
   CONVERSATION_UPDATED_ADDITIONAL_ATTRIBUTE_KEYS = %w[conversation_language].freeze
+  # Marks a conversation created from the server's Junk folder by Imap::JunkImportService.
+  JUNK_IMPORT_KEY = 'junk_import'.freeze
   FILTERED_UNREAD_COUNT_ADDITIONAL_ATTRIBUTE_KEYS = %w[browser_language conversation_language mail_subject referer].freeze
   FILTERED_UNREAD_COUNT_UPDATE_KEYS = %w[
     cached_label_list campaign_id custom_attributes first_reply_created_at label_list last_activity_at priority snoozed_until waiting_since
@@ -147,6 +149,17 @@ class Conversation < ApplicationRecord
 
   def language
     additional_attributes&.dig('conversation_language')
+  end
+
+  def junk_import?
+    additional_attributes&.dig(JUNK_IMPORT_KEY) == true
+  end
+
+  # Restoring a junk conversation to the inbox makes it ordinary mail again.
+  def restore_from_junk!
+    return unless junk_import?
+
+    update!(status: :open, additional_attributes: additional_attributes.except(JUNK_IMPORT_KEY))
   end
 
   # Be aware: The precision of created_at and last_activity_at may differ from Ruby's Time precision.
@@ -300,6 +313,9 @@ class Conversation < ApplicationRecord
   end
 
   def determine_conversation_status
+    # A Junk import arrives resolved and must stay that way; no bot or assistant takes it on.
+    return if junk_import?
+
     self.status = :resolved and return if contact.blocked?
 
     return handle_campaign_status if campaign.present?

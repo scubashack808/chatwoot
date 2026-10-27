@@ -69,6 +69,31 @@ RSpec.describe Inboxes::FetchImapEmailInboxesJob do
   # Plan section 9's rule is the pattern for all mail work in this stack: one scheduler, the
   # existing */1 trigger, the same per-inbox lease. Sent sync rides this fan-out as its own
   # isolated job, so a Sent failure cannot break ingestion and no second cron entry is added.
+  context 'with Junk import' do
+    before do
+      account.enable_features!(:email_mailbox_actions)
+      imap_email_channel.update!(mailbox_sync_config: { 'mode' => 'observe' })
+    end
+
+    it 'enqueues Junk import from the same fan-out, for the same eligible channels' do
+      allow(Inboxes::FetchImapEmailsJob).to receive(:perform_later)
+      expect(Inboxes::ImportImapJunkJob).to receive(:perform_later).with(imap_email_channel).once
+      expect(Inboxes::ImportImapJunkJob).not_to receive(:perform_later).with(imap_email_channel_suspended)
+      expect(Inboxes::ImportImapJunkJob).not_to receive(:perform_later).with(disabled_imap_channel)
+
+      described_class.perform_now
+    end
+
+    it 'enqueues nothing for Junk when the inbox mailbox sync mode is off' do
+      imap_email_channel.update!(mailbox_sync_config: { 'mode' => 'off' })
+      allow(Inboxes::FetchImapEmailsJob).to receive(:perform_later)
+
+      expect(Inboxes::ImportImapJunkJob).not_to receive(:perform_later)
+
+      described_class.perform_now
+    end
+  end
+
   context 'with Sent synchronization' do
     # Sent sync is dark twice over, exactly like reconciliation: the account feature flag AND the
     # per-inbox mode. Without both, nothing is enqueued at all, so a dark feature costs no job.

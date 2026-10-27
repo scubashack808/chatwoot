@@ -15,6 +15,7 @@ class Inboxes::FetchImapEmailInboxesJob < ApplicationJob
       # per-inbox lease, so the jobs on this fan-out defer to each other instead of opening extra
       # connections.
       ::Inboxes::SyncImapSentJob.perform_later(inbox.channel) if should_sync_sent?(inbox)
+      ::Inboxes::ImportImapJunkJob.perform_later(inbox.channel) if should_import_junk?(inbox)
     end
   end
 
@@ -40,6 +41,14 @@ class Inboxes::FetchImapEmailInboxesJob < ApplicationJob
   # Gating at enqueue time rather than only inside the job is what keeps a dark feature free: with
   # either gate off, no job is queued at all, instead of one no-op job per email inbox per minute.
   def should_sync_sent?(inbox)
+    return false unless inbox.account.feature_enabled?('email_mailbox_actions')
+
+    !inbox.channel.mailbox_sync.off?
+  end
+
+  # Junk import reads the server's Junk folder without changing it, so it is gated like Sent sync:
+  # dark until the account flag is on and the inbox's mailbox sync is not off.
+  def should_import_junk?(inbox)
     return false unless inbox.account.feature_enabled?('email_mailbox_actions')
 
     !inbox.channel.mailbox_sync.off?
