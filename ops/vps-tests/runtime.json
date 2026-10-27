@@ -1,0 +1,85 @@
+{
+  "$comment": "Versioned runtime and transport contract for the maintained VPS backend test route (WOOT-32). Read by bin/vps-rspec and by ops/vps-tests/runner.sh. Update this file through the refresh procedure in ops/vps-tests/README.md; never edit it to paper over a mismatch.",
+  "transport": {
+    "host": "100.66.60.55",
+    "port": 41922,
+    "user": "root",
+    "identityFile": "~/.ssh/id_ed25519",
+    "hostKeyAlgorithm": "ssh-ed25519",
+    "hostKeyFingerprint": "SHA256:Qqqft1G6Un608Kny8IjcJ+NzkUTRaDS+JYaUmzS2itM",
+    "strictHostKeyChecking": "yes",
+    "connectTimeoutSeconds": 20
+  },
+  "remote": {
+    "root": "/opt/chatwoot-vps-tests",
+    "runsDir": "/opt/chatwoot-vps-tests/runs",
+    "cachesDir": "/opt/chatwoot-vps-tests/caches",
+    "lockFile": "/opt/chatwoot-vps-tests/route.lock",
+    "lockWaitSeconds": 1800
+  },
+  "image": {
+    "id": "sha256:6a6d171fbbbd92f7436a1d50be5430844a17ccde9d0bc8c9b2a51dff3d874c25",
+    "platform": "linux/amd64",
+    "appPath": "/app",
+    "$comment": "Retained hunt image reused as a candidate runtime. The runner measures the actual toolchain inside it and refuses when the submitted snapshot requires something it cannot satisfy. WOOT-18 cleanup must treat this digest as referenced."
+  },
+  "limits": {
+    "cpus": "4",
+    "memory": "6g",
+    "memorySwap": "6g",
+    "pids": 512
+  },
+  "services": {
+    "networkName": "chatwoot-vps-tests-net",
+    "postgresImage": "pgvector/pgvector:pg16",
+    "redisImage": "redis:alpine",
+    "postgresLimits": { "cpus": "1", "memory": "1g", "pids": 256 },
+    "redisLimits": { "cpus": "0.5", "memory": "256m", "pids": 128 }
+  },
+  "sourceRoots": [
+    "app",
+    "bin",
+    "config",
+    "db",
+    "enterprise",
+    "lib",
+    "ops",
+    "public",
+    "spec",
+    "swagger",
+    "vendor"
+  ],
+  "excludedPrefixes": [
+    ".git/",
+    ".artifacts/",
+    "node_modules/",
+    "tmp/",
+    "log/",
+    "coverage/",
+    "public/vite",
+    "public/packs",
+    "storage/",
+    "scratch/",
+    ".bundle/",
+    "vendor/bundle/"
+  ],
+  "secretPathPatterns": [
+    "^\\.env$",
+    "^\\.env\\.(?!example$|sample$)",
+    "/\\.env$",
+    "master\\.key$",
+    "credentials\\.ya?ml\\.enc$",
+    "^config/credentials/",
+    "\\.p12$",
+    "id_(rsa|ed25519|ecdsa)$"
+  ],
+  "dependencyKeyFiles": [
+    "Gemfile",
+    "Gemfile.lock",
+    ".ruby-version",
+    "package.json",
+    "pnpm-lock.yaml",
+    ".npmrc",
+    "pnpm-workspace.yaml"
+  ]
+}
