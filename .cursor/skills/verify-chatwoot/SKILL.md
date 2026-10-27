@@ -8,7 +8,7 @@ description: Verify Chatwoot's web UI on the approved native synthetic dummy cop
 ## Launch
 
 1. Read this file and [the feature index](features/README.md). This is the repository-owned output of pstack's create-verification-skill workflow, pinned upstream at 0.15.2. The generator itself is unchanged.
-2. Work from ~/Cursor/chatwoot-scubashack808 on chore/woot-38-verification. The separate runtime is ~/Cursor/chatwoot-dummy, candidate d76b96565762a2b491fa444e9870ee216d9f63ca, on MacBook-Air.local. Never substitute the other Mac, VPS or production. This skill requires the existing provisioned native runtime; it does not install one.
+2. Work from ~/Cursor/chatwoot-scubashack808 on chore/woot-38-verification. The separate runtime is ~/Cursor/chatwoot-dummy, candidate d76b96565762a2b491fa444e9870ee216d9f63ca, on MacBook-Air.local (macOS may rename the same Mac MacBook-Air-2.local; both are accepted). Never substitute the other Mac, VPS or production. This skill requires the existing provisioned native runtime; it does not install one.
 3. Read the runtime's .codex/dummy/README.md, ~/.claude/skills/browser-rules/SKILL.md, the installed ~/.claude/skills/browser-harness/SKILL.md and ~/.config/browser-harness/runtime-contract.json. Preserve the single governed Brave and CC01 (Profile 14). No browser installation/restart, alternate driver, personal profile or runtime override.
 4. Inspect current state:
 
@@ -51,7 +51,7 @@ Read [login](features/login.md) and [email reply](features/email-reply.md). Disc
     release_caller()
     PY
 
-Choose the exact synthetic task tab by target ID, full URL, title and Profile 14; never choose the first URL match. Set CHATWOOT_TARGET_ID to that observed ID. Ambiguity is a stop. If no authorized tab exists, use the installed browser-opening procedure first; never allocate a replacement to evade a mismatch. Permitted entries: login, the synthetic dashboard and fixture conversation. Doctor returns current account/display IDs; reset can change the display ID.
+Choose the exact synthetic task tab by target ID, full URL, title and profile; never choose the first URL match. The profile is Profile 14 (CC01) unless --profile names another governed profile directory, never Profile 7 (A-Team); use another one when something in CC01, such as a password manager's save prompt, interferes with typing. Set CHATWOOT_TARGET_ID to that observed ID. Ambiguity is a stop. If no authorized tab exists, use the installed browser-opening procedure first; never allocate a replacement to evade a mismatch. Permitted entries: login, the synthetic dashboard and fixture conversation. Doctor returns current account/display IDs; reset can change the display ID.
 
 Run the complete pilot from the verification checkout:
 

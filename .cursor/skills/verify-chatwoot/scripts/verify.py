@@ -24,7 +24,12 @@ MANAGER = ROOT / '.codex/dummy/manage.py'
 SOCKET = ROOT / 'tmp/dummy/overmind.sock'
 BROWSER = Path.home() / '.local/bin/browser-harness'
 EVIDENCE = SOURCE / 'tmp/verify-chatwoot'
-HOST = 'MacBook-Air.local'
+# The same Mac under both names: macOS renames itself MacBook-Air-2 when another device on the
+# network already answers to MacBook-Air (observed 2026-10-27).
+HOSTS = ('MacBook-Air.local', 'MacBook-Air-2.local')
+DEFAULT_PROFILE = 'Profile 14'
+# Profile 7 (A-Team) holds the business logins and is the harness's own working profile.
+REFUSED_PROFILES = ('Profile 7',)
 SITE = 'http://127.0.0.1:3001'
 MAIL = 'http://127.0.0.1:8025'
 PORTS = {'redis': 6380, 'smtp': 1025, 'mail': 8025, 'backend': 3001, 'vite': 3038}
@@ -84,7 +89,7 @@ def environment():
     return values
 
 def candidate(expected_sha):
-    require(socket.gethostname() == HOST, 'This pilot is authorized only on MacBook-Air.local')
+    require(socket.gethostname() in HOSTS, 'This pilot is authorized only on ' + ' or '.join(HOSTS))
     require(ROOT.resolve() == ROOT and MANAGER.is_file(), 'Provisioned native dummy copy missing')
     require(re.fullmatch(r'[0-9a-f]{40}', expected_sha), 'Expected SHA must be a full commit SHA')
     actual = command(['git', 'rev-parse', 'HEAD']).strip()
@@ -318,7 +323,7 @@ def pilot(args):
         save(directory, 'skill-hashes.json', {str(p.relative_to(SCRIPT_DIR.parent)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files})
         started = False
         lifecycle_touched = False
-        config = {'target_id': args.target_id, 'profile': 'Profile 14', 'directory': str(directory),
+        config = {'target_id': args.target_id, 'profile': args.profile, 'directory': str(directory),
                   'root': str(ROOT), 'marker': marker, 'fixture': initial.get('fixture') or {}}
         receipt['phase'] = 'browser-preflight'
         save(directory, 'receipt.json', receipt)
@@ -419,7 +424,11 @@ def main():
     parser.add_argument('--expected-sha', default=BASE_SHA)
     parser.add_argument('--target-id')
     parser.add_argument('--restart-existing', action='store_true')
+    parser.add_argument('--profile', default=DEFAULT_PROFILE,
+                        help='governed Brave profile directory holding the dummy tab (default: CC01, Profile 14)')
     args = parser.parse_args()
+    require(re.fullmatch(r'Profile [0-9]+', args.profile) and args.profile not in REFUSED_PROFILES,
+            'Profile must be a governed profile directory such as "Profile 14", never ' + ', '.join(REFUSED_PROFILES))
     if args.action == 'doctor':
         result = doctor(args.expected_sha)
         print(json.dumps(result, indent=2))

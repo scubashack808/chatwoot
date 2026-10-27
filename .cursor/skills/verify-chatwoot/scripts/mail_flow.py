@@ -168,7 +168,7 @@ def guard_existing_drafts():
 result = {'ok': False, 'marker': MARKER}
 adopted = False
 try:
-    tabs = discover_tabs(include_chrome=False, profile='Profile 14')
+    tabs = discover_tabs(include_chrome=False, profile=CONFIG.get('profile', 'Profile 14'))
     matches = [tab for tab in tabs if tab['targetId'] == CONFIG['target_id']]
     if len(matches) != 1:
         raise RuntimeError('Exactly discovered target is absent; rediscover instead of opening another tab')
@@ -179,7 +179,7 @@ try:
         allowed.add(tab['url'])
     approved_tab = CONFIG.get('approved_tab', {})
     owned_restart_error = CONFIG.get('mode') == 'journey' and tab['title'] == '127.0.0.1' and approved_tab.get('targetId') == tab['targetId'] and approved_tab.get('profile') == tab.get('profile')
-    if tab['url'] not in allowed or tab.get('profile') != 'Profile 14' or (tab['title'] not in ('Chatwoot Dummy', '🟢 Chatwoot Dummy') and not owned_restart_error):
+    if tab['url'] not in allowed or tab.get('profile') != CONFIG.get('profile', 'Profile 14') or (tab['title'] not in ('Chatwoot Dummy', '🟢 Chatwoot Dummy') and not owned_restart_error):
         raise RuntimeError('Target URL/title/profile does not match the synthetic pilot')
     if any(t['targetId'] != tab['targetId'] and t['url'].startswith(SITE + '/app/') for t in tabs):
         raise RuntimeError('Another dummy app tab shares this login; refusing cross-tab logout. Close only a proven task-created duplicate or ask its owner.')

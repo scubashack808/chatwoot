@@ -4,7 +4,7 @@ Read this index before driving. Canonical skill: [../SKILL.md](../SKILL.md).
 
 ## Baseline preconditions
 
-- Approved native copy on MacBook-Air.local, candidate d76b96565762a2b491fa444e9870ee216d9f63ca.
+- Approved native copy on MacBook-Air.local (or the same Mac renamed MacBook-Air-2.local), candidate d76b96565762a2b491fa444e9870ee216d9f63ca.
 - Account Chatwoot Dummy, agent agent@chatwoot-dummy.test, inbox Dummy Email, contact Synthetic Customer (customer@chatwoot-dummy.test).
 - Unique incoming fixture: Synthetic booking question. Can you confirm the test reservation?
 - Doctor discovers IDs. Reset preserves the display-ID sequence; never assume display ID 1.
