@@ -24,7 +24,9 @@ MANAGER = ROOT / '.codex/dummy/manage.py'
 SOCKET = ROOT / 'tmp/dummy/overmind.sock'
 BROWSER = Path.home() / '.local/bin/browser-harness'
 EVIDENCE = SOURCE / 'tmp/verify-chatwoot'
-HOST = 'MacBook-Air.local'
+# The same Mac under both names: macOS renames itself MacBook-Air-2 when another device on the
+# network already answers to MacBook-Air (observed 2026-10-27).
+HOSTS = ('MacBook-Air.local', 'MacBook-Air-2.local')
 SITE = 'http://127.0.0.1:3001'
 MAIL = 'http://127.0.0.1:8025'
 PORTS = {'redis': 6380, 'smtp': 1025, 'mail': 8025, 'backend': 3001, 'vite': 3038}
@@ -84,7 +86,7 @@ def environment():
     return values
 
 def candidate(expected_sha):
-    require(socket.gethostname() == HOST, 'This pilot is authorized only on MacBook-Air.local')
+    require(socket.gethostname() in HOSTS, 'This pilot is authorized only on ' + ' or '.join(HOSTS))
     require(ROOT.resolve() == ROOT and MANAGER.is_file(), 'Provisioned native dummy copy missing')
     require(re.fullmatch(r'[0-9a-f]{40}', expected_sha), 'Expected SHA must be a full commit SHA')
     actual = command(['git', 'rev-parse', 'HEAD']).strip()

@@ -150,6 +150,18 @@ class DoctorTests(unittest.TestCase):
             result = verify.doctor(verify.ZERO_SHA)
         self.assertFalse(result['ok']); self.assertEqual(result['check'], 'candidate'); services.assert_not_called()
 
+    def test_only_this_macs_names_are_authorized(self):
+        for host in verify.HOSTS:
+            # Later candidate checks need the real runtime; only the host gate is under test here.
+            with patch.object(verify.socket, 'gethostname', return_value=host), patch.object(verify, 'command', side_effect=RuntimeError('past host gate')):
+                with self.assertRaises(RuntimeError) as refused:
+                    verify.candidate(verify.BASE_SHA)
+            self.assertNotIn('authorized only on', str(refused.exception))
+        with patch.object(verify.socket, 'gethostname', return_value='other-mac.local'), patch.object(verify, 'command') as command:
+            with self.assertRaisesRegex(RuntimeError, 'authorized only on'):
+                verify.candidate(verify.BASE_SHA)
+        command.assert_not_called()
+
     def test_stopped_site_precedes_http_and_database(self):
         with patch.object(verify, 'candidate', return_value=verify.BASE_SHA), patch.object(verify, 'owned_services', side_effect=RuntimeError('down')), patch.object(verify, 'get') as http, patch.object(verify, 'fixture') as fixture:
             result = verify.doctor()
