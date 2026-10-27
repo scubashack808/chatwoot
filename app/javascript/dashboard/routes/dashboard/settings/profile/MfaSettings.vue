@@ -24,6 +24,8 @@ const provisioningUri = ref('');
 const qrCodeUrl = ref('');
 const secretKey = ref('');
 const backupCodes = ref([]);
+const isVerifying = ref(false);
+const setupVerified = ref(false);
 
 // Component refs
 const setupWizardRef = ref(null);
@@ -69,6 +71,7 @@ const startMfaSetup = async () => {
     secretKey.value = response.data.secret;
     // Backup codes are now generated after verification, not during enable
     backupCodes.value = [];
+    setupVerified.value = false;
     showSetup.value = true;
   } catch (error) {
     useAlert(t('MFA_SETTINGS.SETUP.ERROR_STARTING'));
@@ -77,23 +80,31 @@ const startMfaSetup = async () => {
 
 // Verify OTP code
 const verifyCode = async verificationCode => {
+  if (isVerifying.value) return;
+
+  isVerifying.value = true;
   try {
     const response = await mfaAPI.verify(verificationCode);
     // Store backup codes returned from verification
     if (response.data.backup_codes) {
       backupCodes.value = response.data.backup_codes;
     }
-    return true;
+    setupVerified.value = true;
+    setupWizardRef.value?.handleVerificationSuccess();
   } catch (error) {
     setupWizardRef.value?.handleVerificationError(
       error.response?.data?.error || t('MFA_SETTINGS.SETUP.INVALID_CODE')
     );
-    throw error;
+  } finally {
+    isVerifying.value = false;
   }
 };
 
 // Complete MFA setup
 const completeMfaSetup = () => {
+  if (!setupVerified.value) return;
+
+  setupVerified.value = false;
   mfaEnabled.value = true;
   backupCodesGenerated.value = true;
   showSetup.value = false;
@@ -103,6 +114,7 @@ const completeMfaSetup = () => {
 
 // Cancel setup
 const cancelSetup = () => {
+  setupVerified.value = false;
   showSetup.value = false;
 };
 
@@ -160,6 +172,7 @@ const regenerateBackupCodes = async ({ otpCode }) => {
         :secret-key="secretKey"
         :backup-codes="backupCodes"
         :qr-code-url-prop="qrCodeUrl"
+        :is-verifying="isVerifying"
         @cancel="cancelSetup"
         @verify="verifyCode"
         @complete="completeMfaSetup"
