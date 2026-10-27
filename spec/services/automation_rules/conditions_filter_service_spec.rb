@@ -257,6 +257,58 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       end
     end
 
+    context 'when combining contact custom not-equal and email conditions' do
+      let(:custom_condition) do
+        { values: ['platinum'], attribute_key: 'customer_type', custom_attribute_type: 'contact_attribute', filter_operator: 'not_equal_to' }
+      end
+      let(:email_condition) do
+        { values: ['selected@example.test'], attribute_key: 'email', filter_operator: 'equal_to' }
+      end
+
+      before do
+        create(:custom_attribute_definition, account: account, attribute_key: 'customer_type',
+                                             attribute_model: 'contact_attribute', attribute_display_type: 'text')
+        conversation.contact.update!(email: 'selected@example.test', custom_attributes: { customer_type: 'gold' })
+      end
+
+      %i[custom_first email_first].each do |order|
+        context "with #{order}" do
+          before do
+            conditions = order == :custom_first ? [custom_condition, email_condition] : [email_condition, custom_condition]
+            rule.update!(conditions: [conditions.first.merge(query_operator: 'AND'), conditions.last.merge(query_operator: nil)])
+          end
+
+          it 'matches a gold contact with the selected email' do
+            expect(described_class.new(rule, conversation, { changed_attributes: {} }).perform).to be(true)
+          end
+
+          it 'matches a missing custom value with the selected email' do
+            conversation.contact.update!(custom_attributes: {})
+
+            expect(described_class.new(rule, conversation, { changed_attributes: {} }).perform).to be(true)
+          end
+
+          it 'matches a null custom value with the selected email' do
+            conversation.contact.update!(custom_attributes: { customer_type: nil })
+
+            expect(described_class.new(rule, conversation, { changed_attributes: {} }).perform).to be(true)
+          end
+
+          it 'excludes a platinum contact with the selected email' do
+            conversation.contact.update!(custom_attributes: { customer_type: 'platinum' })
+
+            expect(described_class.new(rule, conversation, { changed_attributes: {} }).perform).to be(false)
+          end
+
+          it 'excludes a missing custom value with a different email' do
+            conversation.contact.update!(email: 'other@example.test', custom_attributes: {})
+
+            expect(described_class.new(rule, conversation, { changed_attributes: {} }).perform).to be(false)
+          end
+        end
+      end
+    end
+
     context 'when conditions based on contact country_code' do
       before do
         conversation.update(additional_attributes: { country_code: 'US' })

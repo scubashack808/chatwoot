@@ -27,15 +27,16 @@ module Filters::CustomAttributeFilterHelper
 
     query = if attribute_data_type == 'text'
               ActiveRecord::Base.sanitize_sql_array(
-                ["LOWER(#{table_name}.custom_attributes ->> ?)::#{attribute_data_type} #{filter_operator_value} #{query_operator} ", @attribute_key]
+                ["LOWER(#{table_name}.custom_attributes ->> ?)::#{attribute_data_type} #{filter_operator_value}", @attribute_key]
               )
             else
               ActiveRecord::Base.sanitize_sql_array(
-                ["(#{table_name}.custom_attributes ->> ?)::#{attribute_data_type} #{filter_operator_value} #{query_operator} ", @attribute_key]
+                ["(#{table_name}.custom_attributes ->> ?)::#{attribute_data_type} #{filter_operator_value}", @attribute_key]
               )
             end
 
-    query + not_in_custom_attr_query(table_name, query_hash, attribute_data_type)
+    query += not_in_custom_attr_query(table_name, query_hash, attribute_data_type)
+    "(#{query}) #{query_operator} "
   end
 
   def validate_custom_attribute_values!(query_hash)
