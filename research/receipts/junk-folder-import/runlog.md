@@ -49,7 +49,7 @@ resolution, against production's own discovery code and the real mailboxes.
   0 messages; inboxes 3 and 12 → `[Gmail]/Spam` (discovered), 0 messages; inbox 1 → lease busy (a live
   poll held it, which is expected and not a failure). Mode-off inboxes 10 and 11 were not probed.
 
-### Replica rehearsal, candidate `0821560f4`: 20/20 (`replica-output.txt`)
+### Replica rehearsal: 20/20 on `0821560f4`, rerun 20/20 on `b22bb08f8` (`replica-output.txt` is the latest)
 
 | Term | Result |
 |---|---|
@@ -69,17 +69,40 @@ fixed in `0821560f4`, with a spec asserting that no body is fetched for mail alr
 same run also reported a T5 failure, which was a flaw in the script: it counted the setup
 conversation's own notification. The check now scopes to junk conversations and adds the control.
 
-### Code layer
+### Code layer (final candidate `b22bb08f8`)
 
-- Specs, candidate `0821560f4`: `spec/services/imap spec/jobs/inboxes spec/jobs/email_mailbox_operation_job_spec.rb
-  spec/mailboxes spec/listeners/notification_listener_spec.rb spec/finders/conversation_finder_spec.rb
-  spec/models/message_spec.rb spec/models/conversation_spec.rb spec/enterprise/jobs/inboxes
-  spec/requests/api/v1/accounts/conversation_mailbox_operations_spec.rb` → **774 examples, 0 failures**.
-- The same command at base `cf0146223` → **755 examples, 0 failures** (base green; +19 new examples).
-- Mutation check: with `return if skip_conversation_reopen` removed, the two "stays resolved" examples fail.
-- RuboCop on every changed Ruby file: no offenses.
+- Specs: `spec/services/imap spec/jobs/inboxes spec/jobs/email_mailbox_operation_job_spec.rb spec/mailboxes
+  spec/listeners/notification_listener_spec.rb spec/finders/conversation_finder_spec.rb spec/models/message_spec.rb
+  spec/models/conversation_spec.rb spec/models/email_mailbox_operation_spec.rb spec/enterprise/jobs/inboxes
+  spec/requests/api/v1/accounts/conversation_mailbox_operations_spec.rb spec/services/message_templates
+  spec/enterprise/models/conversation_spec.rb` → **838 examples, 0 failures**.
+- The same command at base `cf0146223` → **810 examples, 0 failures** (base green; +28 new examples).
+- Mutation checks, each guard removed and its spec observed to fail: `skip_conversation_reopen` (2
+  examples), the `junk_import?` early return in `determine_conversation_status` (bot inbox), the hook
+  guard (greeting/out-of-office), `partially_succeeded?` in restore, and the reconciliation
+  "Not spam" restore. 4 of 4 in the final batch failed with their guard removed.
+- RuboCop on all 20 changed Ruby files: no offenses.
 - ESLint: not run. The worktree has no `node_modules`, and the only frontend change is three en
   locale JSON strings, which ESLint does not lint. The JSON parses.
+
+### Independent adversarial review (fresh agent, no authoring context, against `0821560f4`)
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| A bot or Captain inbox turns the created conversation `pending`/`open` (`determine_conversation_status`) | blocker | **Fixed** in `b22bb08f8`, spec added |
+| Other quiet paths: greeting/out-of-office auto-replies to the spammer | blocker (part) | **Fixed**: hook skips junk conversations, spec added |
+| Other quiet paths: automation rules, webhooks, CRM hooks, dashboard audio alert still see `conversation_created`/`message_created` | blocker (part) | **Accepted, documented.** Production has 0 automation rules, 0 webhooks, 0 integration hooks, no agent bots or Captain, and no user has audio alerts on (default `none`), checked read-only 2026-10-27. T5's wording (no `conversation_creation` notification) holds; "quiet" for these other consumers is not claimed |
+| Duplicate Message-ID within one Junk batch creates two conversations | should-fix | **Fixed**: in-batch dedup, spec added |
+| Rejected or failing mail re-fetched every minute and can hold the cap; `imported` overcounted | should-fix | **Fixed**: skip marker (3 days, beyond the SINCE window) for rejected mail and after 3 failures; `imported` counts only created messages; blank Message-IDs counted. Specs added |
+| Overlapping cycles could race, since processing happens outside the lease | should-fix | **Accepted**: same structure as the existing INBOX fetch (`FetchImapEmailsJob` also processes after releasing the lease). Not changed here |
+| Restore reopens only on `succeeded`; a reopen error would fail a moved operation | should-fix | **Fixed**: also on `partially_succeeded`, errors captured not raised. Spec added |
+| "Not spam" in Roundcube leaves the conversation resolved and marked junk | should-fix | **Fixed**: reconciliation restores it when the message is back in INBOX with no spam location. Spec added, including the negative case (moved to Trash stays junk) |
+| Gmail junk identities lack `X-GM-MSGID` | nit | **Fixed**, spec added |
+| Junk threading into an ordinary conversation also puts it on the Junk tab | nit | **Accepted**: that is how the existing role filter works (an EXISTS over each message) |
+| A fourth job per inbox per minute contends for the lease | nit | **Accepted**: retries use the existing bounded jitter. Not measured under live load (see unmet) |
+| Spec stubs ignore SINCE | nit | **Accepted**: SINCE is exercised against real Dovecot in the replica |
+
+The reviewer could not falsify T2, T3, T8's gates, T9's en relabel, or the `skip_conversation_reopen` timing.
 
 ### Unmet or unexercised
 
@@ -88,6 +111,8 @@ conversation's own notification. The check now scopes to junk conversations and 
 - **T9 on the real UI: unexercised.** The Junk label was not visually checked in a running dashboard.
 - **Operational layer** (restart, upgrade, lease contention under real load): only the job's
   lease-retry path, by spec. There was no soak against the live 61-messages-a-day info@ volume.
+- Cache note: the skip marker uses `Rails.cache`, the same store `FetchImapEmailsJob` uses for its
+  failure counter. In tests it is `null_store`, so the skip specs swap in a `MemoryStore`.
 - Scope note: the pre-commit hook was skipped (`--no-verify`) because it needs `node_modules`. Its
   two steps (eslint on staged js/vue, of which there are none, and rubocop on staged Ruby) were run
   by hand above.
