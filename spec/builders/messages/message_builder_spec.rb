@@ -352,6 +352,16 @@ describe Messages::MessageBuilder do
       expect(message.attachments.map { |attachment| attachment.file.blob.id }).to eq(source.attachments.map { |attachment| attachment.file.blob.id })
     end
 
+    it 'does not count as a reply to the customer' do
+      waiting_since = 1.hour.ago.round
+      conversation.update!(waiting_since: waiting_since, first_reply_created_at: nil)
+
+      message_builder
+
+      expect(conversation.reload.waiting_since).to eq(waiting_since)
+      expect(conversation.first_reply_created_at).to be_nil
+    end
+
     it 'does not double the forward prefix' do
       source.update!(content_attributes: source.content_attributes.merge(email: { subject: 'Fwd: Invoice 42' }))
 
@@ -360,7 +370,7 @@ describe Messages::MessageBuilder do
 
     it 'refuses a source message from another conversation' do
       other_message = create(:message, account: account, inbox: channel_email.inbox,
-                                        conversation: create(:conversation, inbox: channel_email.inbox, account: account))
+                                       conversation: create(:conversation, inbox: channel_email.inbox, account: account))
       params[:content_attributes] = { forwarded_message_id: other_message.id }
 
       expect { message_builder }.to raise_error(ActiveRecord::RecordNotFound)

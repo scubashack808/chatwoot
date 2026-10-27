@@ -66,6 +66,10 @@ const getters = {
     const lastEmail = [...messages].reverse().find(message => {
       const { message_type: messageType } = message;
       if (message.private) return false;
+      // A forward went to other people; replies stay addressed to the conversation's own thread.
+      const contentAttributes =
+        message.content_attributes || message.contentAttributes;
+      if (contentAttributes?.forwarded_message_id) return false;
 
       return [MESSAGE_TYPE.OUTGOING, MESSAGE_TYPE.INCOMING].includes(
         messageType
