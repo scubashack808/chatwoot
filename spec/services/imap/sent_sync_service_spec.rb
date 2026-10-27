@@ -401,6 +401,46 @@ RSpec.describe Imap::SentSyncService do
       expect(conversation.messages.where(source_id: external_message_id).count).to eq 1
     end
 
+    context 'when the Sent search exceeds one bounded pass' do
+      let(:config) { { 'mode' => 'active', 'sent_mode' => 'provider_managed' } }
+      let(:external_uid) { 1 }
+
+      it 'resumes persisted progress through orchestration and imports early and late replies exactly once' do
+        batches = []
+        late_raw = external_raw.sub(external_message_id, 'late-reply@example.test')
+        allow(imap).to receive(:uid_search).with(array_including('SINCE')).and_return((1..101).to_a.reverse)
+        allow(imap).to receive(:uid_fetch).with(anything, array_including('BODY.PEEK[HEADER]')) do |uids, _attributes|
+          batches << uids
+          uids.map do |uid|
+            header = case uid
+                     when 1 then external_raw
+                     when 101 then late_raw
+                     else "Message-ID: <unthreaded-#{uid}@example.test>\n\n"
+                     end
+            instance_double(Net::IMAP::FetchData, attr: { 'UID' => uid, 'BODY[HEADER]' => header })
+          end
+        end
+        allow(imap).to receive(:uid_fetch).with(101, array_including('BODY.PEEK[]')).and_return(
+          [instance_double(Net::IMAP::FetchData, attr: { 'UID' => 101, 'BODY[]' => late_raw })]
+        )
+
+        first = described_class.new(channel: Channel::Email.find(channel.id)).perform
+        expect([first[:inbound][:imported], channel.reload.sent_import_progress['pending_uids']]).to eq [1, [101]]
+
+        second = described_class.new(channel: Channel::Email.find(channel.id)).perform
+        expect([second[:inbound][:imported], channel.reload.sent_import_progress['pending_uids']]).to eq [1, []]
+        expect(batches).to eq [(1..100).to_a, [101]]
+        expect(imap).to have_received(:uid_search).with(array_including('SINCE')).once
+
+        2.times { described_class.new(channel: Channel::Email.find(channel.id)).perform }
+
+        expect(batches).to all(satisfy { |uids| uids.uniq.length == uids.length && uids.length <= 100 })
+        expect(conversation.messages.where(source_id: [external_message_id, 'late-reply@example.test']).reorder(nil).group(:source_id).count)
+          .to eq(external_message_id => 1, 'late-reply@example.test' => 1)
+        expect(imap).not_to have_received(:append)
+      end
+    end
+
     it 'creates no contact and no conversation for an unthreaded external message' do
       unthreaded = "From: care@example.test\nTo: stranger@example.test\nSubject: cold\nMessage-ID: <cold@example.test>\n\n"
       allow(imap).to receive(:uid_fetch).with([external_uid], array_including('BODY.PEEK[HEADER]')).and_return(

@@ -16,6 +16,7 @@
 #  mailbox_sync_config       :jsonb            not null
 #  provider                  :string
 #  provider_config           :jsonb
+#  sent_import_progress      :jsonb            not null
 #  smtp_address              :string           default("")
 #  smtp_authentication       :string           default("login")
 #  smtp_domain               :string           default("")
