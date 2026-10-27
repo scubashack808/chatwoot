@@ -30,8 +30,8 @@ export const actions = {
   setCurrentPage({ commit }, { filter, page }) {
     commit(types.default.SET_CURRENT_PAGE, { filter, page });
   },
-  setEndReached({ commit }, { filter }) {
-    commit(types.default.SET_CONVERSATION_END_REACHED, { filter });
+  setEndReached({ commit }, { filter, endReached = true }) {
+    commit(types.default.SET_CONVERSATION_END_REACHED, { filter, endReached });
   },
   reset({ commit }) {
     commit(types.default.CLEAR_CONVERSATION_PAGE);
@@ -45,17 +45,20 @@ export const mutations = {
       [filter]: page,
     };
   },
-  [types.default.SET_CONVERSATION_END_REACHED]: ($state, { filter }) => {
+  [types.default.SET_CONVERSATION_END_REACHED]: (
+    $state,
+    { filter, endReached = true }
+  ) => {
     if (filter === 'all') {
       $state.hasEndReached = {
         ...$state.hasEndReached,
-        unassigned: true,
-        me: true,
+        unassigned: endReached,
+        me: endReached,
       };
     }
     $state.hasEndReached = {
       ...$state.hasEndReached,
-      [filter]: true,
+      [filter]: endReached,
     };
   },
   [types.default.CLEAR_CONVERSATION_PAGE]: $state => {

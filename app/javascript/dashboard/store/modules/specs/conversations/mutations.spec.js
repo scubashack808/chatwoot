@@ -81,6 +81,67 @@ describe('#mutations', () => {
   });
 
   describe('#UPDATE_CONVERSATION_MAILBOX', () => {
+    it.each(['running', 'succeeded'])(
+      'updates external placement without replacing a %s operation',
+      status => {
+        const operation = { id: 90, status, attempt_count: 1 };
+        const conversation = { id: 42, mailbox_operation: operation };
+        const state = { allConversations: [conversation] };
+        const mailboxState = { state: 'trash', roles: ['trash'] };
+        mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+          conversationId: 42,
+          mailboxState,
+          stateOnly: true,
+        });
+        expect(conversation.mailbox_state).toEqual(mailboxState);
+        expect(conversation.mailbox_operation).toBe(operation);
+      }
+    );
+
+    it('deletes invalidated state without deleting the operation', () => {
+      const operation = { id: 90, status: 'running' };
+      const conversation = {
+        id: 42,
+        mailbox_operation: operation,
+        mailbox_state: { state: 'inbox' },
+      };
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](
+        { allConversations: [conversation] },
+        { conversationId: 42, stateOnly: true }
+      );
+      expect(conversation).not.toHaveProperty('mailbox_state');
+      expect(conversation.mailbox_operation).toBe(operation);
+    });
+
+    it('does not insert unloaded conversations on a state-only update', () => {
+      const state = { allConversations: [] };
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+        conversationId: 42,
+        stateOnly: true,
+        mailboxState: { state: 'archive' },
+      });
+      expect(state.allConversations).toEqual([]);
+    });
+
+    it('rejects an older forward operation after a state-only update', () => {
+      const operation = { id: 90, status: 'succeeded' };
+      const conversation = { id: 42, mailbox_operation: operation };
+      const state = { allConversations: [conversation] };
+      const mailboxState = { state: 'trash', roles: ['trash'] };
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+        conversationId: 42,
+        stateOnly: true,
+        mailboxState,
+      });
+      mutations[types.UPDATE_CONVERSATION_MAILBOX](state, {
+        conversationId: 42,
+        mailboxOperation: { id: 89, status: 'succeeded' },
+        mailboxState: { state: 'inbox' },
+      });
+      expect(conversation.mailbox_operation).toBe(operation);
+      expect(conversation.mailbox_state).toBe(mailboxState);
+    });
+
     it('applies the server payload to the matching conversation', () => {
       const state = {
         allConversations: [

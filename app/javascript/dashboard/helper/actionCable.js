@@ -160,6 +160,7 @@ class ActionCableConnector extends BaseActionCableConnector {
       mailbox_state: mailboxState,
     } = data;
     const payload = { conversationId, mailboxOperation, mailboxState };
+    if (data.state_only === true) payload.stateOnly = true;
     this.app.$store.dispatch('applyMailboxOperationUpdate', payload);
     emitter.emit(BUS_EVENTS.MAILBOX_OPERATION_UPDATED, payload);
   };

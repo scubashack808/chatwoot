@@ -319,6 +319,49 @@ describe ActionCableListener do
     end
   end
 
+  describe 'state-only mailbox publication' do
+    let(:agent_without_inbox_access) { create(:user, account: account, role: :agent) }
+    let!(:other_account_agent) { create(:user, account: create(:account), role: :agent) }
+    let(:mailbox_state) do
+      { state: 'archive', roles: ['archive'], tracked_count: 1, untracked_count: 0, missing_count: 0, conflict_count: 0 }
+    end
+    let(:event_data) do
+      { account_id: account.id, inbox_id: inbox.id, conversation_id: conversation.display_id, state_only: true }
+    end
+
+    it 'broadcasts safe state exclusively to inbox agents and account administrators' do
+      agent_without_inbox_access
+      event = Events::Base.new(:'conversation.mailbox_operation_updated', Time.zone.now, event_data.merge(mailbox_state: mailbox_state))
+      expect(ActionCableBroadcastJob).to receive(:perform_later).with(
+        a_collection_containing_exactly(agent.pubsub_token, admin.pubsub_token),
+        'conversation.mailbox_operation_updated',
+        { account_id: account.id, conversation_id: conversation.display_id, state_only: true, mailbox_state: mailbox_state }
+      ).once
+
+      listener.conversation_mailbox_operation_updated(event)
+    end
+
+    it 'preserves absent operation and state keys for an invalidation' do
+      event = Events::Base.new(:'conversation.mailbox_operation_updated', Time.zone.now, event_data)
+      expect(ActionCableBroadcastJob).to receive(:perform_later).with(
+        a_collection_containing_exactly(agent.pubsub_token, admin.pubsub_token),
+        'conversation.mailbox_operation_updated',
+        { account_id: account.id, conversation_id: conversation.display_id, state_only: true }
+      ).once
+
+      listener.conversation_mailbox_operation_updated(event)
+    end
+
+    it 'does not broadcast an inbox belonging to a different account' do
+      event = Events::Base.new(
+        :'conversation.mailbox_operation_updated', Time.zone.now, event_data.merge(account_id: other_account_agent.accounts.first.id)
+      )
+      expect(ActionCableBroadcastJob).not_to receive(:perform_later)
+
+      listener.conversation_mailbox_operation_updated(event)
+    end
+  end
+
   describe '#conversation_unread_count_changed' do
     let(:event_name) { :'conversation.unread_count_changed' }
     let!(:agent_without_inbox_access) { create(:user, account: account, role: :agent) }

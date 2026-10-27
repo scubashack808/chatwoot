@@ -1,6 +1,8 @@
 import { describe, it, beforeEach, afterEach, expect, vi } from 'vitest';
 import ActionCableConnector from '../actionCable';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
+import { emitter } from 'shared/helpers/mitt';
+import { BUS_EVENTS } from 'shared/constants/busEvents';
 
 vi.mock('shared/helpers/mitt', () => ({
   emitter: {
@@ -379,6 +381,32 @@ describe('ActionCableConnector - Copilot Tests', () => {
   });
 
   describe('conversation mailbox operation event handlers', () => {
+    it.each([{ state: 'archive', roles: ['archive'] }, undefined])(
+      'forwards state-only updates and invalidations to store and list listeners (%s)',
+      mailboxState => {
+        const data = { account_id: 1, conversation_id: 42, state_only: true };
+        if (mailboxState) data.mailbox_state = mailboxState;
+        actionCable.onReceived({
+          event: 'conversation.mailbox_operation_updated',
+          data,
+        });
+        const payload = {
+          conversationId: 42,
+          mailboxOperation: undefined,
+          mailboxState,
+          stateOnly: true,
+        };
+        expect(mockDispatch).toHaveBeenCalledWith(
+          'applyMailboxOperationUpdate',
+          payload
+        );
+        expect(emitter.emit).toHaveBeenCalledWith(
+          BUS_EVENTS.MAILBOX_OPERATION_UPDATED,
+          payload
+        );
+      }
+    );
+
     it('registers the dedicated mailbox operation event', () => {
       expect(Object.keys(actionCable.events)).toContain(
         'conversation.mailbox_operation_updated'

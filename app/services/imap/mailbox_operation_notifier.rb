@@ -22,4 +22,21 @@ class Imap::MailboxOperationNotifier
   rescue StandardError => e
     Rails.logger.warn "[IMAP::MAILBOX_OPERATION] Event dispatch failed for operation #{operation.id}: #{e.class}."
   end
+
+  def self.publish_state(conversation:, previous_state:)
+    state = Imap::ConversationMailboxState.publishable(conversation: conversation)&.to_h
+    return if state == previous_state
+
+    data = {
+      account_id: conversation.account_id,
+      inbox_id: conversation.inbox_id,
+      conversation_id: conversation.display_id,
+      state_only: true
+    }
+    data[:mailbox_state] = state if state
+
+    Rails.configuration.dispatcher.dispatch(Events::Types::CONVERSATION_MAILBOX_OPERATION_UPDATED, Time.zone.now, data)
+  rescue StandardError => e
+    Rails.logger.warn "[IMAP::MAILBOX_OPERATION] State event dispatch failed for conversation #{conversation.id}: #{e.class}."
+  end
 end

@@ -61,14 +61,40 @@ class Imap::MailboxReconciliationService
     return Imap::ReconciliationReport.skipped(inbox_id: channel.inbox.id, reason: reason) if reason
 
     Imap::BaseFetchEmailService.for(channel).with_connection do |client, session|
-      next scan_and_reconcile(client, session, nil) if full_scan_due?
-
-      probe = probe_server(client, session)
-      probe.settled? ? settled(probe) : scan_and_reconcile(client, session, probe)
+      @previous_mailbox_states = {}
+      begin
+        reconcile_server(client, session)
+      ensure
+        # Writes already committed before a failure must still reach agents; a later unchanged cycle
+        # compares against the written state and would never publish them.
+        publish_changed_states
+      end
     end
   end
 
   private
+
+  def publish_changed_states
+    @previous_mailbox_states.each_value do |conversation, previous_state|
+      Imap::MailboxOperationNotifier.publish_state(conversation: conversation, previous_state: previous_state)
+    end
+  end
+
+  def reconcile_server(client, session)
+    return scan_and_reconcile(client, session, nil) if full_scan_due?
+
+    probe = probe_server(client, session)
+    probe.settled? ? settled(probe) : scan_and_reconcile(client, session, probe)
+  end
+
+  # Snapshot before the first write, then publish the final conversation state while still leased.
+  def write_identity(message, identity)
+    @previous_mailbox_states[message.conversation_id] ||= begin
+      conversation = message.conversation
+      [conversation, Imap::ConversationMailboxState.publishable(conversation: conversation)&.to_h]
+    end
+    message.write_imap_identity!(identity)
+  end
 
   def scan_and_reconcile(client, session, probe)
     report = reconcile(read_server(client, session), probe)
@@ -117,7 +143,7 @@ class Imap::MailboxReconciliationService
       identity = message.imap_identity
       next if identity.nil?
 
-      message.write_imap_identity!(identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_VERIFIED))
+      write_identity(message, identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_VERIFIED))
     end
 
     ids.length
@@ -198,7 +224,7 @@ class Imap::MailboxReconciliationService
     locations = ordered_locations(hits)
     return record_unchanged_locations(message, identity, report) if identity.locations == locations
 
-    message.write_imap_identity!(identity.with_locations(locations, provider_id: shared_provider_id(hits)))
+    write_identity(message, identity.with_locations(locations, provider_id: shared_provider_id(hits)))
     report[change_kind(identity, locations)] += 1
   end
 
@@ -207,7 +233,7 @@ class Imap::MailboxReconciliationService
   def record_unchanged_locations(message, identity, report)
     return report[:unchanged] += 1 if identity.sync_state == Imap::MessageIdentity::SYNC_STATE_VERIFIED
 
-    message.write_imap_identity!(identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_VERIFIED))
+    write_identity(message, identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_VERIFIED))
     report[:recovered] += 1
   end
 
@@ -219,11 +245,11 @@ class Imap::MailboxReconciliationService
       tombstones << message.source_id
       report[:still_missing] += 1
     when Imap::MessageIdentity::SYNC_STATE_STALE
-      message.write_imap_identity!(identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_MISSING))
+      write_identity(message, identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_MISSING))
       tombstones << message.source_id
       report[:marked_missing] += 1
     else
-      message.write_imap_identity!(identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_STALE))
+      write_identity(message, identity.with_sync_state(Imap::MessageIdentity::SYNC_STATE_STALE))
       report[:absent_once] += 1
     end
   end

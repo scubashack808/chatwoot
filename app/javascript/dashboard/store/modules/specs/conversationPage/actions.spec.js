@@ -17,7 +17,10 @@ describe('#actions', () => {
     it('sends correct actions', () => {
       actions.setEndReached({ commit }, { filter: 'me' });
       expect(commit.mock.calls).toEqual([
-        [types.default.SET_CONVERSATION_END_REACHED, { filter: 'me' }],
+        [
+          types.default.SET_CONVERSATION_END_REACHED,
+          { filter: 'me', endReached: true },
+        ],
       ]);
     });
   });
