@@ -130,6 +130,43 @@ RSpec.describe 'Profile API', type: :request do
         expect(json_response['message_signature']).to eq('Thanks\nMy Signature')
       end
 
+      it 'preserves the display name when updating only the signature' do
+        agent.update!(display_name: 'Dive Guide')
+
+        put '/api/v1/profile',
+            params: { profile: { message_signature: 'Thanks, Synthetic' } },
+            headers: agent.create_new_auth_token
+
+        expect(response).to have_http_status(:success)
+        agent.reload
+        expect(agent.display_name).to eq('Dive Guide')
+        expect(agent.message_signature).to eq('Thanks, Synthetic')
+      end
+
+      it 'replaces the display name with a nonempty value' do
+        agent.update!(display_name: 'Dive Guide')
+
+        put '/api/v1/profile',
+            params: { profile: { display_name: 'Captain' } },
+            headers: agent.create_new_auth_token
+
+        expect(response).to have_http_status(:success)
+        expect(agent.reload.display_name).to eq('Captain')
+      end
+
+      it 'clears the display name and falls back to the full name' do
+        agent.update!(name: 'Synthetic User', display_name: 'Dive Guide')
+
+        put '/api/v1/profile',
+            params: { profile: { display_name: '' } },
+            headers: agent.create_new_auth_token
+
+        expect(response).to have_http_status(:success)
+        agent.reload
+        expect(agent.display_name).to eq('')
+        expect(agent.available_name).to eq('Synthetic User')
+      end
+
       it 'updates the password when current password is provided' do
         put '/api/v1/profile',
             params: { profile: { current_password: 'Test123!', password: 'Test1234!', password_confirmation: 'Test1234!' } },
