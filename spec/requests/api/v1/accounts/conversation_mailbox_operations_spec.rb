@@ -102,6 +102,81 @@ RSpec.describe 'Conversation mailbox operations API', type: :request do
       )
     end
 
+    context 'when restoring an archived message' do
+      let(:restore_identity) do
+        Imap::MessageIdentity.build(mailbox: '[Gmail]/All Mail', uidvalidity: 99, uid: 51, roles: [], provider_id: '9001')
+      end
+
+      before do
+        incoming_message.write_imap_identity!(restore_identity)
+      end
+
+      it 'freezes the unchanged roleless source and enqueues Restore' do
+        post "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations",
+             params: { mailbox_operation: { action: 'restore', idempotency_key: idempotency_key } },
+             headers: administrator.create_new_auth_token,
+             as: :json
+
+        expect(response).to have_http_status(:accepted)
+        operation = EmailMailboxOperation.last
+        expect(operation.frozen_items.first['source']).to eq(restore_identity.primary)
+        expect(incoming_message.reload.imap_identity.locations).to eq(restore_identity.locations)
+        expect(EmailMailboxOperationJob).to have_been_enqueued.with(operation.id)
+      end
+
+      context 'without a provider ID' do
+        let(:restore_identity) do
+          Imap::MessageIdentity.build(mailbox: 'Other', uidvalidity: 99, uid: 51, roles: [])
+        end
+
+        it 'does not infer Archive from an ordinary roleless mailbox' do
+          post "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations",
+               params: { mailbox_operation: { action: 'restore', idempotency_key: idempotency_key } },
+               headers: administrator.create_new_auth_token,
+               as: :json
+
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(response.parsed_body['error_code']).to eq('no_eligible_messages')
+          expect(EmailMailboxOperation).not_to exist
+        end
+      end
+
+      context 'with an Inbox location as well as roleless All Mail' do
+        let(:restore_identity) do
+          super().with_location(mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox'])
+        end
+
+        it 'does not treat the All Mail copy as archived' do
+          post "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations",
+               params: { mailbox_operation: { action: 'restore', idempotency_key: idempotency_key } },
+               headers: administrator.create_new_auth_token,
+               as: :json
+
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(response.parsed_body['error_code']).to eq('no_eligible_messages')
+          expect(EmailMailboxOperation).not_to exist
+        end
+      end
+
+      %w[trash spam archive].each do |role|
+        context "with an explicit #{role} location" do
+          let(:restore_identity) do
+            super().with_location(mailbox: "Gmail/#{role}", uidvalidity: 42, uid: 7, roles: [role])
+          end
+
+          it 'prefers the explicit source over roleless All Mail' do
+            post "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/mailbox_operations",
+                 params: { mailbox_operation: { action: 'restore', idempotency_key: idempotency_key } },
+                 headers: administrator.create_new_auth_token,
+                 as: :json
+
+            expect(response).to have_http_status(:accepted)
+            expect(EmailMailboxOperation.last.frozen_items.first['source']).to eq(restore_identity.location_for("Gmail/#{role}"))
+          end
+        end
+      end
+    end
+
     it 'refuses an agent who can access the account but is not an explicit inbox member' do
       agent = create(:user, account: account, role: :agent)
 

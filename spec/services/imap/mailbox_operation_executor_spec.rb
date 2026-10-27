@@ -189,6 +189,54 @@ RSpec.describe Imap::MailboxOperationExecutor do
     expect(message.reload.imap_identity.locations.pluck('mailbox')).to contain_exactly('INBOX', '[Gmail]/All Mail')
   end
 
+  context 'with a roleless provider-backed All Mail source' do
+    let(:identity) do
+      Imap::MessageIdentity.build(mailbox: '[Gmail]/All Mail', uidvalidity: 102, uid: 31, roles: [], provider_id: '9001')
+    end
+
+    before do
+      server['INBOX'].clear
+      server['[Gmail]/All Mail'] = { 31 => 'first@example.com' }
+      uidvalidities['[Gmail]/All Mail'] = 102
+      folders << Net::IMAP::MailboxList.new([:All], '/', '[Gmail]/All Mail')
+      operation.update!(action: :restore)
+      allow(client).to receive(:capabilities).and_return(%w[X-GM-EXT-1 MOVE UIDPLUS])
+      allow(client).to receive(:uid_search).with(%w[X-GM-MSGID 9001]) do
+        server.fetch(selected[:mailbox]).filter_map { |uid, source_id| uid if source_id == message.source_id }
+      end
+      allow(client).to receive(:uid_store).with(31, '+X-GM-LABELS', ['\\Inbox']) do
+        server['INBOX'][44] = message.source_id
+      end
+    end
+
+    it 'accepts the frozen snapshot and persists Inbox alongside the unchanged All Mail location' do
+      expect(operation.items.sole.fetch('source')).to eq identity.primary
+
+      described_class.new(operation: operation).perform
+
+      expect(client).to have_received(:uid_store).with(31, '+X-GM-LABELS', ['\\Inbox']).once
+      expect(client).not_to have_received(:uid_move)
+      expect(operation.reload.status).to eq 'succeeded'
+      expect(message.reload.imap_identity).to have_attributes(provider_id: '9001', version: 2)
+      expect(message.imap_identity.locations).to contain_exactly(
+        identity.primary,
+        'mailbox' => 'INBOX', 'uidvalidity' => 42, 'uid' => 44, 'roles' => ['inbox']
+      )
+      expect(operation.recorded_results.sole).to include('source' => identity.primary, 'status' => 'succeeded')
+    end
+
+    it 'still rejects a frozen source that fabricates an archive role absent from the stored identity' do
+      operation.update!(items: [item.merge('source' => identity.primary.merge('roles' => ['archive']))])
+
+      described_class.new(operation: operation).perform
+
+      expect(client).not_to have_received(:uid_store)
+      expect(client).not_to have_received(:uid_move)
+      expect(operation.reload.recorded_results.sole).to include('status' => 'conflict', 'error_code' => 'identity_version_changed')
+      expect(message.reload.imap_identity.to_h).to eq identity.to_h
+    end
+  end
+
   it 'archives Gmail from the frozen Inbox location when All Mail is the identity primary' do
     gmail_identity = Imap::MessageIdentity
                      .build(mailbox: 'INBOX', uidvalidity: 42, uid: 7, roles: ['inbox'], provider_id: '9001')
