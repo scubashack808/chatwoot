@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { actions } from '../../reports';
+import { createStore } from 'vuex';
+import reports, { actions } from '../../reports';
 import * as types from '../../../mutation-types';
 import { STATUS } from '../../../constants';
 import * as DownloadHelper from 'dashboard/helper/downloadHelper';
@@ -15,6 +16,115 @@ vi.spyOn(DownloadHelper, 'downloadCsvFile');
 describe('#actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('report series through the store', () => {
+    let store;
+    const from = 1785888000;
+    const to = 1788911999;
+    const weekly = [
+      { value: 1, timestamp: 1785628800 },
+      { value: 1, timestamp: 1786233600 },
+      { value: 0, timestamp: 1786838400 },
+      { value: 0, timestamp: 1787443200 },
+      { value: 0, timestamp: 1788048000 },
+      { value: 0, timestamp: 1788652800 },
+    ];
+
+    beforeEach(() => {
+      store = createStore({
+        ...reports,
+        state: JSON.parse(JSON.stringify(reports.state)),
+      });
+    });
+
+    it('retains the first partial week containing in-range conversations', async () => {
+      axios.get.mockResolvedValue({ data: weekly });
+      store.dispatch('fetchAccountReport', {
+        metric: 'conversations_count',
+        type: 'account',
+        from,
+        to,
+        groupBy: 'week',
+        businessHours: false,
+      });
+      expect(
+        store.getters.getAccountReports.isFetching.conversations_count
+      ).toBe(true);
+      await flushPromises();
+
+      const report = store.getters.getAccountReports;
+      expect(
+        report.data.conversations_count.reduce((sum, row) => sum + row.value, 0)
+      ).toBe(2);
+      expect(report.data.conversations_count).toEqual(weekly);
+      expect(report.data.conversations_count[0].timestamp).toBe(1785628800);
+      expect(report.isFetching.conversations_count).toBe(false);
+      expect(axios.get).toHaveBeenCalledWith(expect.any(String), {
+        params: expect.objectContaining({
+          since: from,
+          until: to,
+          group_by: 'week',
+        }),
+      });
+    });
+
+    it.each([
+      [
+        'day',
+        from,
+        [
+          { value: 1, timestamp: from },
+          { value: 1, timestamp: 1786320000 },
+        ],
+      ],
+      ['week', 1785628800, weekly],
+      ['week', from, []],
+      ['month', from, [{ value: 12, count: 2, timestamp: 1785542400 }]],
+      ['year', from, [{ value: 12, count: 2, timestamp: 1767225600 }]],
+    ])(
+      'preserves %s response fields and buckets',
+      async (groupBy, start, data) => {
+        axios.get.mockResolvedValue({ data });
+        store.dispatch('fetchAccountReport', {
+          metric: 'avg_first_response_time',
+          from: start,
+          to,
+          groupBy,
+        });
+        await flushPromises();
+        expect(
+          store.getters.getAccountReports.data.avg_first_response_time
+        ).toEqual(data);
+        expect(
+          store.getters.getAccountReports.isFetching.avg_first_response_time
+        ).toBe(false);
+      }
+    );
+
+    it.each([
+      [
+        'fetchAccountConversationHeatmap',
+        'getAccountConversationHeatmapData',
+        'isFetchingAccountConversationsHeatmap',
+      ],
+      [
+        'fetchAccountResolutionHeatmap',
+        'getAccountResolutionHeatmapData',
+        'isFetchingAccountResolutionsHeatmap',
+      ],
+    ])('keeps hourly clamping for %s', async (action, getter, loadingFlag) => {
+      const data = [from - 1, from, to - 1, to].map(timestamp => ({
+        timestamp,
+        value: 1,
+      }));
+      axios.get.mockResolvedValue({ data });
+      store.dispatch(action, { metric: 'conversations_count', from, to });
+      expect(store.getters.getOverviewUIFlags[loadingFlag]).toBe(true);
+      await flushPromises();
+      expect(store.getters[getter]).toEqual(data.slice(1, 3));
+      expect(store.getters.getOverviewUIFlags[loadingFlag]).toBe(false);
+    });
   });
 
   describe('#fetchAccountSummary', () => {
