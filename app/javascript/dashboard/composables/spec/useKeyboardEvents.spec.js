@@ -71,6 +71,27 @@ describe('useKeyboardEvents', () => {
     expect(Object.keys(keybindings)).toEqual(['Shift+Alt+KeyL']);
   });
 
+  it('keeps default bindings when the keyboard layout API is unavailable', async () => {
+    const actual = await vi.importActual(
+      'dashboard/composables/useDetectKeyboardLayout'
+    );
+    useDetectKeyboardLayout.mockImplementationOnce(
+      actual.useDetectKeyboardLayout
+    );
+    const originalKeyboard = navigator.keyboard;
+    navigator.keyboard = undefined;
+    window.cw_keyboard_layout = null;
+
+    const keybindings = await mount({
+      'Alt+KeyP': () => {},
+      'Alt+KeyL': () => {},
+    });
+
+    expect(Object.keys(keybindings)).toEqual(['Alt+KeyP', 'Alt+KeyL']);
+    navigator.keyboard = originalKeyboard;
+    window.cw_keyboard_layout = null;
+  });
+
   it('ignores shortcuts on focused typeable elements by default', async () => {
     const action = vi.fn();
     const keybindings = await mount({
