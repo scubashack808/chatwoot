@@ -73,6 +73,13 @@ class DataImportJob < ApplicationJob
 
   def import_contacts(contacts_with_labels)
     contacts = contacts_with_labels.pluck(:contact)
+    # Bulk import skips the before_save callback that synchronizes contact attributes.
+    contacts.each do |contact|
+      next unless contact.new_record?
+
+      contact.additional_attributes = contact.additional_attributes.stringify_keys
+      Contacts::SyncAttributes.new(contact).perform
+    end
     # <struct ActiveRecord::Import::Result failed_instances=[], num_inserts=1, ids=[444, 445], results=[]>
     Contact.import(contacts, synchronize: contacts, on_duplicate_key_ignore: true, track_validation_failures: true, validate: true, batch_size: 1000)
     apply_labels_to_contacts(contacts_with_labels)

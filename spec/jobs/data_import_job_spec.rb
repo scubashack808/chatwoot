@@ -31,6 +31,89 @@ RSpec.describe DataImportJob do
   end
 
   describe 'importing data' do
+    context 'when classifying imported contacts' do
+      let(:account) { create(:account) }
+      let(:csv_data) { [%w[name email city], ['Synthetic import', 'imported@example.test', 'Honolulu']] }
+      let(:data_import) { create(:data_import, account: account, import_file: generate_csv_file(csv_data)) }
+
+      before do
+        account.enable_features!('crm_v2')
+      end
+
+      it 'keeps a normally created email contact visible in CRM V2' do
+        contact = account.contacts.create!(name: 'Synthetic normal', email: 'normal@example.test')
+
+        expect(contact.reload.contact_type).to eq('lead')
+        expect(account.contacts.resolved_contacts(use_crm_v2: true)).to include(contact)
+      end
+
+      it 'persists an imported email contact as a lead visible in both contact lists', :aggregate_failures do
+        described_class.perform_now(data_import)
+
+        contact = account.contacts.find_by!(email: 'imported@example.test').reload
+        expect(data_import.reload).to have_attributes(status: 'completed', processed_records: 1, total_records: 1)
+        expect(contact).to have_attributes(name: 'Synthetic import', contact_type: 'lead', location: 'Honolulu')
+        expect(contact.additional_attributes['city']).to eq('Honolulu')
+        expect(account.contacts.resolved_contacts(use_crm_v2: false)).to include(contact)
+        expect(account.contacts.resolved_contacts(use_crm_v2: true)).to include(contact)
+      end
+
+      it 'classifies new contacts even when CRM V2 is disabled' do
+        account.disable_features!('crm_v2')
+
+        described_class.perform_now(data_import)
+
+        expect(account.contacts.find_by!(email: 'imported@example.test').reload.contact_type).to eq('lead')
+      end
+
+      it 'updates the same imported lead without creating a duplicate' do
+        described_class.perform_now(data_import)
+        contact = account.contacts.find_by!(email: 'imported@example.test')
+        updated_csv = [%w[name email city], ['Updated import', contact.email, 'Honolulu']]
+        repeat_import = create(:data_import, account: account, import_file: generate_csv_file(updated_csv))
+
+        expect { described_class.perform_now(repeat_import) }.not_to(change { account.contacts.count })
+
+        expect(repeat_import.reload).to have_attributes(status: 'completed', processed_records: 1)
+        expect(account.contacts.find_by!(email: contact.email).id).to eq(contact.id)
+        expect(contact.reload).to have_attributes(name: 'Updated import', contact_type: 'lead')
+        expect(account.contacts.resolved_contacts(use_crm_v2: true)).to include(contact)
+        expect(account.contacts.resolved_contacts(use_crm_v2: false)).to include(contact)
+      end
+
+      context 'with a phone-only contact' do
+        let(:csv_data) { [%w[name phone_number], ['Synthetic phone', '+12025550123']] }
+
+        it 'persists the contact as a lead' do
+          described_class.perform_now(data_import)
+
+          contact = account.contacts.find_by!(phone_number: '+12025550123').reload
+          expect(contact.contact_type).to eq('lead')
+          expect(account.contacts.resolved_contacts(use_crm_v2: true)).to include(contact)
+        end
+      end
+
+      context 'with an identifier-only contact' do
+        let(:csv_data) { [%w[name identifier], ['Synthetic visitor', 'synthetic-visitor']] }
+
+        it 'keeps the contact a visitor' do
+          described_class.perform_now(data_import)
+
+          contact = account.contacts.find_by!(identifier: 'synthetic-visitor').reload
+          expect(contact.contact_type).to eq('visitor')
+          expect(account.contacts.resolved_contacts(use_crm_v2: true)).not_to include(contact)
+        end
+      end
+
+      it 'preserves an existing customer when importing updates' do
+        contact = create(:contact, account: account, email: 'imported@example.test', contact_type: :customer)
+
+        expect { described_class.perform_now(data_import) }.not_to(change { account.contacts.count })
+
+        expect(contact.reload).to have_attributes(name: 'Synthetic import', contact_type: 'customer')
+      end
+    end
+
     context 'when the data is valid' do
       it 'imports data into the account' do
         csv_length = CSV.parse(data_import.import_file.download, headers: true).length
