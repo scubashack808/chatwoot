@@ -21,11 +21,15 @@ class ArticleEmbedding < ApplicationRecord
 
   delegate :account_id, to: :article
 
+  def embedding_content
+    term
+  end
+
   private
 
   def update_response_embedding
     return unless saved_change_to_term? || embedding.nil?
 
-    Captain::Llm::UpdateEmbeddingJob.perform_later(self, term)
+    Captain::Llm::UpdateEmbeddingJob.perform_later(self, embedding_content)
   end
 end
