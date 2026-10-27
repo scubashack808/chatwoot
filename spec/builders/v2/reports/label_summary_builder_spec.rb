@@ -83,6 +83,64 @@ RSpec.describe V2::Reports::LabelSummaryBuilder do
       end
     end
 
+    context 'when conversation creation and reporting events cross the date window' do
+      let(:business_hours) { false }
+      let(:window_start) { Time.zone.parse('2026-09-17 00:00:00') }
+      let(:params) { { since: window_start.to_i.to_s, until: (window_start + 1.day).to_i.to_s, business_hours: business_hours } }
+      let(:old_conversation) { create(:conversation, account: account, created_at: window_start - 1.day) }
+      let(:new_conversation) { create(:conversation, account: account, created_at: window_start + 1.hour) }
+      let(:report) { builder.build.find { |row| row[:id] == label_1.id } }
+
+      before do
+        old_conversation.update_labels(label_1.title)
+        new_conversation.update_labels(label_1.title)
+        %w[first_response conversation_resolved reply_time].each do |name|
+          create(:reporting_event, account: account, conversation: old_conversation, name: name,
+                                   created_at: window_start, value: 120, value_in_business_hours: 60)
+          create(:reporting_event, account: account, conversation: new_conversation, name: name,
+                                   created_at: window_start + 1.day, value: 600, value_in_business_hours: 300)
+          create(:reporting_event, account: account, conversation: old_conversation, name: name,
+                                   created_at: window_start - 1.second, value: 900, value_in_business_hours: 450)
+        end
+      end
+
+      it 'includes events at the start, excludes events at the end, and counts conversations by creation date' do
+        expect(report).to include(avg_first_response_time: 120, avg_resolution_time: 120, avg_reply_time: 120,
+                                  conversations_count: 1, resolved_conversations_count: 1)
+      end
+
+      context 'with business hours' do
+        let(:business_hours) { true }
+
+        it 'uses the business-hours values of the same in-window events' do
+          expect(report).to include(avg_first_response_time: 60, avg_resolution_time: 60, avg_reply_time: 60)
+        end
+      end
+
+      it 'does not include another account with the same label name' do
+        other_account = create(:account)
+        create(:label, account: other_account, title: label_1.title)
+        other_conversation = create(:conversation, account: other_account, created_at: window_start)
+        other_conversation.update_labels(label_1.title)
+        %w[first_response conversation_resolved reply_time].each do |name|
+          create(:reporting_event, account: other_account, conversation: other_conversation, name: name,
+                                   created_at: window_start, value: 9999)
+        end
+
+        expect(report).to include(avg_first_response_time: 120, avg_resolution_time: 120, avg_reply_time: 120,
+                                  conversations_count: 1, resolved_conversations_count: 1)
+      end
+
+      context 'without a date range' do
+        let(:params) { { business_hours: false } }
+
+        it 'averages all events and counts all conversations' do
+          expect(report).to include(avg_first_response_time: 540, avg_resolution_time: 540, avg_reply_time: 540,
+                                    conversations_count: 2, resolved_conversations_count: 3)
+        end
+      end
+    end
+
     context 'when there are labeled conversations with metrics' do
       before do
         travel_to(Time.zone.today) do
