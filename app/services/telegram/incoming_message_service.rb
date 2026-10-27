@@ -130,7 +130,7 @@ class Telegram::IncomingMessageService
   end
 
   def image_message?
-    params[:message][:photo].present? || params.dig(:message, :sticker, :thumb).present?
+    params[:message][:photo].present? || sticker_thumbnail.present?
   end
 
   def audio_message?
@@ -215,9 +215,14 @@ class Telegram::IncomingMessageService
 
   def visual_media_params
     params[:message][:photo].presence&.last ||
-      params.dig(:message, :sticker, :thumb).presence ||
+      sticker_thumbnail ||
       params[:message][:video].presence ||
       params[:message][:video_note].presence
+  end
+
+  # Bot API 6.6 renamed sticker `thumb` to `thumbnail`; keep `thumb` for older payloads.
+  def sticker_thumbnail
+    params.dig(:message, :sticker, :thumbnail).presence || params.dig(:message, :sticker, :thumb).presence
   end
 
   def transform_business_message!
