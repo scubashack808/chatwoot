@@ -50,6 +50,57 @@ describe Instagram::SendOnInstagramService do
   end
 
   describe '#perform' do
+    context 'with transport failures' do
+      let(:message) do
+        create(:message, message_type: :outgoing, inbox: instagram_inbox, account: account,
+                         conversation: conversation, content: 'Synthetic reply')
+      end
+
+      before do
+        allow(ChatwootExceptionTracker).to receive(:new).and_return(instance_double(ChatwootExceptionTracker, capture_exception: nil))
+      end
+
+      [Net::ReadTimeout, Net::OpenTimeout, StandardError].each do |error_class|
+        it "does not make #{error_class} retryable when acceptance is unknown" do
+          allow(HTTParty).to receive(:post).and_raise(error_class)
+
+          send_reply_service.perform
+
+          expect(message.reload.status).to eq('sent')
+          expect(message.source_id).to be_nil
+          expect(message.external_error).to be_blank
+          expect(ChatwootExceptionTracker).to have_received(:new).with(instance_of(error_class), anything)
+        end
+      end
+
+      it 'does not treat a response processing exception as a refused send' do
+        allow(HTTParty).to receive(:post).and_return(mock_response)
+        allow(mock_response).to receive(:parsed_response).and_raise(Errno::ECONNREFUSED)
+
+        send_reply_service.perform
+
+        expect(message.reload.status).to eq('sent')
+        expect(message.external_error).to be_blank
+      end
+
+      it 'does not enable replay when an attachment was accepted before the text connection failed' do
+        attachment = message.attachments.new(account_id: account.id, file_type: :image)
+        attachment.file.attach(io: Rails.root.join('spec/assets/avatar.png').open, filename: 'avatar.png', content_type: 'image/png')
+        message.save!
+        allow(HTTParty).to receive(:post).and_return(mock_response)
+        allow(HTTParty).to receive(:post).with(anything, hash_including(body: hash_including(message: { text: message.content })))
+                                         .and_raise(Errno::ECONNREFUSED)
+
+        send_reply_service.perform
+
+        expect(HTTParty).to have_received(:post).twice
+        expect(message.reload.status).to eq('sent')
+        expect(message.source_id).to eq('random_message_id')
+        expect(message.external_error).to be_blank
+        expect(ChatwootExceptionTracker).to have_received(:new).with(instance_of(Errno::ECONNREFUSED), anything)
+      end
+    end
+
     context 'with reply' do
       before do
         allow(HTTParty).to receive(:post).and_return(mock_response)
