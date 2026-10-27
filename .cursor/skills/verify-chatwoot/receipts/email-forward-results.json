@@ -1,0 +1,142 @@
+{
+  "claim_status": "reconstructed: written after the runs it reports",
+  "base": "cf01462236",
+  "host_guard_parent": "9b8845979",
+  "forward_proof": {
+    "run_id": "20261027T221146756544Z",
+    "candidate": "f869b9d12a0eb62442873d526ed5e2905ce4840d",
+    "source_head": "f869b9d12a0eb62442873d526ed5e2905ce4840d",
+    "ok": true,
+    "checks": {
+      "F5 menu gating": true,
+      "F4 validation refused": true,
+      "F1 rendered in thread": true,
+      "F2 rendered in thread": true,
+      "F3 rendered in thread": true,
+      "F1 source body visible in thread": true,
+      "F4 nothing extra sent": true,
+      "F1 subject": true,
+      "F1 from": true,
+      "F1 recipients": true,
+      "F1 customer not addressed": true,
+      "F1 new thread": true,
+      "F1 body": true,
+      "F1 attachments": true,
+      "F2 subject": true,
+      "F2 from": true,
+      "F2 recipients": true,
+      "F2 customer not addressed": true,
+      "F2 new thread": true,
+      "F2 body": true,
+      "F2 attachments": true,
+      "F2 forwarded agent reply attributed to the inbox": true,
+      "F3 subject": true,
+      "F3 from": true,
+      "F3 recipients": true,
+      "F3 customer not addressed": true,
+      "F3 new thread": true,
+      "F3 body": true,
+      "F3 attachments": true,
+      "F1 persisted once": true,
+      "F1 persisted forward": true,
+      "F1 blobs reused": true,
+      "F2 persisted once": true,
+      "F2 persisted forward": true,
+      "F2 blobs reused": true,
+      "F3 persisted once": true,
+      "F3 persisted forward": true,
+      "F3 blobs reused": true,
+      "F6 marked failed": true,
+      "F5 failed message offers no forward": true,
+      "F10 reply composer not addressed to forward recipients": true,
+      "F6 retry recipients": true,
+      "F6 retried forward kept its forward": true,
+      "F7 reply goes to the inbox address": true,
+      "F7 ActionMailbox threading does not claim it": true,
+      "F7 reply opens a new conversation": true,
+      "F8 Sent copy matches delivery": true,
+      "F9 foreign source refused": true
+    },
+    "failed": [],
+    "helper_hashes": {
+      "SKILL.md": "b86a3073f1d8121d122bf724aa46f43e156ae03630c83098b91128ba91de468a",
+      "receipts/rendered-readiness.md": "5243ff69d5b94e83b5cac326fada1bcd122f3dc8e9e852df7a48baedc7b8ba58",
+      "receipts/pilot-readiness.md": "ffd194356f85a672291b7f2e74dba659e3512576ed4cb74b00f0121d06a7d804",
+      "receipts/email-forward.md": "0e9be04fbf6dd3524889b2da2dba4ea2964729f6511b3617aa5559a086604428",
+      "features/email-reply.md": "1a635792fda94282c1169d664b9f03d3020d9bb3ad853084444d9eb7e589088e",
+      "features/login.md": "026f89890e8da6a068762c86e1075b92828ce0b0f5e79f56cfe1f39d7ca87f4b",
+      "features/draft-addressing.md": "76ff924fe03d900b7a75e0a9ed50b0b0af596f92ac37b91b65f91eb52a9eb2a4",
+      "features/README.md": "d06ee68b28a0ebafff3174e51bee915b1db000bc2b96efa5694c95566de6cd93",
+      "features/email-forward.md": "384af2461566201b3aa59a903bb777b7fb71826ce313ec03632cad503e5c1b49",
+      "features/unread.md": "fe2a01c7620a42ded86f1a7abf5ecd95c989330a56a9d69d14d9449b5d040e6d",
+      "features/snooze.md": "5c6a66b2fd0c629e3b0e1a612378ed24c3570e7cfcbf50de051499322174ef52",
+      "scripts/forward_flow.py": "80c87370b9287ff02df8b659d14ab45a062e4a9be06cb2effa428ab53acd12eb",
+      "scripts/mail_flow.py": "7689415687072e3b95d50dd00af4d5d92cc8d4b428a55ba5c7108f2f1679a1ac",
+      "scripts/verify.py": "c9c7e9d69b8630d54b7aa2c74f7ec876383415c3b07d662ef3bedac981d5d903",
+      "scripts/inspect_fixture.rb": "6fb801c77a70e26b6cd9be896ab6f7bc5d48ec302024647d94646e5115245d2d",
+      "scripts/forward_fixture.rb": "062c4b7ae2d8e45d174fc700e4db4d2ea97a0b55c45fcf8dc04cb9bb94b71e9a"
+    }
+  },
+  "f10_red_run": {
+    "run_id": "20261027T213731786087Z",
+    "candidate": "df8b49f88f9d4b14bab247b664664f772d7fdfdc",
+    "note": "candidate before the reply-addressing fix (18508ff45)",
+    "failed": [
+      "F10 reply composer not addressed to forward recipients"
+    ],
+    "detail": [
+      {
+        "label": "TO",
+        "value": "forward-to-4@chatwoot-dummy.test"
+      },
+      {
+        "label": "CC",
+        "value": ""
+      }
+    ]
+  },
+  "review_fix_red_specs": {
+    "candidate": "4c62a81a6 (before d6f754898)",
+    "failed_new_specs": [
+      "message_builder_spec: first reply still counted after a forward",
+      "message_builder_spec: forwarded agent reply attributed to the inbox",
+      "message_builder_spec: failed source refused",
+      "conversation_reply_mailer_spec: forward Reply-To is the inbox address",
+      "sent_thread_resolver_spec: reference to a forward refused"
+    ],
+    "note": "all five pass on f869b9d12"
+  },
+  "pilot_r1_passed": {
+    "run_id": "20261027T214550080422Z",
+    "candidate": "459ae26c0175ab4ce401c8980976fabee33f9324",
+    "ok": true,
+    "restored_running": true,
+    "evidence_survived_cleanup": true,
+    "proof_artifacts_complete": true,
+    "shared_services_unchanged": true
+  },
+  "pilot_r1_blocked_on_final_head": [
+    {
+      "run_id": "20261027T221259170460Z",
+      "candidate": "f869b9d12a0eb62442873d526ed5e2905ce4840d",
+      "ok": false,
+      "restored_running": true,
+      "shared_services_unchanged": true
+    },
+    {
+      "run_id": "20261027T221422063730Z",
+      "candidate": "f869b9d12a0eb62442873d526ed5e2905ce4840d",
+      "ok": false,
+      "restored_running": null,
+      "shared_services_unchanged": true
+    },
+    {
+      "run_id": "20261027T221502086353Z",
+      "candidate": "f869b9d12a0eb62442873d526ed5e2905ce4840d",
+      "ok": false,
+      "restored_running": true,
+      "shared_services_unchanged": true
+    }
+  ],
+  "pilot_r1_blocked_reason": "a Zoho Vault \"Save to Zoho Vault?\" extension prompt in Brave Profile 14 captured the login keystrokes; refused before any send; prompt left for the operator"
+}
