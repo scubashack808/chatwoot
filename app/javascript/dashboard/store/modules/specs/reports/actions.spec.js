@@ -17,6 +17,56 @@ describe('#actions', () => {
     vi.clearAllMocks();
   });
 
+  describe('#fetchAccountConversationHeatmap', () => {
+    const reportObj = { from: 100, to: 200, metric: 'conversations_count' };
+
+    it('clears loading after rejection without replacing cached data', async () => {
+      const commit = vi.fn();
+      let rejectRequest;
+      axios.get.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            rejectRequest = reject;
+          })
+      );
+      actions.fetchAccountConversationHeatmap({ commit }, reportObj);
+      expect(commit.mock.calls).toEqual([
+        [types.default.TOGGLE_HEATMAP_LOADING, true],
+      ]);
+      rejectRequest(new Error('Temporary report failure'));
+      await flushPromises();
+      expect(commit.mock.calls).toEqual([
+        [types.default.TOGGLE_HEATMAP_LOADING, true],
+        [types.default.TOGGLE_HEATMAP_LOADING, false],
+      ]);
+    });
+
+    it('requests hourly data and preserves timeline clamping on success', async () => {
+      const commit = vi.fn();
+      const data = [
+        { timestamp: 50, value: 1 },
+        { timestamp: 150, value: 2 },
+        { timestamp: 250, value: 3 },
+      ];
+      axios.get.mockResolvedValueOnce({ data });
+      actions.fetchAccountConversationHeatmap({ commit }, reportObj);
+      await flushPromises();
+      expect(axios.get).toHaveBeenCalledWith(expect.any(String), {
+        params: expect.objectContaining({
+          group_by: 'hour',
+          metric: 'conversations_count',
+          since: 100,
+          until: 200,
+        }),
+      });
+      expect(commit.mock.calls).toEqual([
+        [types.default.TOGGLE_HEATMAP_LOADING, true],
+        [types.default.SET_HEATMAP_DATA, [data[1]]],
+        [types.default.TOGGLE_HEATMAP_LOADING, false],
+      ]);
+    });
+  });
+
   describe('#fetchAccountSummary', () => {
     it('sends correct actions if API is success', async () => {
       const commit = vi.fn();

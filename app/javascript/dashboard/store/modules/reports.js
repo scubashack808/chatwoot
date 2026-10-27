@@ -127,13 +127,17 @@ export const actions = {
   },
   fetchAccountConversationHeatmap({ commit }, reportObj) {
     commit(types.default.TOGGLE_HEATMAP_LOADING, true);
-    Report.getReports({ ...reportObj, groupBy: 'hour' }).then(heatmapData => {
-      let { data } = heatmapData;
-      data = clampDataBetweenTimeline(data, reportObj.from, reportObj.to);
+    Report.getReports({ ...reportObj, groupBy: 'hour' })
+      .then(heatmapData => {
+        let { data } = heatmapData;
+        data = clampDataBetweenTimeline(data, reportObj.from, reportObj.to);
 
-      commit(types.default.SET_HEATMAP_DATA, data);
-      commit(types.default.TOGGLE_HEATMAP_LOADING, false);
-    });
+        commit(types.default.SET_HEATMAP_DATA, data);
+        commit(types.default.TOGGLE_HEATMAP_LOADING, false);
+      })
+      .catch(() => {
+        commit(types.default.TOGGLE_HEATMAP_LOADING, false);
+      });
   },
   fetchAccountResolutionHeatmap({ commit }, reportObj) {
     commit(types.default.TOGGLE_RESOLUTION_HEATMAP_LOADING, true);
