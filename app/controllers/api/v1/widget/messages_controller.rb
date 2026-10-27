@@ -43,17 +43,25 @@ class Api::V1::Widget::MessagesController < Api::V1::Widget::BaseController
   end
 
   def set_conversation
-    if conversation.nil?
-      @conversation = create_conversation
-      apply_labels if permitted_params[:labels].present?
-      return
-    end
+    return create_first_conversation if conversation.nil?
 
     # Hiding the reply box does not stop requests reaching this endpoint, so the setting is
     # enforced here.
     return if inbox.allow_messages_after_resolved || !conversation.resolved?
 
     render json: { error: I18n.t('errors.conversations.resolved') }, status: :forbidden
+  end
+
+  # Overlapping first sends both see no conversation; serialize on the contact inbox and
+  # recheck so the later request joins the conversation the earlier one created.
+  def create_first_conversation
+    @contact_inbox.with_lock do
+      @conversation = conversations.last
+      next if @conversation
+
+      @conversation = create_conversation
+      apply_labels if permitted_params[:labels].present?
+    end
   end
 
   def apply_labels
