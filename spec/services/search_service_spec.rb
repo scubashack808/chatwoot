@@ -156,6 +156,36 @@ describe SearchService do
         end
       end
 
+      context 'with GIN ordinary text' do
+        let(:search_type) { 'Message' }
+
+        before { account.enable_features!('search_with_gin') }
+
+        ["can't cancel", 'cancel (tomorrow', 'cancel & refund', 'cancel tomorrow', 'pre-booking'].each do |query|
+          it "finds a message containing #{query.inspect}" do
+            found = create(:message, account: account, inbox: inbox, content: query)
+            search = described_class.new(current_user: user, current_account: account, params: { q: query }, search_type: search_type)
+            expect(search.perform[:messages].map(&:id)).to include(found.id)
+          end
+        end
+
+        it 'keeps phrase order and adjacency' do
+          create(:message, account: account, inbox: inbox, content: 'refund the cancel')
+          create(:message, account: account, inbox: inbox, content: 'cancel my refund')
+          search = described_class.new(current_user: user, current_account: account, params: { q: 'cancel & refund' }, search_type: search_type)
+          expect(search.perform[:messages]).to be_empty
+        end
+
+        ["can't cancel", 'cancel (tomorrow', 'cancel & refund'].each do |query|
+          it "matches the same literal #{query.inspect} with LIKE search" do
+            account.disable_features!('search_with_gin')
+            found = create(:message, account: account, inbox: inbox, content: query)
+            search = described_class.new(current_user: user, current_account: account, params: { q: query }, search_type: search_type)
+            expect(search.perform[:messages].map(&:id)).to include(found.id)
+          end
+        end
+      end
+
       # rubocop:disable RSpec/MultipleMemoizedHelpers
       context 'when filtering messages with time, sender, and inbox', :opensearch do
         let!(:agent) { create(:user, account: account) }
