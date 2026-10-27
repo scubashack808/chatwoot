@@ -6,6 +6,7 @@ import BaseHeatmap from './BaseHeatmap.vue';
 import HeatmapDateRangeSelector from './HeatmapDateRangeSelector.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useLiveRefresh } from 'dashboard/composables/useLiveRefresh';
+import addDays from 'date-fns/addDays';
 import differenceInCalendarDays from 'date-fns/differenceInCalendarDays';
 import endOfDay from 'date-fns/endOfDay';
 import format from 'date-fns/format';
@@ -233,7 +234,8 @@ const fetchHeatmapData = () => {
   const params = {
     metric: props.metric,
     from: getUnixTime(from),
-    to: getUnixTime(to),
+    // Report ranges exclude their upper bound; keep display dates inclusive.
+    to: getUnixTime(startOfDay(addDays(to, 1))),
     groupBy: 'hour',
     businessHours: false,
   };
