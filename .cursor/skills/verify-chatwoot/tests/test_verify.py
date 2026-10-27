@@ -561,5 +561,54 @@ class LifecycleTests(unittest.TestCase):
         code, actions, receipt, running = self.exercise('success')
         self.assertEqual(code, 0); self.assertTrue(running); self.assertTrue(receipt['evidence_survived_cleanup']); self.assertTrue(receipt['proof_artifacts_complete'])
 
+class ForwardTests(unittest.TestCase):
+    FIXTURE = {'sender_email': 'support@chatwoot-dummy.test', 'vendor_email': 'vendor@chatwoot-dummy.test'}
+
+    def delivered(self, **changes):
+        message = {'ID': 'm1', 'Subject': 'Fwd: Invoice', 'From': {'Address': 'support@chatwoot-dummy.test'},
+                   'To': [{'Address': 'a@chatwoot-dummy.test'}], 'Cc': [], 'Bcc': [], 'Headers': {'Message-Id': ['x']},
+                   'HTML': 'note ' + verify.FORWARD_MARKER + ' body'}
+        message.update(changes)
+        results = {}
+        with patch.object(verify, 'captured_files', return_value={}):
+            verify.judge_delivery(results, 'F', message, self.FIXTURE, ['a@chatwoot-dummy.test'], [], 'Fwd: Invoice', [], marker='note')
+        return results
+
+    def test_forward_requires_an_exact_target(self):
+        with patch.object(sys, 'argv', ['verify.py', 'forward']), patch.object(verify, 'forward_run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'forward requires an exactly discovered --target-id'):
+                verify.main()
+        run.assert_not_called()
+
+    def test_unhealthy_site_refuses_before_fixture_or_browser(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / 'tmp/dummy').mkdir(parents=True)
+            args = SimpleNamespace(expected_sha=verify.BASE_SHA, target_id='T')
+            with patch.object(verify, 'ROOT', root), patch.object(verify, 'candidate', return_value=verify.BASE_SHA), \
+                 patch.object(verify, 'doctor', return_value={'ok': False, 'error': 'down'}), \
+                 patch.object(verify, 'forward_runner') as runner, patch.object(verify, 'browser_run') as browser:
+                with self.assertRaisesRegex(RuntimeError, 'Doctor refused'):
+                    verify.forward_run(args)
+        runner.assert_not_called(); browser.assert_not_called()
+
+    def test_clean_forward_delivery_passes(self):
+        self.assertTrue(all(result['pass'] for result in self.delivered().values()))
+
+    def test_threading_headers_fail_the_new_thread_check(self):
+        results = self.delivered(Headers={'In-Reply-To': ['<x>'], 'References': ['<x>']})
+        self.assertFalse(results['F new thread']['pass'])
+
+    def test_customer_in_any_recipient_field_fails(self):
+        results = self.delivered(Cc=[{'Address': 'vendor@chatwoot-dummy.test'}])
+        self.assertFalse(results['F recipients']['pass']); self.assertFalse(results['F customer not addressed']['pass'])
+
+    def test_forward_flow_uses_only_the_governed_driver(self):
+        source = (verify.SCRIPT_DIR / 'forward_flow.py').read_text()
+        imports = {alias.name.split('.')[0] for node in ast.walk(ast.parse(source)) if isinstance(node, (ast.Import, ast.ImportFrom))
+                   for alias in (node.names if isinstance(node, ast.Import) else [SimpleNamespace(name=node.module)])}
+        self.assertLessEqual(imports, {'datetime', 'json', 'os', 'browser_harness', 'pathlib', 'time'})
+        self.assertIn("raise RuntimeError('Refusing browser work while telemetry is enabled')", source)
+        self.assertIn('release_caller()', source)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

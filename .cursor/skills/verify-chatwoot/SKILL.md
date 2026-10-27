@@ -68,6 +68,17 @@ An existing unsent body or unfamiliar addressing draft is a stop. Before interru
 
 **Done when:** the exact reply is rendered with a cleared composer, Mailpit receives exact body/From/To with no extra recipients, and a separate read-only database view reports exactly one persisted public outgoing sent message.
 
+### Email forward
+
+Read [email forward](features/email-forward.md). With the site already running and Doctor passing on the candidate, run:
+
+    python3 -B .cursor/skills/verify-chatwoot/scripts/verify.py forward \
+      --expected-sha "$CANDIDATE_SHA" --target-id "$CHATWOOT_TARGET_ID"
+
+It holds the same advisory lock, seeds the forward fixture once (forward_fixture.rb seed, additive), drives forward_flow.py through the same governed driver, caller identity and telemetry opt-out, and judges each scenario independently from the UI, Mailpit and a read-only database view. It neither restarts the site nor logs out; the pilot above remains the login and ordinary-reply proof.
+
+**Done when:** receipt.json under tmp/verify-chatwoot/forward-<UTC run ID>/ reports ok with every scenario passing, and its screenshots show the dialog, the refused validation, the forwards in the thread and the retried forward.
+
 ## Evidence
 
 Every attempt gets tmp/verify-chatwoot/<UTC run ID>/ under this verification checkout, separate from dummy reset/storage paths. The private, Git-ignored directory survives successful and failed cleanup.
@@ -102,6 +113,9 @@ All helpers are repository-owned and executable. They add app-specific wiring ar
 - verify.py doctor: read-only readiness, invocation above.
 - verify.py pilot: full owned lifecycle and UI proof, invocation above.
 - mail_flow.py: executed by browser-harness on stdin from pilot, using its per-run VERIFY_CHATWOOT_CONFIG. Requires the pilot lease and Doctor receipt; never invoke independently.
+- verify.py forward: the email-forward journey, invocation above.
+- forward_flow.py: executed by browser-harness on stdin from verify.py forward, in modes forward and retry. Never invoke independently.
+- forward_fixture.rb: Rails runner for the forward fixture and its checks (seed, inspect, fail, reply, rerender, scope), each printing one VERIFY_FORWARD receipt.
 - inspect_fixture.rb: read-only Rails fixture/auth/persistence inspection. Standalone invocation:
 
     python3 -B ../chatwoot-dummy/.codex/dummy/manage.py exec -- \
