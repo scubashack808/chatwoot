@@ -119,6 +119,8 @@ const showDelayDisabledBanner = computed(
     records.value.some(automation => automation.execution_delay)
 );
 
+let slaFetchPromise;
+
 onMounted(() => {
   store.dispatch('inboxes/get');
   store.dispatch('agents/get');
@@ -128,7 +130,7 @@ onMounted(() => {
   store.dispatch('campaigns/get');
   store.dispatch('automations/get');
   if (isSLAEnabled.value) {
-    store.dispatch('sla/get');
+    slaFetchPromise = store.dispatch('sla/get');
   }
 });
 
@@ -141,7 +143,10 @@ const hideAddPopup = () => {
   addDialogRef.value?.close();
 };
 
-const openEditPopup = response => {
+const openEditPopup = async response => {
+  if (isSLAEnabled.value) {
+    await slaFetchPromise;
+  }
   selectedAutomation.value = { ...response };
   editDialogRef.value?.open(response);
 };
