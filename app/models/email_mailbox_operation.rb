@@ -80,6 +80,16 @@ class EmailMailboxOperation < ApplicationRecord
     end
   end
 
+  # A Junk import was created resolved so it stayed quiet. Once restored to Inbox, even in part, it
+  # is ordinary mail. The server move already succeeded, so a failure here must not fail the operation.
+  def reopen_restored_junk!
+    return unless action_restore? && (succeeded? || partially_succeeded?)
+
+    conversation.restore_from_junk!
+  rescue StandardError => e
+    ChatwootExceptionTracker.new(e, account: account).capture_exception
+  end
+
   def mark_failed!(code)
     with_lock { update!(status: :failed, error_code: code) }
   end

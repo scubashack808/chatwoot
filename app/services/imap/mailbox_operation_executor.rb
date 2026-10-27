@@ -32,7 +32,7 @@ class Imap::MailboxOperationExecutor
   # A Junk import was created resolved so it stayed quiet; once it is restored to the inbox it is mail.
   def complete_operation
     operation.complete!
-    operation.conversation.restore_from_junk! if operation.action_restore? && operation.succeeded?
+    operation.reopen_restored_junk!
   end
 
   def execute_with_connection

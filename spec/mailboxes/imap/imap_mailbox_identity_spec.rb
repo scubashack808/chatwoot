@@ -72,6 +72,14 @@ RSpec.describe Imap::ImapMailbox do
       expect(conversation.messages.last.imap_identity.roles).to eq ['spam']
     end
 
+    it 'stays resolved on an inbox with an active bot, so no bot takes on the spam' do
+      create(:agent_bot_inbox, inbox: channel.inbox, agent_bot: create(:agent_bot, account: account))
+
+      described_class.new.process(junk, channel, junk: true)
+
+      expect(channel.inbox.conversations.last.reload).to be_resolved
+    end
+
     it 'adds junk that threads into an existing conversation without marking it junk, and reopens it' do
       existing = create(:conversation, account: account, inbox: channel.inbox, status: :resolved)
       create(:message, conversation: existing, account: account, inbox: channel.inbox, source_id: 'thread@example.com')

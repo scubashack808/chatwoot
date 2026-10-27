@@ -22,6 +22,22 @@ describe MessageTemplates::HookExecutionService do
     end
   end
 
+  context 'when the conversation was imported from the Junk folder' do
+    it 'sends no greeting or out-of-office reply to the spam sender' do
+      contact = create(:contact)
+      conversation = create(:conversation, contact: contact, additional_attributes: { Conversation::JUNK_IMPORT_KEY => true })
+      conversation.inbox.update(greeting_enabled: true, greeting_message: 'Hi', working_hours_enabled: true,
+                                out_of_office_message: 'We are away')
+      allow(MessageTemplates::Template::Greeting).to receive(:new)
+      allow(MessageTemplates::Template::OutOfOffice).to receive(:new)
+
+      create(:message, conversation: conversation, account: conversation.account, message_type: :incoming)
+
+      expect(MessageTemplates::Template::Greeting).not_to have_received(:new)
+      expect(MessageTemplates::Template::OutOfOffice).not_to have_received(:new)
+    end
+  end
+
   context 'when Greeting Message' do
     it 'doesnot calls ::MessageTemplates::Template::Greeting if greeting_message is empty' do
       contact = create(:contact, email: nil)

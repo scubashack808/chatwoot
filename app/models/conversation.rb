@@ -313,6 +313,9 @@ class Conversation < ApplicationRecord
   end
 
   def determine_conversation_status
+    # A Junk import arrives resolved and must stay that way; no bot or assistant takes it on.
+    return if junk_import?
+
     self.status = :resolved and return if contact.blocked?
 
     return handle_campaign_status if campaign.present?

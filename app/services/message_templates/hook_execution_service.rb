@@ -4,6 +4,8 @@ class MessageTemplates::HookExecutionService
   def perform
     return if conversation.last_incoming_message.blank?
     return if message.auto_reply_email?
+    # Never send greetings or out-of-office replies to a spam sender.
+    return if conversation.junk_import?
 
     trigger_templates
   end

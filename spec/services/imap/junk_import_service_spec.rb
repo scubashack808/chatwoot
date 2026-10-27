@@ -93,6 +93,57 @@ RSpec.describe Imap::JunkImportService do
     expect(inbox.messages.where(source_id: 'spam-1@example.test')).to exist
   end
 
+  it 'imports one conversation when the same Message-ID sits in Junk twice' do
+    junk_folder[12] = raw_mail('spam-1@example.test')
+
+    report = nil
+    expect { report = described_class.new(channel: channel).perform }.to change(inbox.conversations, :count).by(1)
+    expect(report).to include(imported: 1, duplicate_in_batch: 1)
+  end
+
+  context 'with a cache that persists between cycles' do
+    before { allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new) }
+
+    it 'stops re-fetching mail the mailbox rejects, such as backscatter with no usable sender' do
+      junk_folder.replace(11 => raw_mail('bounce@example.test', from: 'not-an-address'))
+
+      first = described_class.new(channel: channel).perform
+      second = described_class.new(channel: channel).perform
+
+      expect(first).to include(rejected: 1)
+      expect(first[:imported].to_i).to eq 0
+      expect(second).to include(skipped: 1)
+      expect(imap).to have_received(:uid_fetch).with(anything, ['BODY.PEEK[]']).once
+    end
+
+    it 'gives up on a message after it fails three cycles in a row, without blocking the others' do
+      mailbox = instance_double(Imap::ImapMailbox)
+      allow(Imap::ImapMailbox).to receive(:new).and_return(mailbox)
+      allow(mailbox).to receive(:process).and_raise(StandardError, 'boom')
+
+      3.times { described_class.new(channel: channel).perform }
+      report = described_class.new(channel: channel).perform
+
+      expect(report).to include(skipped: 2)
+      expect(report[:failed].to_i).to eq 0
+    end
+  end
+
+  it 'records the Gmail stable message id when the server offers it' do
+    allow(imap).to receive(:capabilities).and_return(%w[IMAP4REV1 SPECIAL-USE X-GM-EXT-1])
+    allow(imap).to receive(:uid_fetch) do |uids, attributes|
+      if attributes.include?('BODY.PEEK[]')
+        [instance_double(Net::IMAP::FetchData, attr: { 'BODY[]' => junk_folder[uids], 'X-GM-MSGID' => 9_876_000 + uids })]
+      else
+        Array(uids).map { |uid| header_data(uid) }
+      end
+    end
+
+    described_class.new(channel: channel).perform
+
+    expect(inbox.messages.find_by(source_id: 'spam-1@example.test').imap_identity.provider_id).to eq '9876011'
+  end
+
   it 'skips when no folder claims \\Junk rather than guessing one' do
     allow(imap).to receive(:list).with('', '*').and_return([Net::IMAP::MailboxList.new([:Haschildren], '.', 'INBOX')])
 
