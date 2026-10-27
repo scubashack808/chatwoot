@@ -156,10 +156,13 @@ describe('quotedEmailHelper', () => {
   });
 
   describe('getInboxEmail', () => {
-    it('returns email from contentAttributes.email.to', () => {
+    it('returns email from contentAttributes.email.from', () => {
       const lastEmail = {
         contentAttributes: {
-          email: { to: ['inbox@example.com'] },
+          email: {
+            from: ['inbox@example.com'],
+            to: ['customer@example.com'],
+          },
         },
       };
       const result = getInboxEmail(lastEmail, {});
@@ -173,6 +176,21 @@ describe('quotedEmailHelper', () => {
       expect(result).toBe('support@example.com');
     });
 
+    it.each([undefined, [], [''], ['  ']])(
+      'falls back to inbox email, not the recipient, for From %j',
+      from => {
+        const lastEmail = {
+          contentAttributes: {
+            email: { from, to: ['customer@example.com'] },
+          },
+        };
+        expect(
+          getInboxEmail(lastEmail, { email: ' support@example.com ' })
+        ).toBe('support@example.com');
+        expect(getInboxEmail(lastEmail, {})).toBe('');
+      }
+    );
+
     it('returns empty string if no email found', () => {
       expect(getInboxEmail({}, {})).toBe('');
     });
@@ -180,7 +198,7 @@ describe('quotedEmailHelper', () => {
     it('trims whitespace from emails', () => {
       const lastEmail = {
         contentAttributes: {
-          email: { to: ['  inbox@example.com  '] },
+          email: { from: ['  inbox@example.com  '] },
         },
       };
       const result = getInboxEmail(lastEmail, {});
@@ -226,7 +244,8 @@ describe('quotedEmailHelper', () => {
         contentAttributes: {
           email: {
             date: '2024-01-15T10:30:00Z',
-            to: ['support@example.com'],
+            from: ['support@example.com'],
+            to: ['customer@example.com'],
           },
         },
       };
@@ -242,7 +261,8 @@ describe('quotedEmailHelper', () => {
         contentAttributes: {
           email: {
             date: '2024-01-15T10:30:00Z',
-            to: ['inbox@example.com'],
+            from: ['inbox@example.com'],
+            to: ['customer@example.com'],
           },
         },
       };
@@ -259,22 +279,64 @@ describe('quotedEmailHelper', () => {
   });
 
   describe('buildQuotedEmailHeader', () => {
-    it('uses inbox email for outgoing messages (message_type: 1)', () => {
+    it.each(['contentAttributes', 'content_attributes'])(
+      'uses the outgoing From alias from %s instead of the recipient',
+      attributeKey => {
+        const lastEmail = {
+          message_type: 1,
+          sender: { name: 'Agent', email: 'agent@example.com' },
+          [attributeKey]: {
+            email: {
+              date: '2024-01-15T10:30:00Z',
+              from: ['reservations@example.com'],
+              to: ['customer@example.com'],
+              text_content: { full: 'The trip starts at 7am.' },
+            },
+          },
+        };
+        const inbox = { name: 'Support', email: 'support@example.com' };
+        const contact = { name: 'Customer', email: 'customer@example.com' };
+        const header = buildQuotedEmailHeader(lastEmail, contact, inbox);
+        expect(header).toContain('Support <reservations@example.com> wrote:');
+        expect(header).not.toContain('customer@example.com');
+        expect(header).not.toContain('support@example.com');
+        expect(header).not.toContain('agent@example.com');
+
+        const body = appendQuotedTextToMessage(
+          'Following up.',
+          extractQuotedEmailText(lastEmail),
+          header
+        );
+        expect(body).toContain('Support <reservations@example.com> wrote:');
+        expect(body).toContain('The trip starts at 7am.');
+        expect(body).not.toContain('<customer@example.com> wrote:');
+      }
+    );
+
+    it('uses inbox identity for outgoing messages without envelope metadata', () => {
+      const lastEmail = { message_type: 1, created_at: 1705314600 };
+      const inbox = { name: 'Support', email: 'support@example.com' };
+      expect(buildQuotedEmailHeader(lastEmail, {}, inbox)).toContain(
+        'Support <support@example.com> wrote:'
+      );
+    });
+
+    it('keeps the incoming envelope customer author', () => {
       const lastEmail = {
-        message_type: 1,
-        contentAttributes: {
+        message_type: 0,
+        content_attributes: {
           email: {
             date: '2024-01-15T10:30:00Z',
-            to: ['support@example.com'],
+            from: ['customer@example.com'],
+            to: ['reservations@example.com'],
           },
         },
       };
+      const contact = { name: 'Customer', email: 'customer@example.com' };
       const inbox = { name: 'Support', email: 'support@example.com' };
-      const contact = { name: 'John Doe', email: 'john@example.com' };
-      const result = buildQuotedEmailHeader(lastEmail, contact, inbox);
-      expect(result).toContain('Support');
-      expect(result).toContain('support@example.com');
-      expect(result).not.toContain('John Doe');
+      expect(buildQuotedEmailHeader(lastEmail, contact, inbox)).toContain(
+        'Customer <customer@example.com> wrote:'
+      );
     });
 
     it('uses contact email for incoming messages (message_type: 0)', () => {
