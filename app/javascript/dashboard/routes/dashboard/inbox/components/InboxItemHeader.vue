@@ -1,5 +1,4 @@
 <script>
-import { mapGetters } from 'vuex';
 import { useAlert, useTrack } from 'dashboard/composables';
 import { getUnixTime } from 'date-fns';
 import { CMD_SNOOZE_NOTIFICATION } from 'dashboard/helper/commandbar/events';
@@ -36,9 +35,6 @@ export default {
   emits: ['next', 'prev'],
   data() {
     return { showCustomSnoozeModal: false };
-  },
-  computed: {
-    ...mapGetters({ meta: 'notifications/getMeta' }),
   },
   mounted() {
     emitter.on(CMD_SNOOZE_NOTIFICATION, this.onCmdSnoozeNotification);
@@ -88,8 +84,6 @@ export default {
       this.$store
         .dispatch('notifications/delete', {
           notification: this.activeNotification,
-          unread_count: this.meta.unreadCount,
-          count: this.meta.count,
         })
         .then(() => {
           useAlert(this.$t('INBOX.ALERTS.DELETE'));

@@ -132,8 +132,6 @@ const deleteNotification = async notificationItem => {
   try {
     await store.dispatch('notifications/delete', {
       notification: notificationItem,
-      unread_count: meta.value.unreadCount,
-      count: meta.value.count,
     });
 
     useAlert(t('INBOX.ALERTS.DELETE'));
