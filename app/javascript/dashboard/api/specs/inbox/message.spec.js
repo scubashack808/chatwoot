@@ -44,6 +44,118 @@ describe('#ConversationAPI', () => {
       );
     });
   });
+  describe('#create', () => {
+    let transport;
+    let originalPath;
+
+    beforeEach(() => {
+      originalPath = window.location.pathname;
+      window.history.replaceState({}, '', '/app/accounts/7/conversations/123');
+      transport = vi.fn().mockResolvedValue({ data: {} });
+      vi.stubGlobal('axios', transport);
+    });
+
+    afterEach(() => {
+      window.history.replaceState({}, '', originalPath);
+      vi.unstubAllGlobals();
+    });
+
+    it.each([
+      {
+        conversation_id: 123,
+        cc_emails: 'crew@example.com',
+        bcc_emails: 'archive@example.com',
+        to_emails: 'guest@example.com',
+        content_attributes: {
+          from_email: 'alias@example.com',
+          in_reply_to: 42,
+        },
+        template_params: {
+          processed_params: { body: { guest_name: 'Guest' } },
+        },
+      },
+      {
+        conversationId: 123,
+        conversation_id: 123,
+        ccEmails: 'crew@example.com',
+        bccEmails: 'archive@example.com',
+        toEmails: 'guest@example.com',
+        contentAttributes: { from_email: 'alias@example.com', in_reply_to: 42 },
+        templateParams: { processed_params: { body: { guest_name: 'Guest' } } },
+      },
+    ])(
+      'preserves the envelope and nested attributes for input %#',
+      async input => {
+        await messageAPI.create({
+          ...input,
+          message: 'Retry me',
+          private: false,
+          echo_id: 'echo-1',
+        });
+
+        expect(transport).toHaveBeenCalledExactlyOnceWith({
+          method: 'post',
+          url: '/api/v1/accounts/7/conversations/123/messages',
+          data: {
+            content: 'Retry me',
+            private: false,
+            echo_id: 'echo-1',
+            cc_emails: 'crew@example.com',
+            bcc_emails: 'archive@example.com',
+            to_emails: 'guest@example.com',
+            content_attributes: {
+              from_email: 'alias@example.com',
+              in_reply_to: 42,
+            },
+            template_params: {
+              processed_params: { body: { guest_name: 'Guest' } },
+            },
+          },
+        });
+      }
+    );
+
+    it('preserves file identity and snake_case voice and envelope fields', async () => {
+      const file = new File(['audio-data'], 'message.ogg', {
+        type: 'audio/ogg',
+      });
+      await messageAPI.create({
+        conversation_id: 123,
+        message: 'Retry me',
+        private: false,
+        echo_id: 'echo-1',
+        files: [file],
+        is_voice_message: true,
+        cc_emails: 'crew@example.com',
+        bcc_emails: 'archive@example.com',
+        to_emails: 'guest@example.com',
+        content_attributes: {
+          from_email: 'alias@example.com',
+          in_reply_to: 42,
+        },
+      });
+
+      const request = transport.mock.calls[0][0];
+      expect(request.url).toBe('/api/v1/accounts/7/conversations/123/messages');
+      expect(request.data).toBeInstanceOf(FormData);
+      expect(request.data.get('attachments[]')).toBe(file);
+      expect(Object.fromEntries(request.data)).toEqual({
+        'attachments[]': file,
+        content: 'Retry me',
+        private: 'false',
+        echo_id: 'echo-1',
+        is_voice_message: 'true',
+        cc_emails: 'crew@example.com',
+        bcc_emails: 'archive@example.com',
+        to_emails: 'guest@example.com',
+        content_attributes: JSON.stringify({
+          from_email: 'alias@example.com',
+          in_reply_to: 42,
+        }),
+      });
+    });
+  });
+
   describe('#buildCreatePayload', () => {
     it('builds form payload if file is available', () => {
       const formPayload = buildCreatePayload({
