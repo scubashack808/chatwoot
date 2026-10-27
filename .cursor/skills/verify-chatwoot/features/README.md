@@ -25,6 +25,7 @@ A receipt proves only its recorded candidate/helper hashes. Later changes need n
 
 - [Login](login.md): rejection, sign-in, logout. Implemented pilot entry point.
 - [Email reply](email-reply.md): seeded conversation, public reply, SMTP capture, stored state. Implemented pilot; inbound transport unverified.
+- [Email forward](email-forward.md): forward one email with a note to new recipients; gating, validation, delivery, persistence, retry, reply threading, Sent copy and scoping. Implemented (`verify.py forward`); inbound IMAP transport unverified.
 - [Draft addressing](draft-addressing.md): WOOT-29, preserve unsent fields across delivery updates. Mapped, unexecuted.
 - [Conversation snooze](snooze.md): WOOT-30, snooze B while A is selected. Mapped, unexecuted.
 - [Unread state](unread.md): WOOT-31, stale timer versus newer unread events. Mapped, unexecuted.

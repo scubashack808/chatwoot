@@ -313,4 +313,94 @@ describe Messages::MessageBuilder do
       end
     end
   end
+
+  describe '#perform when forwarding an email' do
+    let!(:channel_email) { create(:channel_email, account: account, email: 'support@example.com') }
+    let(:conversation) { create(:conversation, inbox: channel_email.inbox, account: account) }
+    let(:source) do
+      create(:message, conversation: conversation, message_type: :incoming, content: 'Invoice attached',
+                       content_attributes: { email: { subject: 'Invoice 42', from: ['vendor@example.com'], to: ['support@example.com'],
+                                                      date: 'Mon, 27 Oct 2026 10:15:00 -1000',
+                                                      html_content: { full: '<p>Invoice body</p>' } } })
+    end
+    let(:params) do
+      ActionController::Parameters.new({ content: 'Please pay this one', to_emails: 'rachel@example.com', cc_emails: 'ops@example.com',
+                                         content_attributes: { forwarded_message_id: source.id } })
+    end
+
+    before do
+      source.attachments.create!(account_id: account.id, file_type: :file,
+                                 file: Rack::Test::UploadedFile.new('spec/assets/avatar.png', 'image/png'))
+    end
+
+    it 'builds the forward from the source message' do
+      message = message_builder
+
+      expect(message.content_attributes[:forwarded_message_id]).to eq source.id
+      expect(message.content_attributes[:to_emails]).to eq ['rachel@example.com']
+      expect(message.content_attributes[:cc_emails]).to eq ['ops@example.com']
+      expect(message.content_attributes.dig(:email, :subject)).to eq 'Fwd: Invoice 42'
+      expect(message.content_attributes.dig(:email, :to)).to eq ['rachel@example.com']
+      html = message.content_attributes.dig(:email, :html_content, :reply)
+      expect(html).to include('Please pay this one', Messages::ForwardEmailService::FORWARD_MARKER, 'Subject: Invoice 42', '<p>Invoice body</p>')
+      expect(message.content).to include('Please pay this one', '<vendor@example.com>')
+    end
+
+    it 'attaches the source files by reusing their blobs' do
+      message = message_builder
+
+      expect(message.attachments.map { |attachment| attachment.file.blob.id }).to eq(source.attachments.map { |attachment| attachment.file.blob.id })
+    end
+
+    it 'does not count as a reply to the customer' do
+      waiting_since = 1.hour.ago.round
+      conversation.update!(waiting_since: waiting_since, first_reply_created_at: nil)
+
+      message_builder
+
+      expect(conversation.reload.waiting_since).to eq(waiting_since)
+      expect(conversation.first_reply_created_at).to be_nil
+    end
+
+    it 'leaves the first reply to the customer counted as the first reply' do
+      message_builder
+      reply = described_class.new(user, conversation, ActionController::Parameters.new({ content: 'Paid, thanks' })).perform
+
+      expect(conversation.reload.first_reply_created_at).to eq(reply.created_at)
+    end
+
+    it 'attributes a forwarded agent reply to the inbox address, not the agent login' do
+      reply = described_class.new(user, conversation, ActionController::Parameters.new({ content: 'Our answer' })).perform
+      params[:content_attributes] = { forwarded_message_id: reply.id }
+
+      expect(message_builder.content).to include("<#{channel_email.email}>")
+      expect(message_builder.content).not_to include(user.email)
+    end
+
+    it 'refuses a failed source message' do
+      source.update!(status: :failed)
+
+      expect { message_builder }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+
+    it 'does not double the forward prefix' do
+      source.update!(content_attributes: source.content_attributes.merge(email: { subject: 'Fwd: Invoice 42' }))
+
+      expect(message_builder.content_attributes.dig(:email, :subject)).to eq 'Fwd: Invoice 42'
+    end
+
+    it 'refuses a source message from another conversation' do
+      other_message = create(:message, account: account, inbox: channel_email.inbox,
+                                       conversation: create(:conversation, inbox: channel_email.inbox, account: account))
+      params[:content_attributes] = { forwarded_message_id: other_message.id }
+
+      expect { message_builder }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+
+    it 'refuses a forward without recipients' do
+      params[:to_emails] = ''
+
+      expect { message_builder }.to raise_error(StandardError, I18n.t('conversations.messages.forward.recipient_required'))
+    end
+  end
 end

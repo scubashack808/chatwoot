@@ -53,6 +53,19 @@ RSpec.describe Mailbox::ConversationFinderStrategies::InReplyToStrategy do
       end
     end
 
+    context 'when in_reply_to matches a forward' do
+      before do
+        conversation.messages.create!(source_id: 'forward/42@example.com', account_id: account.id, message_type: 'outgoing',
+                                      inbox_id: email_channel.inbox.id, content: 'Forward',
+                                      content_attributes: { forwarded_message_id: 1 })
+        mail.in_reply_to = 'forward/42@example.com'
+      end
+
+      it 'does not thread a reply to the forward into its conversation' do
+        expect(described_class.new(mail).find).to be_nil
+      end
+    end
+
     context 'when in_reply_to has multiple values' do
       let(:message) do
         conversation.messages.create!(

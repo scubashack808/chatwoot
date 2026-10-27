@@ -97,5 +97,15 @@ RSpec.describe Imap::SentThreadResolver do
       expect(resolved.conversation).to be_nil
       expect(resolved.reason).to eq 'unthreaded'
     end
+
+    it 'refuses a reference to a forward, which went to people outside the conversation' do
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing,
+                       source_id: 'forward/42@example.test', content_attributes: { forwarded_message_id: 1 })
+
+      resolved = described_class.new(inbox: inbox, mail: mail_with('In-Reply-To' => '<forward/42@example.test>')).perform
+
+      expect(resolved.conversation).to be_nil
+      expect(resolved.reason).to eq 'unthreaded'
+    end
   end
 end

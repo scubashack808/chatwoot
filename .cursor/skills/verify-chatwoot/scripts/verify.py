@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Serial, synthetic-only pilot for the already-provisioned native dummy copy."""
 import argparse
+import base64
 import datetime as dt
 import fcntl
 import hashlib
@@ -46,6 +47,19 @@ SHA_LENGTH = 40
 ZERO_SHA = '0' * SHA_LENGTH
 ERROR_TAIL_CHARS = 1800
 PROCESS_TIMESTAMP_RESOLUTION = 1
+MAIL_LIST_LIMIT = 500
+MAIL_WAIT_SECONDS = 45
+UNPROCESSABLE = 422
+FORWARD_MARKER = '---------- Forwarded message ---------'
+FORWARD_SUBJECT_PREFIX = 'Fwd: '
+FORWARD_RECIPIENTS = {'F1_to': ['forward-to-1@chatwoot-dummy.test', 'forward-to-2@chatwoot-dummy.test'],
+                      'F1_cc': ['forward-cc@chatwoot-dummy.test'],
+                      'F2_to': ['forward-to-3@chatwoot-dummy.test'],
+                      'F3_to': ['forward-to-4@chatwoot-dummy.test']}
+FORWARD_REPLIER = 'forward-to-1@chatwoot-dummy.test'
+FORWARD_REPLY_TEXT = 'Synthetic reply to a forward.'
+INVALID_FORWARD_ADDRESS = 'not-an-email'
+AGENT_LOGIN = 'agent@chatwoot-dummy.test'
 RUNTIME_FILES = ('Procfile.worktree', '.env', '.codex/dummy/manage.py', '.codex/dummy/local_http.rb',
                  '.codex/dummy/redis.conf', '.codex/dummy/sidekiq.yml')
 
@@ -260,7 +274,7 @@ def browser_environment(config_path, run_id):
     return dict(os.environ, BH_TELEMETRY='0', BU_CALLER='verify-chatwoot-' + run_id,
                 VERIFY_CHATWOOT_CONFIG=str(config_path))
 
-def browser_run(directory, config, run_id, mode='journey'):
+def browser_run(directory, config, run_id, mode='journey', script='mail_flow.py'):
     config = dict(config, mode=mode)
     config_path = directory / ('browser-config-' + mode + '.json')
     save(directory, config_path.name, config)
@@ -273,7 +287,7 @@ def browser_run(directory, config, run_id, mode='journey'):
             'Browser telemetry must be disabled for this process')
     save(directory, 'browser-privacy.json', {'enabled': False, 'disabled_by_env': True})
     try:
-        with (directory / ('browser-' + mode + '.log')).open('w') as log, (SCRIPT_DIR / 'mail_flow.py').open() as source:
+        with (directory / ('browser-' + mode + '.log')).open('w') as log, (SCRIPT_DIR / script).open() as source:
             try:
                 result = subprocess.run([str(BROWSER)], stdin=source, env=env, stdout=log,
                                         stderr=subprocess.STDOUT, text=True, timeout=BROWSER_TIMEOUT)
@@ -418,9 +432,212 @@ def pilot(args):
         print(json.dumps(receipt, indent=2))
         return 0 if receipt['ok'] else FAILURE_EXIT
 
+def forward_runner(*args):
+    output = command([sys.executable, MANAGER, 'exec', '--', 'bundle', '_2.5.16_', 'exec',
+                      'rails', 'runner', SCRIPT_DIR / 'forward_fixture.rb', *args])
+    lines = [line[len('VERIFY_FORWARD='):] for line in output.splitlines() if line.startswith('VERIFY_FORWARD=')]
+    require(len(lines) == 1, 'Forward fixture runner did not return its single receipt')
+    return json.loads(lines[0])
+
+def mail_ids():
+    return {m['ID'] for m in json.loads(get(f'{MAIL}/api/v1/messages?limit={MAIL_LIST_LIMIT}'))['messages']}
+
+def mail_message(mail_id):
+    message = json.loads(get(f'{MAIL}/api/v1/message/{mail_id}'))
+    message['Headers'] = json.loads(get(f'{MAIL}/api/v1/message/{mail_id}/headers'))
+    return message
+
+def wait_for_mail(before, markers):
+    """New captured mail carrying each marker, keyed by marker."""
+    deadline = time.monotonic() + MAIL_WAIT_SECONDS
+    found = {}
+    while time.monotonic() < deadline:
+        for mail_id in mail_ids() - before - {m['ID'] for m in found.values()}:
+            message = mail_message(mail_id)
+            for marker in markers:
+                if marker in message.get('Text', '') or marker in message.get('HTML', ''):
+                    found.setdefault(marker, message)
+        if all(marker in found for marker in markers):
+            return found
+        time.sleep(POLL_SECONDS)
+    raise RuntimeError('Forward mail not captured for: ' + ', '.join(m for m in markers if m not in found))
+
+def addresses(entries):
+    return sorted(entry['Address'] for entry in entries or [])
+
+def captured_files(message):
+    files = {}
+    for part in (message.get('Attachments') or []) + (message.get('Inline') or []):
+        data = get(f"{MAIL}/api/v1/message/{message['ID']}/part/{part['PartID']}")
+        files[part['FileName']] = {'byte_size': len(data), 'checksum': base64.b64encode(hashlib.md5(data).digest()).decode()}
+    return files
+
+def check(results, name, condition, detail=None):
+    results[name] = {'pass': bool(condition), 'detail': detail}
+
+def judge_delivery(results, name, message, fixture, to, cc, subject, source_attachments, source_html_marker=None, marker=None):
+    headers = {key.lower() for key in message['Headers']}
+    check(results, name + ' subject', message['Subject'] == subject, message['Subject'])
+    check(results, name + ' from', message['From']['Address'] == fixture['sender_email'], message['From']['Address'])
+    check(results, name + ' recipients', addresses(message['To']) == sorted(to) and addresses(message['Cc']) == sorted(cc)
+          and not message.get('Bcc'), {'to': addresses(message['To']), 'cc': addresses(message['Cc'])})
+    every = addresses(message['To']) + addresses(message['Cc']) + addresses(message.get('Bcc'))
+    check(results, name + ' customer not addressed', fixture['vendor_email'] not in every, every)
+    check(results, name + ' new thread', 'in-reply-to' not in headers and 'references' not in headers, sorted(headers))
+    body = message.get('HTML', '')
+    check(results, name + ' body', marker in body and FORWARD_MARKER in body and
+          (source_html_marker is None or source_html_marker in body), {'length': len(body)})
+    expected = {a['filename']: {'byte_size': a['byte_size'], 'checksum': a['checksum']} for a in source_attachments}
+    actual = captured_files(message)
+    check(results, name + ' attachments', actual == expected, {'expected': expected, 'actual': actual})
+
+def judge_stored(results, name, stored, source, to, cc, subject):
+    check(results, name + ' persisted once', len(stored) == 1, [m['id'] for m in stored])
+    if len(stored) != 1:
+        return None
+    message = stored[0]
+    check(results, name + ' persisted forward', message['message_type'] == 'outgoing' and not message['private']
+          and message['forwarded_message_id'] == source['id'] and message['to_emails'] == to
+          and (message['cc_emails'] or []) == cc and message['subject'] == subject and message['html_has_forward_marker'],
+          {k: message[k] for k in ('id', 'status', 'forwarded_message_id', 'to_emails', 'cc_emails', 'subject')})
+    check(results, name + ' blobs reused', sorted(a['blob_id'] for a in message['attachments'])
+          == sorted(a['blob_id'] for a in source['attachments']), message['attachments'])
+    return message
+
+def forward_run(args):
+    candidate(args.expected_sha)
+    lock_path = ROOT / 'tmp/dummy/verify-chatwoot.lock'
+    with lock_path.open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('Another cooperating verification run owns the dummy site')
+        initial = doctor(args.expected_sha)
+        require(initial['ok'], f'Doctor refused; start the dummy on the candidate first: {initial.get("error")}')
+        run_id = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        directory = EVIDENCE / ('forward-' + run_id)
+        directory.mkdir(parents=True, mode=PRIVATE_MODE)
+        tag = run_id.lower()
+        markers = {key: f'Verify Forward {tag} {key}' for key in ('F1', 'F2', 'F3')}
+        receipt = {'run_id': run_id, 'markers': markers, 'ok': False, 'candidate': args.expected_sha,
+                   'source_head': command(['git', 'rev-parse', 'HEAD'], cwd=SOURCE).strip(), 'evidence': str(directory),
+                   'claim': 'native synthetic email-forward journey: UI, captured delivery, persistence and inbound threading',
+                   'limits': ['local SMTP capture, no live mail', 'IMAP reply fed to the mailbox in-process (IMAP disabled)',
+                              'synthetic forward conversation, forwards and captures retained; no reset or deletion']}
+        save(directory, 'initial-doctor.json', initial)
+        files = list(SCRIPT_DIR.parent.rglob('*.md')) + list(SCRIPT_DIR.glob('*.py')) + list(SCRIPT_DIR.glob('*.rb'))
+        save(directory, 'skill-hashes.json', {str(p.relative_to(SCRIPT_DIR.parent)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files})
+        results = {}
+        try:
+            fixture = forward_runner('seed', tag)
+            save(directory, 'forward-fixture.json', fixture)
+            config = {'target_id': args.target_id, 'profile': args.profile, 'directory': str(directory), 'root': str(ROOT),
+                      'forward_fixture': fixture, 'markers': markers, 'recipients': FORWARD_RECIPIENTS}
+            before = mail_ids()
+            receipt['phase'] = 'browser-forward'
+            save(directory, 'receipt.json', receipt)
+            browser_run(directory, config, run_id, mode='forward', script='forward_flow.py')
+            ui = json.loads((directory / 'forward-browser-forward.json').read_text())
+            gating = ui['gating']
+            check(results, 'F5 menu gating', gating['incoming_offers_forward'] and gating['outgoing_offers_forward']
+                  and not gating['private_note_offers_forward'], gating)
+            check(results, 'F4 validation refused', ui['F1'].get('empty_to_refused') and ui['F1'].get('invalid_to_refused'), ui['F1'])
+            for key in ('F1', 'F2', 'F3'):
+                check(results, key + ' rendered in thread', ui[key].get('rendered_subject') and ui[key].get('rendered_forward_block'), ui[key])
+            check(results, 'F1 source body visible in thread', ui['F1'].get('rendered_source_body'), ui['F1'])
+            captured = wait_for_mail(before, list(markers.values()))
+            save(directory, 'forward-captured.json', captured)
+            # Seeding delivers its own agent reply and notifications asynchronously; count only mail
+            # addressed to a forward recipient or to the refused address.
+            watched = {address for addresses in FORWARD_RECIPIENTS.values() for address in addresses} | {INVALID_FORWARD_ADDRESS}
+            forward_mail = [mail_id for mail_id in sorted(mail_ids() - before)
+                            if watched & set(addresses((message := mail_message(mail_id))['To']) + addresses(message['Cc']))]
+            check(results, 'F4 nothing extra sent', len(forward_mail) == len(markers), forward_mail)
+            html, reply, plain = fixture['html_source'], fixture['outgoing_reply'], fixture['plain_source']
+            judge_delivery(results, 'F1', captured[markers['F1']], fixture, FORWARD_RECIPIENTS['F1_to'], FORWARD_RECIPIENTS['F1_cc'],
+                           FORWARD_SUBJECT_PREFIX + html['subject'], html['attachments'], fixture['html_marker'], markers['F1'])
+            judge_delivery(results, 'F2', captured[markers['F2']], fixture, FORWARD_RECIPIENTS['F2_to'], [],
+                           FORWARD_SUBJECT_PREFIX + 'Synthetic invoice 42', [], marker=markers['F2'])
+            f2_body = captured[markers['F2']].get('HTML', '')
+            check(results, "F2 forwarded agent reply attributed to the inbox", f"&lt;{fixture['sender_email']}&gt;" in f2_body
+                  and AGENT_LOGIN not in f2_body, {'length': len(f2_body)})
+            judge_delivery(results, 'F3', captured[markers['F3']], fixture, FORWARD_RECIPIENTS['F3_to'], [],
+                           FORWARD_SUBJECT_PREFIX + plain['subject'], [], marker=markers['F3'])
+            stored = forward_runner('inspect', tag, *markers.values())
+            save(directory, 'forward-persisted.json', stored)
+            f1 = judge_stored(results, 'F1', stored['markers'][markers['F1']], html, FORWARD_RECIPIENTS['F1_to'],
+                              FORWARD_RECIPIENTS['F1_cc'], FORWARD_SUBJECT_PREFIX + html['subject'])
+            judge_stored(results, 'F2', stored['markers'][markers['F2']], reply, FORWARD_RECIPIENTS['F2_to'], [],
+                         FORWARD_SUBJECT_PREFIX + 'Synthetic invoice 42')
+            f3 = judge_stored(results, 'F3', stored['markers'][markers['F3']], plain, FORWARD_RECIPIENTS['F3_to'], [],
+                              FORWARD_SUBJECT_PREFIX + plain['subject'])
+            require(f1 and f3, 'Forwards were not persisted; later scenarios need them')
+
+            receipt['phase'] = 'retry'
+            save(directory, 'receipt.json', receipt)
+            failed = forward_runner('fail', tag, str(f3['id']))
+            save(directory, 'forward-failed.json', failed)
+            check(results, 'F6 marked failed', failed['status'] == 'failed', failed['status'])
+            before_retry = mail_ids()
+            browser_run(directory, dict(config, failed_forward_id=f3['id']), run_id, mode='retry', script='forward_flow.py')
+            retry_ui = json.loads((directory / 'forward-browser-retry.json').read_text())
+            check(results, 'F5 failed message offers no forward', retry_ui['failed_offers_forward'] is False, retry_ui)
+            forward_addresses = {address for addresses in FORWARD_RECIPIENTS.values() for address in addresses}
+            composer = retry_ui.get('composer_recipients') or []
+            check(results, 'F10 reply composer not addressed to forward recipients', bool(composer) and
+                  not any(address.strip() in forward_addresses for row in composer for address in row['value'].split(',')), composer)
+            retried = wait_for_mail(before_retry, [markers['F3']])[markers['F3']]
+            save(directory, 'forward-retry-captured.json', retried)
+            check(results, 'F6 retry recipients', addresses(retried['To']) == FORWARD_RECIPIENTS['F3_to'] and not retried['Cc'],
+                  addresses(retried['To']))
+            after_retry = forward_runner('inspect', tag, markers['F3'])['markers'][markers['F3']]
+            check(results, 'F6 retried forward kept its forward', len(after_retry) == 1 and after_retry[0]['external_error'] is None
+                  and after_retry[0]['to_emails'] == FORWARD_RECIPIENTS['F3_to'] and after_retry[0]['forwarded_message_id'] == plain['id'],
+                  after_retry)
+
+            receipt['phase'] = 'server-checks'
+            save(directory, 'receipt.json', receipt)
+            reply_result = forward_runner('reply', tag, str(f1['id']))
+            save(directory, 'forward-reply.json', reply_result)
+            check(results, 'F7 reply goes to the inbox address', reply_result['reply_address'] == fixture['sender_email'], reply_result)
+            check(results, 'F7 ActionMailbox threading does not claim it', reply_result['action_mailbox_conversation_id'] is None, reply_result)
+            check(results, 'F7 reply opens a new conversation',
+                  reply_result['after']['conversations'] == reply_result['before']['conversations'] + 1
+                  and reply_result['after']['source_messages'] == reply_result['before']['source_messages']
+                  and reply_result['reply_conversation_id'] not in (None, reply_result['source_conversation_id'])
+                  and reply_result['reply_contact_email'] == FORWARD_REPLIER
+                  and FORWARD_REPLY_TEXT in (reply_result['reply_content'] or ''), reply_result)
+            rerender = forward_runner('rerender', tag, str(f1['id']))
+            save(directory, 'forward-rerender.json', rerender)
+            sent = captured[markers['F1']]
+            squash = lambda text: re.sub(r'\s+', '', text or '')
+            check(results, 'F8 Sent copy matches delivery', rerender['subject'] == sent['Subject']
+                  and sorted(rerender['to']) == addresses(sent['To']) and sorted(rerender['cc'] or []) == addresses(sent['Cc'])
+                  and rerender['message_id'] == sent['MessageID'] and not rerender['in_reply_to'] and not rerender['references']
+                  and squash(rerender['html']) == squash(sent['HTML']),
+                  {k: rerender[k] for k in ('subject', 'to', 'cc', 'message_id', 'in_reply_to', 'references')})
+            before_scope = mail_ids()
+            scope = forward_runner('scope', tag)
+            save(directory, 'forward-scope.json', scope)
+            time.sleep(POLL_SECONDS)
+            check(results, 'F9 foreign source refused', scope['status'] == UNPROCESSABLE and scope['messages_created'] == 0
+                  and "Couldn't find Message" in (scope.get('error') or '')
+                  and mail_ids() == before_scope, scope)
+            receipt['ok'] = all(result['pass'] for result in results.values())
+        except BaseException as error:
+            receipt['error'] = str(error)
+        finally:
+            receipt['phase'] = 'finished'
+            receipt['scenarios'] = results
+            receipt['failed'] = [name for name, result in results.items() if not result['pass']]
+            receipt['ok'] = receipt['ok'] and not receipt['failed']
+            save(directory, 'receipt.json', receipt)
+        print(json.dumps(receipt, indent=2))
+        return 0 if receipt['ok'] else FAILURE_EXIT
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['doctor', 'pilot'])
+    parser.add_argument('action', choices=['doctor', 'pilot', 'forward'])
     parser.add_argument('--expected-sha', default=BASE_SHA)
     parser.add_argument('--target-id')
     parser.add_argument('--restart-existing', action='store_true')
@@ -433,8 +650,8 @@ def main():
         result = doctor(args.expected_sha)
         print(json.dumps(result, indent=2))
         return 0 if result['ok'] else FAILURE_EXIT
-    require(bool(args.target_id), 'pilot requires an exactly discovered --target-id')
-    return pilot(args)
+    require(bool(args.target_id), args.action + ' requires an exactly discovered --target-id')
+    return forward_run(args) if args.action == 'forward' else pilot(args)
 
 def interrupt(signum, frame):
     raise InterruptedError('Interrupted by ' + signal.Signals(signum).name)

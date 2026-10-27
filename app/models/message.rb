@@ -281,6 +281,11 @@ class Message < ApplicationRecord
     true
   end
 
+  # A message an agent forwarded onward to new recipients (see Messages::ForwardEmailService).
+  def email_forward?
+    content_attributes[:forwarded_message_id].present?
+  end
+
   def auto_reply_email?
     return false unless incoming_email? || inbox.email?
 
@@ -290,10 +295,13 @@ class Message < ApplicationRecord
   def valid_first_reply?
     return false unless human_response? && !private?
     return false if conversation.first_reply_created_at.present?
+    # A forward went to other people, so it is not a reply to the customer either. content_attributes
+    # is stored as an encoded JSON string, which SQL cannot look inside, so forwards are left out here.
     return false if conversation.messages.outgoing
                                 .where.not(sender_type: ['AgentBot', 'Captain::Assistant'])
                                 .where.not(private: true)
-                                .where("(additional_attributes->'campaign_id') is null").count > 1
+                                .where("(additional_attributes->'campaign_id') is null")
+                                .to_a.count { |message| !message.email_forward? } > 1
 
     true
   end
@@ -430,7 +438,8 @@ class Message < ApplicationRecord
     # if automation rule id is present, it's not a human response
     # if campaign id is present, it's not a human response
     # external echo messages are responses sent from the native app (WhatsApp Business, Instagram)
-    outgoing? &&
+    # a forward goes to other people, so it does not answer the customer
+    outgoing? && !email_forward? &&
       content_attributes['automation_rule_id'].blank? &&
       additional_attributes['campaign_id'].blank? &&
       (sender.is_a?(User) || content_attributes['external_echo'].present?)

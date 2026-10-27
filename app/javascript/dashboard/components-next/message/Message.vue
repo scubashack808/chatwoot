@@ -46,6 +46,7 @@ import WhatsappReferral from './bubbles/Text/WhatsappReferral.vue';
 
 import MessageError from './MessageError.vue';
 import ContextMenu from 'dashboard/modules/conversations/components/MessageContextMenu.vue';
+import ForwardEmailDialog from './ForwardEmailDialog.vue';
 import { useBranding } from 'shared/composables/useBranding';
 
 /**
@@ -145,6 +146,7 @@ const emit = defineEmits(['retry']);
 const contextMenuPosition = ref({});
 const showBackgroundHighlight = ref(false);
 const showContextMenu = ref(false);
+const forwardDialogRef = ref(null);
 const { t } = useI18n();
 const route = useRoute();
 const inboxGetter = useMapGetter('inboxes/getInbox');
@@ -408,6 +410,11 @@ const contextMenuEnabledOptions = computed(() => {
       !props.private &&
       props.inboxSupportsReplyTo.outgoing &&
       !isFailedOrProcessing,
+    forwardEmail:
+      props.isEmailInbox &&
+      variant.value === MESSAGE_VARIANTS.EMAIL &&
+      !isFailedOrProcessing &&
+      !isMessageDeleted.value,
     report:
       isOnChatwootCloud.value &&
       isCaptainMessage.value &&
@@ -469,6 +476,10 @@ function handleReplyTo() {
 
   LocalStorage.updateJsonStore(replyStorageKey, conversationId, replyTo);
   emitter.emit(BUS_EVENTS.TOGGLE_REPLY_TO_MESSAGE, props);
+}
+
+function handleForwardEmail() {
+  forwardDialogRef.value?.open();
 }
 
 const avatarInfo = computed(() => {
@@ -617,8 +628,17 @@ provideMessageContext({
         @open="openContextMenu"
         @close="closeContextMenu"
         @reply-to="handleReplyTo"
+        @forward-email="handleForwardEmail"
       />
     </div>
+    <ForwardEmailDialog
+      v-if="contextMenuEnabledOptions.forwardEmail"
+      ref="forwardDialogRef"
+      :message-id="id"
+      :conversation-id="conversationId"
+      :email="contentAttributes.email"
+      :attachments="attachments"
+    />
   </div>
 </template>
 

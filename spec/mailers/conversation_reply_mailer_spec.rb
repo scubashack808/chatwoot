@@ -563,6 +563,54 @@ RSpec.describe ConversationReplyMailer do
       end
     end
 
+    context 'with a forwarded email' do
+      let(:contact) { create(:contact, account: account, email: 'customer@example.com') }
+      let(:conversation) { create(:conversation, assignee: agent, inbox: email_channel.inbox, account: account, contact: contact).reload }
+      let(:source) do
+        create(:message, conversation: conversation, account: account, message_type: :incoming, content: 'Invoice attached',
+                         content_attributes: { email: { subject: 'Invoice 42', from: ['vendor@example.com'], message_id: 'vendor-1@example.com',
+                                                        html_content: { full: '<p>Invoice body</p>' } } })
+      end
+      let(:forward) do
+        source.attachments.create!(account_id: account.id, file_type: :file,
+                                   file: Rack::Test::UploadedFile.new('spec/assets/avatar.png', 'image/png'))
+        params = ActionController::Parameters.new({ content: 'Please pay this one', to_emails: 'rachel@example.com',
+                                                    cc_emails: 'ops@example.com', content_attributes: { forwarded_message_id: source.id } })
+        Messages::MessageBuilder.new(agent, conversation, params).perform
+      end
+      let(:mail) { described_class.email_reply(forward).deliver_now }
+
+      it 'uses the stored Fwd: subject' do
+        expect(mail.subject).to eq('Fwd: Invoice 42')
+      end
+
+      it 'goes only to the forward recipients' do
+        expect(mail.to).to eq(['rachel@example.com'])
+        expect(mail.cc).to eq(['ops@example.com'])
+        expect(mail.to + mail.cc).not_to include('customer@example.com')
+      end
+
+      it 'asks for replies at the inbox address, not the conversation reply address' do
+        expect(mail.reply_to).to eq([email_channel.email])
+      end
+
+      it 'starts a new thread' do
+        expect(mail.in_reply_to).to be_nil
+        expect(mail.references).to be_nil
+        expect(mail.message_id).to start_with("forward/#{forward.id}@")
+      end
+
+      it 'carries the note, the forwarded header, the original body and the attachments' do
+        expect(mail.html_part.decoded).to include('Please pay this one', Messages::ForwardEmailService::FORWARD_MARKER, '<p>Invoice body</p>')
+        expect(mail.attachments.map(&:filename)).to include('avatar.png')
+      end
+
+      it 'renders the same mail again for Sent sync' do
+        expect(described_class.email_reply(forward).message.subject).to eq(mail.subject)
+        expect(described_class.email_reply(forward).message.message_id).to eq(mail.message_id)
+      end
+    end
+
     context 'when smtp enabled for email channel' do
       let(:smtp_channel) do
         create(:channel_email, smtp_enabled: true, smtp_address: 'smtp.gmail.com', smtp_port: 587, smtp_login: 'smtp@gmail.com',

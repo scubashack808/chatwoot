@@ -2,6 +2,7 @@ class Messages::MessageBuilder
   include ::FileTypeHelper
   include ::EmailHelper
   include ::DataHelper
+  include Messages::ForwardedMessageHelper
 
   attr_reader :message
 
@@ -28,6 +29,7 @@ class Messages::MessageBuilder
     # When the message has no quoted content, it will just be rendered as a regular message
     # The frontend is equipped to handle this case
     process_email_content
+    process_forwarded_email
     @message.save!
     @message
   end
@@ -158,7 +160,7 @@ class Messages::MessageBuilder
   end
 
   def should_process_email_content?
-    email_inbox? && !@private && @message.content.present?
+    email_inbox? && !@private && @message.content.present? && forwarded_message_id.blank?
   end
 
   def build_email_attributes

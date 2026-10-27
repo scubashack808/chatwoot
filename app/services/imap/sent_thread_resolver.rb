@@ -51,11 +51,12 @@ class Imap::SentThreadResolver
   end
 
   # Only messages already in THIS inbox count. A Message-ID that belongs to another inbox is not
-  # evidence about this conversation.
+  # evidence about this conversation. A forward went to other people, so mail answering it is not
+  # evidence either.
   def conversations_for(message_ids)
     return [] if message_ids.empty?
 
-    inbox.messages.where(source_id: message_ids).reorder(nil).distinct.pluck(:conversation_id)
+    inbox.messages.where(source_id: message_ids).reorder(nil).reject(&:email_forward?).map(&:conversation_id).uniq
   end
 
   def conversations_by_uuid
