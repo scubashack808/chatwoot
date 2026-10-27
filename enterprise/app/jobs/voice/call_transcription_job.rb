@@ -1,5 +1,7 @@
 class Voice::CallTranscriptionJob < ApplicationJob
   queue_as :low
+  # Recording scheduling clears durable intent only after the adapter accepts the job.
+  self.enqueue_after_transaction_commit = :never
 
   # A recording OpenAI rejects (corrupt/unsupported audio) or credentials it refuses
   # will never succeed on retry — drop the job instead of hammering the API.

@@ -133,6 +133,80 @@ RSpec.describe Voice::Provider::Twilio::RecordingAttachmentService do
       expect { perform_service }.not_to have_enqueued_job(Voice::CallTranscriptionJob)
     end
 
+    it 'recovers a failed enqueue with fresh call state without downloading the recording again' do
+      adapter = Voice::CallTranscriptionJob.queue_adapter
+      allow(adapter).to receive(:enqueue).and_call_original
+      allow(adapter).to receive(:enqueue).with(instance_of(Voice::CallTranscriptionJob))
+                                         .and_raise('synthetic enqueue failure before acceptance')
+
+      expect { perform_service }.to raise_error('synthetic enqueue failure before acceptance')
+      blob_id = call.reload.recording.blob.id
+      expect(call.recording_sid).to eq(recording_sid)
+      expect(call.duration_seconds).to eq(47)
+      expect(enqueued_jobs.count { |job| job[:job] == Voice::CallTranscriptionJob }).to eq(0)
+
+      allow(adapter).to receive(:enqueue).with(instance_of(Voice::CallTranscriptionJob)).and_call_original
+      2.times do
+        described_class.new(call: Call.find(call.id), recording_sid: recording_sid, recording_url: recording_url).perform
+      end
+
+      expect(enqueued_jobs.count { |job| job[:job] == Voice::CallTranscriptionJob }).to eq(1)
+      expect(SafeFetch).to have_received(:fetch).once
+      expect(call.reload.recording.blob.id).to eq(blob_id)
+    end
+
+    it 'retains intent when enqueue is aborted and clears it after a successful retry' do
+      allow(Voice::CallTranscriptionJob).to receive(:perform_later).and_return(false)
+      perform_service
+      expect(call.reload.transcription_pending_recording_sid).to eq(recording_sid)
+
+      allow(Voice::CallTranscriptionJob).to receive(:perform_later).and_call_original
+      expect { perform_service }.to have_enqueued_job(Voice::CallTranscriptionJob).with(call.id)
+      expect(call.reload.transcription_pending_recording_sid).to be_nil
+      expect(SafeFetch).to have_received(:fetch).once
+    end
+
+    it 'does not infer missing scheduling for legacy recordings without intent' do
+      call.recording.attach(io: StringIO.new('AUDIO'), filename: 'legacy.wav', content_type: 'audio/wav')
+      call.update!(recording_sid: recording_sid)
+
+      expect { perform_service }.not_to have_enqueued_job(Voice::CallTranscriptionJob)
+      expect(SafeFetch).not_to have_received(:fetch)
+    end
+
+    it 'does not schedule intent for a different recording' do
+      call.recording.attach(io: StringIO.new('AUDIO'), filename: 'other.wav', content_type: 'audio/wav')
+      call.update!(recording_sid: recording_sid, transcription_pending_recording_sid: 'RE_other')
+
+      expect { perform_service }.not_to have_enqueued_job(Voice::CallTranscriptionJob)
+      expect(call.reload.transcription_pending_recording_sid).to eq('RE_other')
+      expect(SafeFetch).not_to have_received(:fetch)
+    end
+
+    it 'recovers pending scheduling when another invocation stored the recording inside the lock' do
+      call.recording.attach(io: StringIO.new('AUDIO'), filename: 'winner.wav', content_type: 'audio/wav')
+      allow(call).to receive(:with_lock).and_wrap_original do |original, &block|
+        call.update!(recording_sid: recording_sid, transcription_pending_recording_sid: recording_sid) if call.reload.recording_sid.blank?
+        original.call(&block)
+      end
+
+      expect { perform_service }.to have_enqueued_job(Voice::CallTranscriptionJob).with(call.id)
+      expect(call.reload.transcription_pending_recording_sid).to be_nil
+    end
+
+    it 'does not enqueue again from a stale call after another contender cleared the intent' do
+      allow(Voice::CallTranscriptionJob).to receive(:perform_later).and_return(false)
+      perform_service
+      stale_call = Call.find(call.id)
+      allow(Voice::CallTranscriptionJob).to receive(:perform_later).and_call_original
+      perform_service
+
+      expect do
+        described_class.new(call: stale_call, recording_sid: recording_sid, recording_url: recording_url).perform
+      end.not_to have_enqueued_job(Voice::CallTranscriptionJob)
+      expect(SafeFetch).to have_received(:fetch).once
+    end
+
     it 'is a no-op when recording_sid is blank' do
       expect { perform_service(recording_sid: '') }.not_to change { call.reload.recording.attached? }.from(false)
       expect(SafeFetch).not_to have_received(:fetch)

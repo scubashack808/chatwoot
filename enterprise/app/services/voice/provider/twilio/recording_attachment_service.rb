@@ -6,23 +6,21 @@ class Voice::Provider::Twilio::RecordingAttachmentService
 
   def perform
     return if recording_sid.blank? || recording_url.blank?
-    return if already_attached?
 
-    SafeFetch.fetch(
-      recording_url,
-      http_basic_authentication: [account_sid, auth_token],
-      allowed_content_type_prefixes: ALLOWED_CONTENT_TYPE_PREFIXES
-    ) do |result|
-      persist_recording!(result)
+    unless already_attached?
+      SafeFetch.fetch(
+        recording_url,
+        http_basic_authentication: [account_sid, auth_token],
+        allowed_content_type_prefixes: ALLOWED_CONTENT_TYPE_PREFIXES
+      ) do |result|
+        persist_recording!(result)
+      end
+
+      # Rebroadcast the embedded Call payload with its recording URL.
+      call.message&.touch if @persisted # rubocop:disable Rails/SkipsModelValidations
     end
 
-    # Bump the message updated_at so the message.updated dispatcher rebroadcasts
-    # the embedded Call payload (now with recording_url) to connected clients.
-    call.message&.touch # rubocop:disable Rails/SkipsModelValidations
-
-    # Duplicate callbacks can both clear the outer already_attached? check, so only
-    # the invocation that actually stored the blob pays for transcription.
-    Voice::CallTranscriptionJob.perform_later(call.id) if @persisted
+    enqueue_transcription!
   end
 
   private
@@ -33,9 +31,19 @@ class Voice::Provider::Twilio::RecordingAttachmentService
 
       attach_recording!(result)
       call.recording_sid = recording_sid
+      call.transcription_pending_recording_sid = recording_sid
       call.duration_seconds ||= normalized_recording_duration
       call.save!
       @persisted = true
+    end
+  end
+
+  def enqueue_transcription!
+    call.with_lock do
+      next unless already_attached? && call.transcription_pending_recording_sid == recording_sid
+      next unless Voice::CallTranscriptionJob.perform_later(call.id)
+
+      call.update!(transcription_pending_recording_sid: nil)
     end
   end
 
