@@ -74,16 +74,7 @@ const onDateRangeChange = ([startDate, endDate, rangeType]) => {
   emitChange();
 };
 
-const setInitialRange = () => {
-  customDateRange.value = [subDays(new Date(), 6), new Date()];
-  emitChange();
-};
-
-onMounted(() => {
-  if (!route.query.from || !route.query.to) {
-    setInitialRange();
-  }
-});
+onMounted(emitChange);
 </script>
 
 <template>
