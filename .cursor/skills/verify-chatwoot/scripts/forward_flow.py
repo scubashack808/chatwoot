@@ -182,12 +182,12 @@ def open_conversation():
 result = {'ok': False, 'mode': MODE}
 adopted = False
 try:
-    tabs = discover_tabs(include_chrome=False, profile='Profile 14')
+    tabs = discover_tabs(include_chrome=False, profile=CONFIG['profile'])
     matches = [tab for tab in tabs if tab['targetId'] == CONFIG['target_id']]
     if len(matches) != 1:
         raise RuntimeError('Exactly discovered target is absent; rediscover instead of opening another tab')
     tab = matches[0]
-    if not tab['url'].startswith(SITE + '/app/') or tab.get('profile') != 'Profile 14':
+    if not tab['url'].startswith(SITE + '/app/') or tab.get('profile') != CONFIG['profile']:
         raise RuntimeError('Target URL/profile does not match the synthetic dummy app')
     adopt_tab(tab)
     adopted = True

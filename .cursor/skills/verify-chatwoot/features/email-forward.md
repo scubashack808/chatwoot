@@ -22,7 +22,7 @@ An agent forwards one email of a conversation to new recipients with a covering 
 
 ## Driving it with browser-harness
 
-Preconditions: Doctor passes on the candidate with the site running; exactly one dummy app tab in Profile 14. The fixture is created on first run by forward_fixture.rb seed (additive, idempotent; no reset).
+Preconditions: Doctor passes on the candidate with the site running; exactly one dummy app tab in the chosen profile (Profile 14 unless --profile names another). The fixture is created on first run by forward_fixture.rb seed (additive, idempotent; no reset).
 
 - **Open.** Navigate the adopted tab to the forward conversation; sign in with the synthetic credentials only if the login form shows. Wait until the source renders as an email (its "Subject: Synthetic invoice 42" header): messages are plain bubbles until the inbox loads, and email-only actions appear only after that.
 - **Menu.** Right-click the bubble header (24px, 14px in from its top-left), read the `.menu-container .menu` labels, then close by clicking the far side of the same bubble: the menu closes on focus loss and opens at the click point.

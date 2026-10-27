@@ -531,7 +531,7 @@ def forward_run(args):
         try:
             fixture = forward_runner('seed', tag)
             save(directory, 'forward-fixture.json', fixture)
-            config = {'target_id': args.target_id, 'profile': 'Profile 14', 'directory': str(directory), 'root': str(ROOT),
+            config = {'target_id': args.target_id, 'profile': args.profile, 'directory': str(directory), 'root': str(ROOT),
                       'forward_fixture': fixture, 'markers': markers, 'recipients': FORWARD_RECIPIENTS}
             before = mail_ids()
             receipt['phase'] = 'browser-forward'

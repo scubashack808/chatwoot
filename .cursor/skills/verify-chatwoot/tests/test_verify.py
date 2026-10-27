@@ -595,7 +595,7 @@ class ForwardTests(unittest.TestCase):
     def test_unhealthy_site_refuses_before_fixture_or_browser(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); (root / 'tmp/dummy').mkdir(parents=True)
-            args = SimpleNamespace(expected_sha=verify.BASE_SHA, target_id='T')
+            args = SimpleNamespace(expected_sha=verify.BASE_SHA, target_id='T', profile=verify.DEFAULT_PROFILE)
             with patch.object(verify, 'ROOT', root), patch.object(verify, 'candidate', return_value=verify.BASE_SHA), \
                  patch.object(verify, 'doctor', return_value={'ok': False, 'error': 'down'}), \
                  patch.object(verify, 'forward_runner') as runner, patch.object(verify, 'browser_run') as browser:
