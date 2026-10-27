@@ -187,9 +187,11 @@ class Message < ApplicationRecord
   # Merges only the imap namespace, under a row lock, without firing the ordinary update
   # callbacks. update_columns is deliberate: dispatch_update_event would broadcast this internal
   # state to contacts and fan it out to automations, bots, webhooks and CRM processors.
-  def write_imap_identity!(identity)
+  def write_imap_identity!(identity, mailbox_operation_receipt: nil)
     with_lock do
-      merged = (external_source_ids || {}).merge(Imap::MessageIdentity::NAMESPACE => identity.to_h)
+      namespace = identity.to_h
+      namespace['mailbox_operation_receipt'] = mailbox_operation_receipt if mailbox_operation_receipt
+      merged = (external_source_ids || {}).merge(Imap::MessageIdentity::NAMESPACE => namespace)
       # rubocop:disable Rails/SkipsModelValidations
       update_columns(external_source_ids: merged)
       # rubocop:enable Rails/SkipsModelValidations
